@@ -27,12 +27,24 @@ const cleanJSONResponse = (text: string): string => {
   return cleaned;
 };
 
-export const generateNLU = async (utterance: string, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<NLUData> => {
+export const generateNLU = async (utterance: string, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void, config?: GlobalConfig): Promise<NLUData> => {
   const ai = getAI();
   onLog?.('info', `[NLU] Iniciando análisis semántico de: "${utterance.substring(0, 50)}..."`);
+
+  const geoRegion = config?.geoContext?.region || 'No especificado';
+  const lang = config?.lang || 'es';
+  const annotatedContext = config?.annotatedContext?.trim()
+    ? `\n- Contexto anotado: "${config.annotatedContext.trim()}"`
+    : '';
+
   const systemInstruction = `**Contexto de Arquitectura:**
 Operas como el nodo de procesamiento "NLU Schema Engine" dentro de la arquitectura de grafo PictoNet.
 Tu tarea es instanciar el esquema JSON definido oficialmente en el repositorio **\`mediafranca/nlu-schema\`**.
+
+**Contexto de Uso (metadata del vocabulario):**
+- Región geográfica: ${geoRegion}
+- Idioma del vocabulario: ${lang}${annotatedContext}
+Ten en cuenta este contexto para interpretar correctamente la intención comunicativa, la pragmática y las convenciones culturales relevantes.
 
 **Función del Nodo:**
 Recibes una intención comunicativa (\`utterance\`) y debes mapearla al grafo semántico utilizando la ontología NSM (65 primos universales).
@@ -129,12 +141,21 @@ export const generateVisualBlueprint = async (nlu: NLUData, config: GlobalConfig
   onLog?.('info', `[VISUAL] Iniciando generación de blueprint visual (idioma: ${targetLang})...`);
   onLog?.('info', `[VISUAL] Contexto semántico: ${nlu.metadata?.intent || 'N/A'}`);
 
+  // Build list of available CSS class names from config so Gemini can reference them
+  const availableClasses = config.svgStyleDefs
+    ? config.svgStyleDefs.flatMap(s => s.selectors).join(', ')
+    : '.main, .secondary, .tertiary, .accent, .red, .green, .st-dark, .st-light, .dashed, .glow, .anim-blink, .anim-beat, .anim-swing, .slide-r, .slide-u';
+
   const systemInstruction = `You are the "Visual Topology Node" in the PictoNet graph.
 Your function is to translate the semantic graph (NLU) into a hierarchical visual graph (Elements & Spatial Logic).
 
 **Language Context:**
 The "utterance" language is: **${targetLang}**.
 You MUST generate Element IDs and the prompt logic in **${targetLang}**.
+
+**Available CSS style classes (for reference in element descriptions):**
+${availableClasses}
+These classes will be applied to SVG elements later. You may suggest a \`suggestedClass\` field on elements when semantically relevant (e.g., an action element could suggest \`.anim-beat\`, a warning element \`.red\`). This field is optional and informational only.
 
 **Output Graph Schema:**
 
@@ -143,6 +164,7 @@ You MUST generate Element IDs and the prompt logic in **${targetLang}**.
     *   The root element must always be \`pictograma\`, representing the entire scene.
     *   IDs must be **simple nouns** in **${targetLang}**.
     *   For compound names, use \`snake_case\` (e.g., \`persona_corriendo\`, \`casa_grande\`).
+    *   Optional: add \`"suggestedClass": ".accent"\` when a specific style class is semantically meaningful.
 
 2.  **"prompt" (Spatial Edges):**
     *   Describes the edges/relationships between visual nodes in space incorporating visual metaphors.

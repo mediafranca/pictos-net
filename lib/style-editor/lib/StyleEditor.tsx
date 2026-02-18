@@ -67,14 +67,19 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
   }, [styles, keyframes]);
 
   // Notify parent when styles change
+  // NOTE: onStylesChange intentionally omitted from deps — it's an event handler
+  // whose reference changes every parent render. Including it causes an infinite
+  // render loop: new ref → effect fires → onUpdateConfig({...config}) → re-render.
   useEffect(() => {
     onStylesChange?.(styles);
-  }, [styles, onStylesChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [styles]);
 
   // Notify parent when keyframes change
   useEffect(() => {
     onKeyframesChange?.(keyframes);
-  }, [keyframes, onKeyframesChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyframes]);
 
   const handleEditClick = (style: StyleDefinition) => {
     setCurrentEditingStyle(style);
@@ -137,9 +142,9 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
       {!hideHeader && (
         <header className="flex-none bg-white border-b border-gray-200 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-20">
           <div className="flex items-center gap-3">
-            <div className="flex flex-col">
+            <div className="flex">
               <h1 className="text-xl font-bold tracking-tight text-gray-900 leading-tight">Style Editor</h1>
-              <span className="text-xs text-gray-500 font-medium tracking-wide">PICTOS.net by mediafranca</span>
+              {/* <span className="text-xs text-gray-500 font-medium tracking-wide">PICTOS.net by mediafranca</span> */}
             </div>
           </div>
 
@@ -215,10 +220,10 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
       )}
 
       {/* Content Area */}
-      <main className="flex-1 overflow-y-auto p-6 md:p-8">
+      <main className="flex-1 overflow-y-auto p-4">
 
         {viewMode === ViewMode.GRID && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+          <div className="flex flex-wrap gap-2">
             {styles.map(style => (
               <StylePreviewCard
                 key={style.id}
@@ -227,16 +232,16 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
                 onClick={() => handleEditClick(style)}
               />
             ))}
-            {/* Empty State / Add New Card */}
+            {/* Add New */}
             {!hideNewButton && (
               <button
                 onClick={handleCreateNew}
-                className="group flex flex-col items-center justify-center gap-3 p-4 border-2 border-dashed border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50/50 transition-all min-h-[180px]"
+                className="group w-9 flex flex-col items-center gap-1 cursor-pointer select-none"
               >
-                <div className="w-12 h-12 rounded-full bg-gray-100 group-hover:bg-blue-100 flex items-center justify-center text-gray-400 group-hover:text-blue-500 transition-colors">
-                  <Plus size={24} />
+                <div className="w-full aspect-square border-2 border-dashed border-gray-200 rounded group-hover:border-blue-400 transition-colors flex items-center justify-center text-gray-300 group-hover:text-blue-400">
+                  <Plus size={20} />
                 </div>
-                <span className="text-sm font-medium text-gray-500 group-hover:text-blue-600">Add New Style</span>
+                <span className="text-[10px] font-mono text-gray-300 group-hover:text-blue-500 transition-colors">new</span>
               </button>
             )}
           </div>

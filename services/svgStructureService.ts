@@ -10,73 +10,23 @@
 
 import { GoogleGenAI } from "@google/genai";
 import type { NLUData, VisualElement, GlobalConfig } from "../types";
+import { SVG_STYLESHEET } from "./svgStyles";
+import { generateCssString } from "../lib/style-editor/lib/utils/cssGenerator";
 
 // Reuse the AI client pattern from geminiService
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Embedded CSS stylesheet following mf-svg-schema specification
- * This is inserted into the <defs> section of structured SVGs
- */
-/**
- * Generate CSS stylesheet dynamically based on GlobalConfig
- * Following mf-svg-schema specification with user-defined overrides
+ * Returns the CSS stylesheet to embed in SVGs.
+ * When the user has edited styles (config.svgStyleDefs), generates CSS from those
+ * structured definitions so edits propagate to Gemini's system instruction.
+ * Otherwise falls back to the canonical SVG_STYLESHEET.
  */
 export const generateStylesheet = (config: GlobalConfig): string => {
-    const styles = config.svgStyles || {
-        f: { fill: '#000', stroke: 'none', strokeWidth: 0 },
-        k: { fill: '#fff', stroke: 'none', strokeWidth: 0 }
-    };
-
-    // Generate CSS for each defined class
-    const classStyles = Object.entries(styles).map(([className, style]) => `
-.${className} {
-  fill: ${style.fill};
-  fill-opacity: ${style.opacity ?? 1};
-  stroke: ${style.stroke};
-  stroke-width: ${style.strokeWidth};
-  stroke-opacity: ${style.opacity ?? 1};
-  stroke-linecap: ${style.strokeLinecap || 'round'};
-  stroke-linejoin: ${style.strokeLinejoin || 'round'};
-}`).join('\n');
-
-    return `
-/* MediaFranca SVG Schema - Dynamic Class Styling System */
-${classStyles}
-
-/* --- Mini Utility Classes (Tailwind-like) --- */
-/* Colors */
-.fill-none { fill: none; }
-.stroke-none { stroke: none; }
-.fill-red { fill: #ef4444; }
-.fill-blue { fill: #3b82f6; }
-.fill-green { fill: #22c55e; }
-.fill-yellow { fill: #eab308; }
-
-/* Strokes */
-.stroke-sm { stroke-width: 1px; }
-.stroke-md { stroke-width: 2px; }
-.stroke-lg { stroke-width: 4px; }
-
-/* Animations */
-.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-.animate-spin { animation: spin 1s linear infinite; }
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Focus states for keyboard navigation */
-g[role="group"]:focus {
-  outline: 2px solid #0066cc;
-  outline-offset: 2px;
-}
-`;
+    if (config.svgStyleDefs && config.svgStyleDefs.length > 0) {
+        return generateCssString(config.svgStyleDefs, config.svgKeyframes ?? []);
+    }
+    return SVG_STYLESHEET;
 };
 
 /**

@@ -19,6 +19,8 @@ import useSVGLibrary from './hooks/useSVGLibrary';
 import { StyleEditor } from './components/PictoForge/StyleEditor';
 import { GeoAutocomplete } from './components/GeoAutocomplete';
 import * as IndexedDBService from './services/indexedDBService';
+import { INITIAL_STYLES } from './lib/style-editor/lib/constants';
+import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
 import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 
@@ -154,10 +156,9 @@ const App: React.FC = () => {
     license: 'CC BY 4.0',
     visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados, sin sombras, sin texturas y sin contornos. Geometría: Usa trazos gruesos y consistentes y simplificación geométrica. Todas las extremidades y terminales deben tener puntas redondeadas y vértices suavizados. Composición: Representación plana 2D centrada. Usa el espacio negativo (blanco) para definir la separación interna entre formas negras superpuestas (por ejemplo, el espacio entre una cabeza y un torso). Claridad: Maximiza la legibilidad y el reconocimiento semántico a escalas pequeñas. Evita cualquier rasgo facial o detalles intrincados. Usa color solo en el elemento distintivo, si es necesario.",
     geoContext: { lat: '40.4168', lng: '-3.7038', region: 'Madrid, ES' },
-    svgStyles: {
-      f: { fill: '#000000', stroke: 'none', strokeWidth: 0 },
-      k: { fill: '#ffffff', stroke: 'none', strokeWidth: 0 }
-    }
+    annotatedContext: '',
+    svgStyleDefs: INITIAL_STYLES,
+    svgKeyframes: INITIAL_KEYFRAMES,
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'eval', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
@@ -264,54 +265,45 @@ const App: React.FC = () => {
     loadData();
   }, []);
 
-  // Auto-save (debounced 500ms)
-  // Debounce prevents stacked writes during rapid state changes (e.g. startup
-  // load → IDB merge → second setRows). Only the final stable state is written.
+  // Auto-save strategy:
+  //   1. FIRST: metadata → localStorage synchronously (never blocked by IDB)
+  //      Always strip binary fields to stay well under the 5MB quota.
+  //   2. THEN: bitmaps + SVGs → IDB fire-and-forget (non-blocking)
+  //      Race condition with refresh is acceptable — IDB is a best-effort cache.
   useEffect(() => {
     if (!isInitialized) return;
 
-    const timer = setTimeout(() => {
-      // 1. Save bitmaps to IDB first (fire-and-forget, no localStorage quota issues).
-      //    With debounce the IDB write starts after state settles, maximising the
-      //    chance it completes before any user-triggered refresh.
-      const bitmapEntries = rows
-        .filter((row: RowData) => row.bitmap)
-        .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap! }));
-      if (bitmapEntries.length > 0) {
-        IndexedDBService.saveBitmapsBatch(bitmapEntries)
-          .catch(err => console.error('Failed to batch-save bitmaps to IDB:', err));
-      }
+    // 1. Metadata → localStorage immediately (synchronous, always runs first)
+    const rowsMeta = rows.map((row: RowData) => {
+      const { bitmap, rawSvg, structuredSvg, ...meta } = row;
+      return meta;
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsMeta));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    } catch (error) {
+      console.error('[save] localStorage quota exceeded:', error);
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) { /* */ }
+    }
 
-      // 2. Try to save FULL rows to localStorage (works for small/medium libraries).
-      //    Falls back to metadata-only on quota error (bitmaps are in IDB).
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-      } catch (_quotaError) {
-        const rowsMeta = rows.map((row: RowData) => {
-          const { bitmap, rawSvg, structuredSvg, ...meta } = row;
-          return meta;
-        });
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsMeta));
-          localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-        } catch (e) {
-          console.error('Critical: failed to save to localStorage:', e);
-        }
-      }
+    // 2. Bitmaps → IDB (fire-and-forget, non-blocking)
+    const bitmapEntries = rows
+      .filter((row: RowData) => row.bitmap)
+      .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap! }));
+    if (bitmapEntries.length > 0) {
+      IndexedDBService.saveBitmapsBatch(bitmapEntries)
+        .catch(err => console.error('[save] IDB bitmap write failed:', err));
+    }
 
-      // 3. SVGs from editor → IDB
-      rows
-        .filter((row: RowData) => row.rawSvg || row.structuredSvg)
-        .forEach((row: RowData) => {
-          IndexedDBService.saveSvgs(row.id, {
-            rawSvg: row.rawSvg,
-            structuredSvg: row.structuredSvg,
-          }).catch(err => console.error('Failed to save SVG to IDB:', err));
-        });
-    }, 500);
-
-    return () => clearTimeout(timer);
+    // 3. SVGs → IDB (fire-and-forget, non-blocking)
+    rows
+      .filter((row: RowData) => row.rawSvg || row.structuredSvg)
+      .forEach((row: RowData) => {
+        IndexedDBService.saveSvgs(row.id, {
+          rawSvg: row.rawSvg,
+          structuredSvg: row.structuredSvg,
+        }).catch(err => console.error('[save] SVG write failed:', err));
+      });
   }, [rows, isInitialized, config]);
 
   // Load available libraries from index.json
@@ -603,7 +595,7 @@ const App: React.FC = () => {
     try {
       let result: any;
       if (step === 'nlu') {
-        result = await Gemini.generateNLU(row.UTTERANCE, addLog);
+        result = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       } else if (step === 'visual') {
         let nluObj;
         try {
@@ -970,6 +962,24 @@ const App: React.FC = () => {
               <textarea value={config.visualStylePrompt} onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-24" />
             </div>
 
+            <div className="md:col-span-4">
+              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 flex items-center gap-1">
+                Contexto Anotado
+                <div className="group/tooltip relative">
+                  <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
+                  <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-72 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-50 leading-relaxed">
+                    Descripción libre del uso de este vocabulario: quién lo usa, en qué contexto, qué necesidades comunicativas tiene. Gemini lo usará en la fase COMPRENDER para interpretar mejor cada utterance.
+                  </div>
+                </div>
+              </label>
+              <textarea
+                value={config.annotatedContext || ''}
+                onChange={e => setConfig({ ...config, annotatedContext: e.target.value })}
+                placeholder="Ej: Vocabulario para adulto con discapacidad cognitiva moderada, contexto de vida cotidiana en Santiago de Chile..."
+                className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
+              />
+            </div>
+
             <div className="md:col-span-1 relative group">
               <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">
                 Geo-Linguistic Context
@@ -1311,7 +1321,16 @@ const RowComponent: React.FC<{
           className="w-14 h-14 border border-slate-200 bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
-          {row.bitmap ? <img src={row.bitmap} alt="Miniature" className="w-full h-full object-contain" /> : <div className="text-slate-200"><ImageIcon size={20} /></div>}
+          {(row.structuredSvg || row.rawSvg) ? (
+            <div
+              dangerouslySetInnerHTML={{ __html: row.structuredSvg || row.rawSvg! }}
+              className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+            />
+          ) : row.bitmap ? (
+            <img src={row.bitmap} alt="Miniature" className="w-full h-full object-contain" />
+          ) : (
+            <div className="text-slate-200"><ImageIcon size={20} /></div>
+          )}
         </div>
         <div className="flex gap-2 transition-all">
           {row.status === 'processing' ? (

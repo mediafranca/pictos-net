@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Undo, Redo, Download } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
+import { useTranslation } from '../../hooks/useTranslation';
 import SemanticTree from './SemanticTree';
 import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
@@ -21,7 +22,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     utterance,
     onSave
 }) => {
-    // ... (state and effects remain same)
+    const { t } = useTranslation();
     const [currentSvg, setCurrentSvg] = useState(initialSvg);
     const loadSVG = useSVGEditorStore(state => state.loadSVG);
     const svgDocument = useSVGEditorStore(state => state.svgDocument);
@@ -82,7 +83,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                         </button>
                         <div>
                             <h2 className="text-lg font-bold text-white font-mono leading-none">
-                                SVG Editor
+                                {t('svg.editor')}
                             </h2>
                             <span className="text-xs text-slate-400 font-mono">
                                 {utterance}
@@ -117,7 +118,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                             className="px-3 py-1.5 text-sm rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 mr-2"
                         >
                             <Download size={14} />
-                            Export
+                            {t('svg.editorExport')}
                         </button>
 
                         {/* Save & Close */}
@@ -125,7 +126,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                             onClick={() => { handleSave(); onClose(); }}
                             className="px-4 py-1.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-lg"
                         >
-                            Save Changes
+                            {t('svg.editorSave')}
                         </button>
                     </div>
                 </header>
@@ -136,7 +137,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                     <aside className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-xl">
                         <div className="p-3 border-b border-slate-100 bg-slate-50">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                                Layers & Structure
+                                {t('svg.editorLayers')}
                             </h3>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2">

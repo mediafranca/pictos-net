@@ -32,8 +32,11 @@ export const generateCssString = (styles: StyleDefinition[], keyframes: Keyframe
 
 export const updateDynamicStyles = (styles: StyleDefinition[], keyframes: KeyframeDefinition[]) => {
   const css = generateCssString(styles, keyframes);
-  const styleTag = document.getElementById('dynamic-svg-styles');
-  if (styleTag) {
-    styleTag.textContent = css;
+  let styleTag = document.getElementById('dynamic-svg-styles');
+  if (!styleTag) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'dynamic-svg-styles';
+    document.head.appendChild(styleTag);
   }
+  styleTag.textContent = css;
 };
