@@ -188,21 +188,29 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         },
 
         updateElementId: (oldId: string, newId: string) => {
-            const { svgDOM } = get();
-            if (!svgDOM) return;
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
 
-            const updateIds = (element: SVGElement): SVGElement => {
-                if (element.id === oldId) {
-                    return { ...element, id: newId };
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+            const element = doc.querySelector(`#${CSS.escape(oldId)}`);
+
+            if (element) {
+                element.id = newId;
+                const serialized = new XMLSerializer().serializeToString(doc);
+                // Apply styles/keyframes logic to ensure consistency
+                const nextSvg = applyUsedStylesToSvg(
+                    serialized,
+                    get().styleDefinitions,
+                    get().keyframes
+                );
+                commitSvg(nextSvg);
+
+                // Also update selection if we renamed the selected element
+                if (get().selectedElementId === oldId) {
+                    set({ selectedElementId: newId });
                 }
-                return {
-                    ...element,
-                    children: element.children.map(updateIds),
-                };
-            };
-
-            const updatedDOM = updateIds(svgDOM);
-            set({ svgDOM: updatedDOM });
+            }
         },
 
         updateElement: (id: string, updates: Partial<SVGElement>) => {

@@ -33,10 +33,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
     useEffect(() => {
         if (isOpen && initialSvg) {
-            // Load SVG with real-time sync callback
-            loadSVG(initialSvg, (updatedSvg) => {
-                setCurrentSvg(updatedSvg);
-            });
+            loadSVG(initialSvg);
         }
 
         // Cleanup on close
@@ -46,6 +43,13 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
             }
         };
     }, [isOpen, initialSvg]);
+
+    // Sync local state with store updates
+    useEffect(() => {
+        if (svgDocument) {
+            setCurrentSvg(svgDocument);
+        }
+    }, [svgDocument]);
 
     const handleSave = () => {
         if (currentSvg) {

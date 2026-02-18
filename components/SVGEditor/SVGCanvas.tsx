@@ -184,10 +184,29 @@ export default function SVGCanvas() {
                 return;
             }
 
+            // Prioritize selecting the direct element (leaf) if it has an ID, 
+            // otherwise look for a group, 
+            // otherwise use the target itself if it matches criteria.
+
+            // Try explicit element first
+            const elementTarget = target.closest('[id]');
+
+            // If the element is found and is not the root SVG
+            if (elementTarget && elementTarget !== svgElement) {
+                const id = elementTarget.getAttribute('id');
+                selectElement(id);
+                return;
+            }
+
+            // Fallback to group if needed (though usually elements inside have IDs due to normalizer)
             const groupTarget = target.closest('g[id]');
-            const elementTarget = groupTarget ?? target.closest('[id]');
-            const id = elementTarget?.getAttribute('id') ?? null;
-            selectElement(id);
+            if (groupTarget && groupTarget !== svgElement) {
+                const id = groupTarget.getAttribute('id');
+                selectElement(id);
+                return;
+            }
+
+            selectElement(null);
         };
 
         svgElement.addEventListener('click', handleSvgClick);

@@ -214,148 +214,104 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const loadData = async () => {
-      // Load rows from localStorage
-      const saved = localStorage.getItem(STORAGE_KEY);
+      // ── Step 1: config (localStorage, synchronous) ──────────────────────────
       const savedConfig = localStorage.getItem(CONFIG_KEY);
+      if (savedConfig) {
+        try { setConfig(JSON.parse(savedConfig)); } catch (e) { console.error('Failed to load config', e); }
+      }
 
+      // ── Step 2: row metadata (localStorage, synchronous → instant render) ───
+      // localStorage holds row metadata WITHOUT binary fields.
+      // This is always fast and reliable regardless of IDB state.
+      const saved = localStorage.getItem(STORAGE_KEY);
       let loadedRows: RowData[] = [];
-
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            loadedRows = parsed.map(sanitizeRow);
-          }
-        } catch (e) {
-          console.error("Failed to load rows", e);
-        }
+          if (Array.isArray(parsed)) loadedRows = parsed.map(sanitizeRow);
+        } catch (e) { console.error('Failed to load rows from localStorage', e); }
       }
 
-      // Load bitmaps from IndexedDB and merge with rows
       if (loadedRows.length > 0) {
-        try {
-          const bitmapsMap = await IndexedDBService.getAllBitmaps();
-          const svgsMap = await IndexedDBService.getAllSvgs();
-
-          // Fallback: Try to load from SVG Library in localStorage (migration/recovery)
-          const savedLibrary = localStorage.getItem('pictonet_svg_lib');
-          const librarySvgs = new Map();
-          if (savedLibrary) {
-            try {
-              const parsedLib = JSON.parse(savedLibrary);
-              if (Array.isArray(parsedLib)) {
-                parsedLib.forEach((item: any) => {
-                  if (item.sourceRowId && item.svg) {
-                    librarySvgs.set(item.sourceRowId, item.svg);
-                  }
-                });
-              }
-            } catch (e) { console.error('Failed to parse SVG library fallback', e); }
-          }
-
-          loadedRows = loadedRows.map(row => {
-            const svgs = svgsMap.get(row.id);
-            // Recover SVG from Library if missing in IDB (this handles migration to IDB)
-            const fallbackSvg = librarySvgs.get(row.id);
-
-            return {
-              ...row,
-              bitmap: bitmapsMap.get(row.id) || row.bitmap,
-              rawSvg: svgs?.rawSvg || row.rawSvg || fallbackSvg,
-              structuredSvg: svgs?.structuredSvg || row.structuredSvg || fallbackSvg
-            };
-          });
-        } catch (err) {
-          console.error('Failed to load data from IndexedDB:', err);
-        }
-
         setRows(loadedRows);
         setViewMode('list');
       }
+      setIsInitialized(true);
 
-      if (savedConfig) {
+      // ── Step 3: binary data (IndexedDB, async → merge when ready) ────────────
+      // Bitmaps and SVGs are stored separately in IDB; merge them in after load.
+      if (loadedRows.length > 0) {
         try {
-          setConfig(JSON.parse(savedConfig));
-        } catch (e) {
-          console.error("Failed to load config", e);
+          const [bitmapsMap, svgsMap] = await Promise.all([
+            IndexedDBService.getAllBitmaps(),
+            IndexedDBService.getAllSvgs(),
+          ]);
+          const hasBinaryData = bitmapsMap.size > 0 || svgsMap.size > 0;
+          if (hasBinaryData) {
+            setRows((prev: RowData[]) => prev.map((row: RowData) => ({
+              ...row,
+              bitmap: bitmapsMap.get(row.id) || row.bitmap,
+              rawSvg: svgsMap.get(row.id)?.rawSvg || row.rawSvg,
+              structuredSvg: svgsMap.get(row.id)?.structuredSvg || row.structuredSvg,
+            })));
+          }
+        } catch (err) {
+          console.error('Failed to load binary data from IndexedDB:', err);
         }
       }
-
-      setIsInitialized(true);
     };
 
     loadData();
   }, []);
 
-  // Auto-save to localStorage with error handling
+  // Auto-save (debounced 500ms)
+  // Debounce prevents stacked writes during rapid state changes (e.g. startup
+  // load → IDB merge → second setRows). Only the final stable state is written.
   useEffect(() => {
     if (!isInitialized) return;
 
-    const saveData = async () => {
-      // 1. Trigger IndexedDB saves (Parallel)
-      const bitmapSavePromises = rows
+    const timer = setTimeout(() => {
+      // 1. Save bitmaps to IDB first (fire-and-forget, no localStorage quota issues).
+      //    With debounce the IDB write starts after state settles, maximising the
+      //    chance it completes before any user-triggered refresh.
+      const bitmapEntries = rows
         .filter((row: RowData) => row.bitmap)
-        .map((row: RowData) => IndexedDBService.saveBitmap(row.id, row.bitmap!));
+        .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap! }));
+      if (bitmapEntries.length > 0) {
+        IndexedDBService.saveBitmapsBatch(bitmapEntries)
+          .catch(err => console.error('Failed to batch-save bitmaps to IDB:', err));
+      }
 
-      const svgSavePromises = rows
-        .filter((row: RowData) => row.rawSvg || row.structuredSvg)
-        .map((row: RowData) => IndexedDBService.saveSvgs(row.id, {
-          rawSvg: row.rawSvg,
-          structuredSvg: row.structuredSvg
-        }));
-
-      const idbPromise = Promise.all([...bitmapSavePromises, ...svgSavePromises]).catch(err => {
-        console.error('Failed to save data to IndexedDB:', err);
-      });
-
-      // 2. Save to localStorage immediately (Synchronous fallback)
+      // 2. Try to save FULL rows to localStorage (works for small/medium libraries).
+      //    Falls back to metadata-only on quota error (bitmaps are in IDB).
       try {
-        // Try to keep SVGs in localStorage as first attempt backup
-        const rowsToSave = rows.map((row: RowData) => ({
-          ...row,
-          bitmap: undefined, // Always remove bitmaps (too large)
-        }));
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsToSave));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
         localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-      } catch (error) {
-        // Handle Quota Exceeded
-        const isQuotaError = error instanceof DOMException &&
-          (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
-
-        if (isQuotaError) {
-          console.warn('localStorage quota exceeded. Retrying without SVGs...');
-
-          try {
-            // Fallback: Strip SVGs and save only metadata
-            // We rely on IndexedDB for the actual content in this case
-            const strippedRows = rows.map((row: RowData) => ({
-              ...row,
-              bitmap: undefined,
-              rawSvg: undefined,
-              structuredSvg: undefined
-            }));
-
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(strippedRows));
-            localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-
-            // Only log warning once maybe? or use specific warning level
-            // addLog('warn', t('messages.storageQuotaWarning')); 
-          } catch (retryError) {
-            console.error('CRITICAL: Failed to save even metadata to localStorage', retryError);
-            addLog('error', t('messages.storageSaveCriticalFail'));
-          }
-        } else {
-          console.error('Failed to save to localStorage:', error);
-          addLog('error', t('messages.storageSaveFailed'));
+      } catch (_quotaError) {
+        const rowsMeta = rows.map((row: RowData) => {
+          const { bitmap, rawSvg, structuredSvg, ...meta } = row;
+          return meta;
+        });
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsMeta));
+          localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+        } catch (e) {
+          console.error('Critical: failed to save to localStorage:', e);
         }
       }
 
-      // Await IDB just for lifecycle management (though useEffect cleanup won't wait)
-      await idbPromise;
-    };
+      // 3. SVGs from editor → IDB
+      rows
+        .filter((row: RowData) => row.rawSvg || row.structuredSvg)
+        .forEach((row: RowData) => {
+          IndexedDBService.saveSvgs(row.id, {
+            rawSvg: row.rawSvg,
+            structuredSvg: row.structuredSvg,
+          }).catch(err => console.error('Failed to save SVG to IDB:', err));
+        });
+    }, 500);
 
-    saveData();
+    return () => clearTimeout(timer);
   }, [rows, isInitialized, config]);
 
   // Load available libraries from index.json
@@ -516,9 +472,9 @@ const App: React.FC = () => {
         setLogs([]);
         localStorage.removeItem(STORAGE_KEY);
 
-        // Clear IndexedDB bitmaps
+        // Clear all IndexedDB data (rows, bitmaps, svgs)
         try {
-          await IndexedDBService.clearAllBitmaps();
+          await IndexedDBService.clearAllData();
         } catch (err) {
           console.error('Failed to clear IndexedDB:', err);
         }

@@ -360,7 +360,7 @@ export const generateImage = async (elements: VisualElement[], prompt: string, r
 };
 
 // Helper function to resize bitmap to target size
-// Uses JPEG format with quality 0.85 for better compression than PNG
+// Uses JPEG format with quality 0.70 for better compression than PNG
 const resizeImage = (dataUrl: string, targetSize: number): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -377,8 +377,8 @@ const resizeImage = (dataUrl: string, targetSize: number): Promise<string> => {
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, targetSize, targetSize);
       ctx.drawImage(img, 0, 0, targetSize, targetSize);
-      // Use JPEG with quality 0.85 for better compression (smaller file size)
-      resolve(canvas.toDataURL('image/jpeg', 0.85));
+      // Use JPEG with quality 0.70 for better compression (smaller file size)
+      resolve(canvas.toDataURL('image/jpeg', 0.70));
     };
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = dataUrl;
