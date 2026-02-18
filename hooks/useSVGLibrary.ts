@@ -38,7 +38,6 @@ const sanitizeFilename = (text: string, maxLength: number = 30): string => {
  *   utterance: 'Quiero agua',
  *   svg: '<svg>...</svg>',
  *   sourceRowId: 'row-123',
- *   icapScore: 4.5,
  *   createdAt: new Date().toISOString()
  * });
  * 

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
 import { Download, RefreshCw, AlertCircle, FileCode, Check } from 'lucide-react';
-import { RowData, VisualElement, NLUData, EvaluationMetrics } from '../types';
+import { RowData, VisualElement, NLUData } from '../types';
 import { vectorizeBitmap } from '../services/vtracerService';
 import { structureSVG, canGenerateSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
@@ -47,8 +47,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const eligibility = canGenerateSVG({
         bitmap: row.bitmap,
         NLU: row.NLU,
-        elements: row.elements,
-        evaluation: row.evaluation
+        elements: row.elements
     });
 
     // Dynamic Style Injection (Visual only)
@@ -60,111 +59,50 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             .replace(/<g /g, '<g tabindex="0" style="cursor: pointer;" ');
     }, [existingSVG, config]);
 
-    // Raw SVG with basic styling for visualization
+    // Raw SVG prepared for display.
+    // The viewBox from vtracer (or assembled multicolor SVG) is authoritative and
+    // should already match the source bitmap pixel dimensions. If it's missing
+    // (legacy SVGs, unexpected vtracer output), we compute a rough fallback from
+    // the translate() transforms on each path.
     const displayRawSvg = React.useMemo(() => {
         if (!rawSvg) return '';
-
         try {
-            // Parse SVG to DOM
             const parser = new DOMParser();
             const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
             const svgEl = doc.querySelector('svg');
-
             if (!svgEl) return rawSvg;
 
-            // Parse aspect ratio from config (e.g., '16:9' -> 16/9)
-            const [widthRatio, heightRatio] = config.aspectRatio.split(':').map(Number);
-            const targetAspectRatio = widthRatio / heightRatio;
-
-            // Calculate bounding box from all paths
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-            // Extract coordinates from transform attributes and path data
-            const paths = svgEl.querySelectorAll('path');
-            paths.forEach(path => {
-                const transform = path.getAttribute('transform');
-                const d = path.getAttribute('d');
-
-                if (transform) {
-                    const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-                    if (match) {
-                        const tx = parseFloat(match[1]);
-                        const ty = parseFloat(match[2]);
-                        minX = Math.min(minX, tx);
-                        minY = Math.min(minY, ty);
-                        maxX = Math.max(maxX, tx);
-                        maxY = Math.max(maxY, ty);
+            if (!svgEl.hasAttribute('viewBox')) {
+                // Compute a viewBox from translate() transforms as a fallback.
+                // Each path is positioned at translate(tx, ty) in pixel space.
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                svgEl.querySelectorAll('path').forEach(path => {
+                    const t = path.getAttribute('transform') || '';
+                    const m = t.match(/translate\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/);
+                    if (m) {
+                        minX = Math.min(minX, +m[1]);
+                        minY = Math.min(minY, +m[2]);
+                        maxX = Math.max(maxX, +m[1]);
+                        maxY = Math.max(maxY, +m[2]);
                     }
+                });
+                if (isFinite(minX)) {
+                    // Add generous padding to accommodate path extents beyond their origins
+                    const pad = Math.max(80, (maxX - minX) * 0.15);
+                    svgEl.setAttribute('viewBox',
+                        `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`);
                 }
-
-                if (d) {
-                    // Extract all numbers from path data
-                    const coords = d.match(/-?\d+\.?\d*/g);
-                    if (coords) {
-                        coords.forEach(coord => {
-                            const val = parseFloat(coord);
-                            minX = Math.min(minX, val);
-                            minY = Math.min(minY, val);
-                            maxX = Math.max(maxX, val);
-                            maxY = Math.max(maxY, val);
-                        });
-                    }
-                }
-            });
-
-            // Calculate content dimensions
-            const contentWidth = maxX - minX;
-            const contentHeight = maxY - minY;
-            const contentCenterX = (minX + maxX) / 2;
-            const contentCenterY = (minY + maxY) / 2;
-
-            // Add 5% padding around content
-            const paddingFactor = 0.05;
-            const paddedContentWidth = contentWidth * (1 + paddingFactor * 2);
-            const paddedContentHeight = contentHeight * (1 + paddingFactor * 2);
-
-            // Calculate viewBox dimensions that respect target aspect ratio
-            // We want to fit the content within a box that has the target aspect ratio
-            let viewBoxWidth, viewBoxHeight;
-
-            const contentAspectRatio = paddedContentWidth / paddedContentHeight;
-
-            if (contentAspectRatio > targetAspectRatio) {
-                // Content is wider than target - fit by width
-                viewBoxWidth = paddedContentWidth;
-                viewBoxHeight = viewBoxWidth / targetAspectRatio;
-            } else {
-                // Content is taller than target - fit by height
-                viewBoxHeight = paddedContentHeight;
-                viewBoxWidth = viewBoxHeight * targetAspectRatio;
             }
 
-            // Center the viewBox around the content center
-            const viewBoxX = contentCenterX - viewBoxWidth / 2;
-            const viewBoxY = contentCenterY - viewBoxHeight / 2;
-
-            // Set viewBox and dimensions
-            svgEl.setAttribute('viewBox', `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
             svgEl.setAttribute('width', '100%');
             svgEl.setAttribute('height', '100%');
             svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
-            // Apply fill and stroke to paths
-            paths.forEach(path => {
-                if (!path.getAttribute('fill') || path.getAttribute('fill') === '#000000') {
-                    path.setAttribute('fill', '#000');
-                }
-                if (!path.getAttribute('stroke')) {
-                    path.setAttribute('stroke', 'none');
-                }
-            });
-
             return new XMLSerializer().serializeToString(svgEl);
-        } catch (error) {
-            console.error('Error processing raw SVG:', error);
+        } catch {
             return rawSvg;
         }
-    }, [rawSvg, config.aspectRatio]);
+    }, [rawSvg]);
 
     // Download raw SVG
     const downloadRawSvg = () => {
@@ -238,26 +176,16 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         };
     }, [status, processStartTime]);
 
-    // Debugging: Monitor row updates and eligibility
+    // Debugging: Monitor row eligibility changes
     useEffect(() => {
-        if (row.evaluation) {
-            const avg = (
-                row.evaluation.clarity +
-                row.evaluation.recognizability +
-                row.evaluation.semantic_transparency +
-                row.evaluation.pragmatic_fit +
-                row.evaluation.cultural_adequacy +
-                row.evaluation.cognitive_accessibility
-            ) / 6;
-
-            console.log('[SVGGenerator] Evaluation Updated:', {
+        if (eligibility.eligible !== undefined) {
+            console.log('[SVGGenerator] Eligibility Updated:', {
                 id: row.id,
-                avg: avg.toFixed(2),
                 eligible: eligibility.eligible,
                 reason: eligibility.reason
             });
         }
-    }, [row.evaluation, eligibility]);
+    }, [eligibility]);
 
     useEffect(() => {
         if (existingSVG) {
@@ -343,7 +271,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 bitmap: row.bitmap || '', // Pass original bitmap as visual reference
                 nlu: nluData,
                 elements: row.elements || [],
-                evaluation: row.evaluation || {} as EvaluationMetrics,
                 utterance: row.UTTERANCE,
                 config,
                 onProgress: (msg) => onLog('info', msg),
@@ -371,10 +298,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 svg: result.svg,
                 createdAt: new Date().toISOString(),
                 sourceRowId: row.id,
-                icapScore: row.evaluation ?
-                    (row.evaluation.clarity + row.evaluation.recognizability + row.evaluation.semantic_transparency +
-                        row.evaluation.pragmatic_fit + row.evaluation.cultural_adequacy + row.evaluation.cognitive_accessibility) / 6
-                    : 0,
                 lang: nluData.lang
             });
 
@@ -415,6 +338,14 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-10 font-medium">
                         Click parts to cycle through styles
                     </div>
+                    {/* Download overlay — bottom-right on hover */}
+                    <button
+                        onClick={() => downloadSVG(existingSVG.id)}
+                        className="absolute bottom-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg z-10"
+                        title="Download SVG"
+                    >
+                        <Download size={14} />
+                    </button>
                     <div
                         dangerouslySetInnerHTML={{ __html: displaySvg }}
                         onClick={handleSvgInteraction}
@@ -424,18 +355,11 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
                 <div className="flex gap-2">
                     <button
-                        onClick={() => downloadSVG(existingSVG.id)}
-                        className="flex-1 flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 px-4 text-[10px] font-bold uppercase tracking-widest rounded transition-colors"
-                    >
-                        <Download size={14} /> SVG
-                    </button>
-
-                    <button
                         onClick={handleTrace}
-                        title="Regenerate SVG"
-                        className="flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200"
+                        title="Re-trace bitmap"
+                        className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
                     >
-                        <RefreshCw size={14} />
+                        <RefreshCw size={14} /> Re-trace
                     </button>
                 </div>
 
@@ -446,15 +370,23 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         );
     }
 
-    // New: Show raw traced SVG with Format button
+    // Show raw traced SVG with Format button
     if (status === 'traced' && rawSvg) {
         return (
             <div className="flex flex-col h-full">
-                <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden">
+                <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview">
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">
+                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         Raw Trace
                     </div>
+                    {/* Download overlay — bottom-right on hover */}
+                    <button
+                        onClick={downloadRawSvg}
+                        className="absolute bottom-2 right-2 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg z-10"
+                        title="Download raw SVG"
+                    >
+                        <Download size={14} />
+                    </button>
                     <div
                         dangerouslySetInnerHTML={{ __html: displayRawSvg }}
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
@@ -467,14 +399,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
                     >
                         <FileCode size={16} /> Format with Gemini
-                    </button>
-
-                    <button
-                        onClick={downloadRawSvg}
-                        title="Download raw SVG"
-                        className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 px-3 rounded transition-colors border border-slate-200"
-                    >
-                        <Download size={14} />
                     </button>
 
                     <button

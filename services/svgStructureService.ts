@@ -2,14 +2,14 @@
  * SVG Structure Service - Gemini-powered SVG Restructuring
  *
  * Takes a raw SVG from vtracer and structures it according to
- * the mf-svg-schema specification, adding semantic roles,
- * accessibility metadata, and ICAP validation data.
+ * the mf-svg-schema specification, adding semantic roles and
+ * accessibility metadata.
  *
  * @module services/svgStructureService
  */
 
 import { GoogleGenAI } from "@google/genai";
-import type { NLUData, VisualElement, EvaluationMetrics, GlobalConfig } from "../types";
+import type { NLUData, VisualElement, GlobalConfig } from "../types";
 
 // Reuse the AI client pattern from geminiService
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -109,8 +109,6 @@ export interface SVGStructureInput {
     nlu: NLUData;
     /** Hierarchical visual elements */
     elements: VisualElement[];
-    /** ICAP evaluation metrics */
-    evaluation: EvaluationMetrics;
     /** Original utterance */
     utterance: string;
     /** Global configuration */
@@ -245,20 +243,11 @@ function flattenElements(elements: VisualElement[]): VisualElement[] {
 }
 
 /**
- * Calculate ICAP average score
- */
-function calculateICAPAverage(eval_: EvaluationMetrics): number {
-    const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = eval_;
-    return (clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility) / 6;
-}
-
-/**
  * Build the metadata JSON block
  */
 function buildMetadataJSON(input: SVGStructureInput): object {
     const primes = extractNSMPrimes(input.nlu);
     const concepts = buildConceptsArray(input.elements, input.nlu);
-    const icapAvg = calculateICAPAverage(input.evaluation);
 
     return {
         version: "1.0.0",
@@ -279,13 +268,6 @@ function buildMetadataJSON(input: SVGStructureInput): object {
             generatedAt: new Date().toISOString(),
             sourceDataset: "MediaFranca-PictoNet",
             licence: input.config.license || "CC BY 4.0"
-        },
-        icap: {
-            validated: true,
-            validatedAt: new Date().toISOString(),
-            validator: input.config.author || "PictoNet",
-            clarityScore: Math.round(input.evaluation.clarity),
-            comments: input.evaluation.reasoning || `ICAP average: ${icapAvg.toFixed(2)}`
         }
     };
 }
@@ -304,7 +286,7 @@ Convert a raw vectorized SVG into a semantically structured SVG following the mf
 1. **Visual Reference (IMAGE)**: The original bitmap pictogram - USE THIS to understand what each part represents
 2. **Geometric Base (TEXT)**: Raw SVG with unstructured <path> elements from vtracer vectorization
 3. **Semantic Context (TEXT)**: Hierarchical visual elements that MUST correspond to visual parts in the image
-4. **Metadata (TEXT)**: NLU analysis, concepts, ICAP scores
+4. **Metadata (TEXT)**: NLU analysis and concepts
 
 **CRITICAL VISUAL CORRELATION:**
 Look at the IMAGE and the HIERARCHICAL ELEMENTS together:
@@ -415,7 +397,6 @@ function cleanSVGResponse(text: string): string {
  *   rawSvg: svgFromVtracer,
  *   nlu: row.NLU,
  *   elements: row.elements,
- *   evaluation: row.evaluation,
  *   utterance: row.UTTERANCE,
  *   config: globalConfig
  * });
@@ -541,13 +522,12 @@ Output ONLY the complete, restructured SVG file - no explanation.`
 
 /**
  * Check if a row has sufficient data for SVG generation
- * Requires: bitmap (for vectorization), NLU, elements, evaluation with ICAP >= 4.0
+ * Requires: bitmap (for vectorization), NLU, and visual elements
  */
 export function canGenerateSVG(row: {
     bitmap?: string;
     NLU?: NLUData | string;
     elements?: VisualElement[];
-    evaluation?: EvaluationMetrics;
 }): { eligible: boolean; reason?: string } {
 
     if (!row.bitmap) {
@@ -560,20 +540,6 @@ export function canGenerateSVG(row: {
 
     if (!row.elements || row.elements.length === 0) {
         return { eligible: false, reason: 'Visual elements required' };
-    }
-
-    if (!row.evaluation) {
-        return { eligible: false, reason: 'ICAP evaluation required' };
-    }
-
-    const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = row.evaluation;
-    const average = (clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility) / 6;
-
-    if (average < 4.0) {
-        return {
-            eligible: false,
-            reason: `ICAP average (${average.toFixed(2)}) must be >= 4.0`
-        };
     }
 
     return { eligible: true };

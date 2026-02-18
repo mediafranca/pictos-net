@@ -11,9 +11,8 @@
 5. [Generación en Cascada](#generación-en-cascada)
 6. [Generación Paso por Paso](#generación-paso-por-paso)
 7. [Edición y Regeneración de Pasos Intermedios](#edición-y-regeneración-de-pasos-intermedios)
-8. [Evaluación ICAP](#evaluación-icap)
-9. [Gestión de la Biblioteca SVG](#gestión-de-la-biblioteca-svg)
-10. [Consejos y Buenas Prácticas](#consejos-y-buenas-prácticas)
+8. [Gestión de la Biblioteca SVG](#gestión-de-la-biblioteca-svg)
+9. [Consejos y Buenas Prácticas](#consejos-y-buenas-prácticas)
 
 ## Introducción
 
@@ -31,7 +30,6 @@ Convierte frases en lenguaje natural (intención comunicativa) en pictogramas me
 
 - **Modelos de IA**: Google Gemini (3 Pro Preview, 2.5 Flash Image, 3 Pro Image)
 - **Análisis Semántico**: Natural Semantic Metalanguage (NSM)
-- **Validación**: Sistema de evaluación ICAP-50
 
 ## Primeros Pasos
 
@@ -41,22 +39,16 @@ Convierte frases en lenguaje natural (intención comunicativa) en pictogramas me
 
 Al abrir PICTOS.NET, verás la pantalla principal con dos opciones:
 
-#### 1. Cargar ICAP-50
+#### 1. Cargar Vocabulario de Ejemplo
 
-El **ICAP-50** es un corpus canónico de 50 frases diseñadas para cubrir las dimensiones fundamentales de comunicación aumentativa:
-
-- Necesidades básicas
-- Emociones
-- Acciones cotidianas
-- Relaciones sociales
-- Conceptos temporales y espaciales
+PICTOS.NET incluye colecciones de ejemplo con frases curadas para distintos contextos de comunicación aumentativa. Puedes cargar una desde la pantalla de inicio para comenzar rápidamente.
 
 **Cómo usar:**
-1. Haz clic en el botón "Cargar ICAP-50"
-2. Se cargarán automáticamente las 50 frases base
+1. Haz clic en "Cargar biblioteca" junto a la colección de ejemplo
+2. Se cargarán automáticamente las frases incluidas
 3. Serás redirigido a la pantalla de trabajo (LIST)
 
-El índice **ICAP** es un módulo independiente que está documentado y disponible de forma separada acá: [https://github.com/mediafranca/ICAP](https://github.com/mediafranca/ICAP).
+El protocolo de evaluación **ICAP** es un módulo independiente documentado en [https://github.com/mediafranca/ICAP](https://github.com/mediafranca/ICAP).
 
 #### 2. Importar Frases Personalizadas
 
@@ -246,7 +238,7 @@ Para ejecutar la generación del pictograma de forma completa (todos los pasos "
    [PRODUCIR: idle → processing → completed]
    ```
 
-5. Al finalizar, verás la miniatura del pictograma generado con un badge de score ICAP
+5. Al finalizar, verás la miniatura del pictograma generado
 
 #### Método 2: Batch Processing (múltiples filas)
 
@@ -281,7 +273,6 @@ Cuando ejecutas cascada, ocurre lo siguiente:
 
 **Resultado**
 - Fila marcada como "completed"
-- Evaluación en estado "idle" (lista para evaluar manualmente)
 
 ### Estados posibles
 
@@ -597,164 +588,17 @@ Cuando estés en el editor de enfoque (modal pantalla completa):
 - **Ctrl+S** (Windows/Linux) o **Cmd+S** (Mac): Guardar cambios
 - **Tab**: Navegar entre campos
 
-## Evaluación ICAP
-
-![Evaluación ICAP](img/evaluacion-icap.png)
-
-### ¿Qué es ICAP?
-
-**ICAP** (Image-Communication Accessibility Protocol) es un sistema de evaluación de pictogramas basado en 6 dimensiones:
-
-1. **Clarity** (Claridad visual)
-2. **Recognizability** (Reconocibilidad)
-3. **Semantic Transparency** (Transparencia semántica)
-4. **Pragmatic Fit** (Ajuste pragmático)
-5. **Cultural Adequacy** (Adecuación cultural)
-6. **Cognitive Accessibility** (Accesibilidad cognitiva)
-
-Cada dimensión se evalúa en escala **Likert de 1 a 5**:
-- 1 = Muy deficiente
-- 2 = Deficiente
-- 3 = Aceptable
-- 4 = Bueno
-- 5 = Excelente
-
-### ¿Por qué evaluar?
-
-La evaluación ICAP:
-- **Valida** la calidad del pictograma
-- **Filtra** pictogramas para la biblioteca SVG (solo ≥4.0 se guardan)
-- **Documenta** decisiones de diseño
-- **Guía** iteraciones de mejora
-
-### Cómo evaluar
-
-#### Método 1: En la Vista Detallada
-
-1. **Expande la fila** del pictograma
-2. **Localiza el StepBox PRODUCIR** (tercera columna)
-3. **Scroll hacia abajo** dentro del StepBox
-4. Verás el **Evaluation Editor** con 6 dimensiones
-
-#### Método 2: En Modo Enfoque
-
-1. **Expande la fila**
-2. **Haz clic en "⛶ Enfoque"** en el StepBox PRODUCIR
-3. Se abrirá pantalla completa con:
-   - Imagen bitmap grande
-   - Formulario de evaluación
-   - **HexagonChart** (gráfico radar hexagonal)
-
-#### Proceso de Evaluación
-
-**Paso 1: Visualización**
-- Observa el pictograma generado
-- Compara con el utterance original
-- Considera el contexto de uso (audiencia, propósito)
-
-**Paso 2: Evaluación por Dimensión**
-
-Para cada dimensión, desliza el slider de 1 a 5:
-
-**A) Clarity (Claridad Visual)**
-- ¿Las formas son nítidas y bien definidas?
-- ¿Hay ruido visual o elementos confusos?
-- ¿El contraste es adecuado?
-- **5**: Imagen cristalina, formas perfectas
-- **3**: Algunas áreas confusas pero mayormente claro
-- **1**: Imagen borrosa, formas indefinidas
-
-**B) Recognizability (Reconocibilidad)**
-- ¿Se identifican claramente los elementos representados?
-- ¿Una persona puede nombrar lo que ve?
-- **5**: Todos los elementos son inmediatamente identificables
-- **3**: La mayoría se reconocen con algo de esfuerzo
-- **1**: Elementos irreconocibles
-
-**C) Semantic Transparency (Transparencia Semántica)**
-- ¿La relación entre la imagen y el significado es evidente?
-- ¿Alguien que no habla el idioma puede inferir el significado?
-- **5**: Significado inmediatamente obvio
-- **3**: Se requiere contexto para comprender
-- **1**: No hay conexión aparente con el significado
-
-**D) Pragmatic Fit (Ajuste Pragmático)**
-- ¿El pictograma es apropiado para el contexto de uso?
-- ¿Captura la intención comunicativa (no solo el significado literal)?
-- **5**: Perfecto para el contexto y uso previsto
-- **3**: Funciona pero no es ideal
-- **1**: Inapropiado para el contexto
-
-**E) Cultural Adequacy (Adecuación Cultural)**
-- ¿El pictograma es culturalmente apropiado para tu contexto geográfico?
-- ¿Evita estereotipos o representaciones ofensivas?
-- ¿Refleja la diversidad?
-- **5**: Culturalmente neutral o apropiado
-- **3**: Algunos elementos culturalmente específicos
-- **1**: Culturalmente inapropiado u ofensivo
-
-**F) Cognitive Accessibility (Accesibilidad Cognitiva)**
-- ¿Personas con diferentes capacidades cognitivas pueden comprenderlo?
-- ¿Es simple sin ser simplista?
-- ¿Evita metáforas complejas?
-- **5**: Accesible para todos los niveles cognitivos
-- **3**: Requiere capacidad cognitiva moderada
-- **1**: Demasiado complejo o abstracto
-
-**Paso 3: Revisión del Score**
-
-- El **score promedio** se calcula automáticamente
-- Se muestra en el badge junto a la miniatura
-- **Score ≥ 4.0**: Calidad suficiente para biblioteca SVG
-- **Score < 4.0**: Necesita mejora
-
-**Paso 4: Guardar Evaluación**
-
-- Los cambios se guardan automáticamente
-- El badge de la fila se actualiza con el score
-- El estado de evaluación cambia de "idle" a "completed"
-
-### Visualización: HexagonChart
-
-![gráfico o visualización hexagonal del ICAP](img/icap-hexagono.png)
-
-En modo enfoque, verás un **gráfico radar hexagonal** que visualiza las 6 dimensiones:
-
-1. Claridad
-2. Transparencia Semántica
-3. Adecuación Cultural
-4. Reconocibilidad
-5. Adecuación Pragmática
-6. Accesibilidad Cognitiva
-
-Esta evaluación:
-
-- Permite identificar **rápidamente** puntos débiles
-- Un hexágono **regular y grande** indica alta calidad
-- Un hexágono **irregular o pequeño** indica áreas a mejorar
-
-### Re-evaluación
-
-Puedes re-evaluar en cualquier momento:
-
-1. Edita los sliders
-2. El score se recalcula automáticamente
-3. La evaluación se actualiza
-
-**Nota:** Si regeneras el BITMAP, la evaluación se **resetea** a "idle" (debes evaluar nuevamente).
-
 ## Gestión de la Biblioteca SVG
 
 ### ¿Qué es la Biblioteca SVG?
 
 Es una colección de **pictogramas vectoriales estructurados** que cumplen con:
-- **Score ICAP ≥ 4.0**
 - **Formato mf-svg-schema** (MediaFranca SVG Schema)
 - Metadatos semánticos embebidos
 
 ### Flujo de Creación de SVG
 
-Cuando un pictograma bitmap cumple los criterios, puedes vectorizarlo:
+Cuando tienes un pictograma bitmap, puedes vectorizarlo:
 
 ```
 BITMAP (PNG) → [Re-trace] → RAW SVG → [Process] → STRUCTURED SVG → Biblioteca
@@ -765,7 +609,7 @@ BITMAP (PNG) → [Re-trace] → RAW SVG → [Process] → STRUCTURED SVG → Bib
 **Función:** Convierte bitmap (PNG) en vectores SVG
 
 **Proceso:**
-1. **Expandir la fila** del pictograma evaluado (score ≥4.0)
+1. **Expandir la fila** del pictograma
 2. **En StepBox PRODUCIR**, localiza el botón **"⟳ Re-trace SVG"**
 3. **Haz clic**
 4. Espera 3-8 segundos (usa vtracer, procesamiento local)
@@ -786,8 +630,8 @@ BITMAP (PNG) → [Re-trace] → RAW SVG → [Process] → STRUCTURED SVG → Bib
 3. Espera 5-10 segundos (llama a Gemini API)
 4. Se genera **structuredSvg** con:
    - Grupos semánticos (`<g id="agent">`, `<g id="patient">`)
-   - Metadatos ICAP
-   - Roles semánticos
+   - Metadatos semánticos (NSM, conceptos, roles)
+   - Atributos de accesibilidad
    - Estilos aplicados
 
 **Resultado:**
@@ -805,7 +649,6 @@ BITMAP (PNG) → [Re-trace] → RAW SVG → [Process] → STRUCTURED SVG → Bib
 4. Se abrirá modal con:
    - Miniaturas de SVG estructurados
    - Utterance original
-   - Score ICAP
    - Botones de acción (descargar, eliminar)
 
 #### Exportar Biblioteca
@@ -918,19 +761,7 @@ Los SVG de la biblioteca pueden:
 - Máxima calidad requerida
 - Biblioteca definitiva
 
-### 5. Evaluación ICAP
-
-**No seas demasiado estricto:**
-- Score 4.0+ es suficiente para biblioteca
-- Perfección (5.0 en todo) es rara
-- Prioriza **usabilidad** sobre perfección estética
-
-**Considera el contexto:**
-- Un pictograma "Comer" para niños vs adultos puede diferir
-- Ajusta tu evaluación al público objetivo
-- Cultural Adequacy depende de tu geo-context
-
-### 6. Gestión de Biblioteca
+### 5. Gestión de Biblioteca
 
 **Estrategia de backup:**
 - Exporta tu biblioteca regularmente
@@ -953,19 +784,16 @@ Los SVG de la biblioteca pueden:
 **Problema: Elementos visuales son incorrectos**
 - **Solución:** Edita `elements` manualmente, ajusta types y semanticRoles
 
-**Problema: Score ICAP bajo**
-- **Solución:** Identifica dimensión débil en HexagonChart, edita paso correspondiente
-
 **Problema: SVG re-trace falla**
 - **Solución:** Asegúrate de que el bitmap tiene alto contraste, regenera con Pro si es necesario
 
 ### 8. Optimización de Tiempo
 
-**Para procesamiento de ICAP-50:**
+**Para procesamiento en lote:**
 - Usa **flash** en primera pasada
-- Evalúa solo los más prometedores
-- Regenera con **pro** solo los aprobados
-- Tiempo estimado: 2-3 horas para 50 pictogramas de calidad
+- Revisa y selecciona los más prometedores
+- Regenera con **pro** solo los que necesiten mayor calidad
+- Tiempo estimado: 2-3 horas para 50 pictogramas
 
 ### 9. Accesibilidad
 
@@ -995,7 +823,7 @@ Los SVG de la biblioteca pueden:
    └─ Definir prompt general, geo-context, aspect ratio, modelo
 
 2. CARGAR UTTERANCES
-   └─ ICAP-50 o archivo personalizado
+   └─ Colección de ejemplo o archivo personalizado
 
 3. GENERAR PICTOGRAMAS
    ├─ Cascada completa (rápido)
@@ -1006,10 +834,7 @@ Los SVG de la biblioteca pueden:
    ├─ Editar pasos intermedios
    └─ Regenerar solo lo necesario
 
-5. EVALUAR ICAP
-   └─ 6 dimensiones, score ≥4.0 para biblioteca
-
-6. CREAR SVG ESTRUCTURADOS
+5. CREAR SVG ESTRUCTURADOS
    ├─ Re-trace bitmap → SVG
    └─ Process SVG → metadatos semánticos
 

@@ -1,0 +1,46 @@
+{
+  "case_id": "req-001_v1.0.0_default-v1_01",
+  "phrase_id": "req-001",
+  "phrase": {
+    "spanish": "Quiero ir al baño.",
+    "english": "I want to go to the toilet.",
+    "domain": "Higiene/Salud",
+    "syntax": "Verbo (querer) + infinitivo + lugar"
+  },
+  "pipeline_version": "v1.0.0",
+  "style_profile_id": "default-v1",
+  "model_name": "example-generator",
+  "generation_timestamp": "2025-01-26T15:30:00Z",
+  "variant": "01",
+  "iteration_number": 1,
+  "parent_case_id": null,
+  "files": {
+    "svg": "pictograms/req-001_v1.0.0_default-v1_01/output.svg",
+    "metadata": "pictograms/req-001_v1.0.0_default-v1_01/metadata.json"
+  },
+  "generation_params": {
+    "temperature": 0.7,
+    "seed": 42,
+    "style": "minimalist",
+    "complexity": "simple"
+  },
+  "evaluation": {
+    "ratings": {
+      "clarity": 4,
+      "recognizability": 5,
+      "semantic_transparency": 4,
+      "pragmatic_fit": 5,
+      "cultural_adequacy": 4,
+      "cognitive_accessibility": 5
+    },
+    "vcsci_score": 4.5,
+    "decision": "accept",
+    "evaluator_role": "expert-aac",
+    "evaluation_date": "2025-01-26",
+    "evaluation_mode": "online",
+    "required_edits": [],
+    "notes": "Excellent pictogram. Clear, recognizable, and appropriate for AAC use. The combination of person figure and toilet symbol effectively communicates the need."
+  },
+  "tags": ["example", "toy", "toilet", "request", "accepted"],
+  "notes": "This is a toy example demonstrating the complete VCSCI evaluation flow with embedded metadata as single source of truth."
+}

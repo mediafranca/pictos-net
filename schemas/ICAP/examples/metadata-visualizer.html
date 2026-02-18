@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VCSCI Metadata Visualizer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f6fa;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      margin-bottom: 30px;
+    }
+
+    .upload-area {
+      background: white;
+      border: 3px dashed #3498db;
+      border-radius: 10px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin-bottom: 30px;
+    }
+
+    .upload-area:hover {
+      border-color: #2980b9;
+      background: #f8f9fa;
+    }
+
+    .upload-area.dragging {
+      background: #e8f4f8;
+      border-color: #2980b9;
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .results {
+      display: none;
+    }
+
+    .results.visible {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 10px;
+      padding: 25px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .panel h2 {
+      color: #2c3e50;
+      margin-bottom: 15px;
+      font-size: 18px;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+
+    #svgPreview {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ecf0f1;
+      border-radius: 5px;
+    }
+
+    .hexagon-panel {
+      grid-column: 1 / -1;
+    }
+
+    .metadata-item {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 5px;
+    }
+
+    .metadata-item label {
+      display: block;
+      font-size: 12px;
+      color: #7f8c8d;
+      margin-bottom: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .metadata-item value {
+      display: block;
+      font-size: 14px;
+      color: #2c3e50;
+      font-weight: 600;
+    }
+
+    .certified-badge {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 10px;
+    }
+
+    .certified-badge.accept {
+      background: #2ecc71;
+      color: white;
+    }
+
+    .certified-badge.reject {
+      background: #e74c3c;
+      color: white;
+    }
+
+    .certified-badge.pending {
+      background: #95a5a6;
+      color: white;
+    }
+
+    .chain-step {
+      padding: 15px;
+      margin-bottom: 10px;
+      background: #f8f9fa;
+      border-left: 4px solid #3498db;
+      border-radius: 5px;
+    }
+
+    .chain-step h4 {
+      color: #2c3e50;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .chain-step p {
+      font-size: 13px;
+      color: #7f8c8d;
+      margin: 3px 0;
+    }
+
+    .error {
+      background: #e74c3c;
+      color: white;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 20px;
+      display: none;
+    }
+
+    .error.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 VCSCI Metadata Visualizer</h1>
+
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+      <h2>📁 Drop SVG file here or click to browse</h2>
+      <p style="color: #7f8c8d; margin-top: 10px;">
+        Upload a VCSCI pictogram SVG with embedded metadata
+      </p>
+      <input type="file" id="fileInput" accept=".svg,image/svg+xml">
+    </div>
+
+    <div class="error" id="error"></div>
+
+    <div class="results" id="results">
+      <!-- Pictogram Preview -->
+      <div class="panel">
+        <h2>Pictogram</h2>
+        <div id="svgPreview"></div>
+      </div>
+
+      <!-- Metadata Summary -->
+      <div class="panel">
+        <h2>Metadata</h2>
+        <div id="metadataSummary"></div>
+      </div>
+
+      <!-- Hexagonal Visualization -->
+      <div class="panel hexagon-panel">
+        <h2>Evaluation Profile</h2>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 40px;">
+          <svg id="hexagonViz" viewBox="0 0 400 400" width="400" height="400">
+            <g id="hex-grid"></g>
+            <g id="hex-axes"></g>
+            <polygon id="hex-data" fill="rgba(52, 152, 219, 0.3)" stroke="#2980b9" stroke-width="3"/>
+            <g id="hex-labels"></g>
+            <g id="hex-dots"></g>
+          </svg>
+          <div id="scoresSummary" style="min-width: 200px;"></div>
+        </div>
+      </div>
+
+      <!-- Chain of Thought -->
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Chain of Thought</h2>
+        <div id="chainOfThought"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const results = document.getElementById('results');
+    const error = document.getElementById('error');
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragging');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragging');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragging');
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.endsWith('.svg')) {
+        processFile(file);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        processFile(file);
+      }
+    });
+
+    function processFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const svgContent = e.target.result;
+          const metadata = extractMetadata(svgContent);
+
+          if (!metadata) {
+            showError('No VCSCI metadata found in this SVG. Make sure it was generated with metadata embedding.');
+            return;
+          }
+
+          hideError();
+          displayResults(svgContent, metadata);
+        } catch (err) {
+          showError('Error processing file: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function extractMetadata(svgContent) {
+      // Try to extract from CDATA
+      const cdataMatch = svgContent.match(/<!\[CDATA\[([\s\S]*?)\]\]>/);
+      if (cdataMatch) {
+        try {
+          return JSON.parse(cdataMatch[1]);
+        } catch (e) {
+          console.error('Failed to parse CDATA metadata:', e);
+        }
+      }
+
+      // Try to extract from data attributes
+      const caseIdMatch = svgContent.match(/data-case-id="([^"]*)"/);
+      const scoreMatch = svgContent.match(/data-vcsci-score="([^"]*)"/);
+      const decisionMatch = svgContent.match(/data-decision="([^"]*)"/);
+
+      if (caseIdMatch || scoreMatch || decisionMatch) {
+        return {
+          vcsci: {
+            case_id: caseIdMatch ? caseIdMatch[1] : 'Unknown',
+            chain_of_thought: {
+              '3_evaluation': {
+                vcsci_score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
+                decision: decisionMatch ? decisionMatch[1] : 'unknown'
+              }
+            }
+          }
+        };
+      }
+
+      return null;
+    }
+
+    function displayResults(svgContent, metadata) {
+      results.classList.add('visible');
+
+      // Show SVG
+      const svgPreview = document.getElementById('svgPreview');
+      const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      svgPreview.innerHTML = `<img src="${url}" alt="Pictogram">`;
+
+      // Show metadata summary
+      displayMetadataSummary(metadata);
+
+      // Show hexagon
+      const evaluation = metadata.vcsci.chain_of_thought?.['3_evaluation'];
+      if (evaluation && evaluation.ratings) {
+        displayHexagon(evaluation.ratings, evaluation.vcsci_score);
+      }
+
+      // Show chain of thought
+      displayChainOfThought(metadata.vcsci.chain_of_thought);
+    }
+
+    function displayMetadataSummary(metadata) {
+      const container = document.getElementById('metadataSummary');
+      const vcsci = metadata.vcsci;
+      const evaluation = vcsci.chain_of_thought?.['3_evaluation'];
+
+      let html = `
+        <div class="metadata-item">
+          <label>Case ID</label>
+          <value>${vcsci.case_id || 'N/A'}</value>
+        </div>
+        <div class="metadata-item">
+          <label>Phrase ID</label>
+          <value>${vcsci.phrase_id || 'N/A'}</value>
+        </div>
+      `;
+
+      if (evaluation) {
+        html += `
+          <div class="metadata-item">
+            <label>VCSCI Score</label>
+            <value>${evaluation.vcsci_score?.toFixed(2) || 'N/A'} / 5.0</value>
+          </div>
+          <div class="metadata-item">
+            <label>Decision</label>
+            <value>${evaluation.decision || 'N/A'}</value>
+            <span class="certified-badge ${evaluation.decision}">
+              ${evaluation.decision === 'accept' ? '✓ Certified' : evaluation.decision === 'reject' ? '✗ Rejected' : '⏳ Pending'}
+            </span>
+          </div>
+        `;
+
+        if (evaluation.evaluator_role) {
+          html += `
+            <div class="metadata-item">
+              <label>Evaluator Role</label>
+              <value>${evaluation.evaluator_role}</value>
+            </div>
+          `;
+        }
+
+        if (evaluation.evaluation_date) {
+          html += `
+            <div class="metadata-item">
+              <label>Evaluation Date</label>
+              <value>${evaluation.evaluation_date}</value>
+            </div>
+          `;
+        }
+      }
+
+      container.innerHTML = html;
+    }
+
+    function displayHexagon(ratings, vcsciScore) {
+      const dimensions = [
+        { key: 'clarity', label: 'Clarity', angle: -90 },
+        { key: 'semantic_transparency', label: 'Semantic\nTransparency', angle: -30 },
+        { key: 'pragmatic_fit', label: 'Pragmatic\nFit', angle: 30 },
+        { key: 'cultural_adequacy', label: 'Cultural\nAdequacy', angle: 90 },
+        { key: 'cognitive_accessibility', label: 'Cognitive\nAccessibility', angle: 150 },
+        { key: 'recognizability', label: 'Recognizability', angle: 210 }
+      ];
+
+      const cx = 200, cy = 200, maxR = 150;
+
+      // Draw grid
+      const grid = document.getElementById('hex-grid');
+      grid.innerHTML = '';
+      for (let i = 1; i <= 5; i++) {
+        const points = [];
+        dimensions.forEach(d => {
+          const r = (i / 5) * maxR;
+          const rad = (d.angle * Math.PI) / 180;
+          points.push(`${cx + r * Math.cos(rad)},${cy + r * Math.sin(rad)}`);
+        });
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', points.join(' '));
+        polygon.setAttribute('fill', 'none');
+        polygon.setAttribute('stroke', '#ecf0f1');
+        grid.appendChild(polygon);
+      }
+
+      // Draw axes
+      const axes = document.getElementById('hex-axes');
+      axes.innerHTML = '';
+      dimensions.forEach(d => {
+        const rad = (d.angle * Math.PI) / 180;
+        const x = cx + maxR * Math.cos(rad);
+        const y = cy + maxR * Math.sin(rad);
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', cx);
+        line.setAttribute('y1', cy);
+        line.setAttribute('x2', x);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', '#bdc3c7');
+        axes.appendChild(line);
+      });
+
+      // Draw labels
+      const labelsGroup = document.getElementById('hex-labels');
+      labelsGroup.innerHTML = '';
+      dimensions.forEach(d => {
+        const rad = (d.angle * Math.PI) / 180;
+        const x = cx + (maxR + 30) * Math.cos(rad);
+        const y = cy + (maxR + 30) * Math.sin(rad);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', x);
+        text.setAttribute('y', y);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'middle');
+        text.setAttribute('font-size', '12');
+        text.setAttribute('fill', '#2c3e50');
+        text.textContent = d.label.replace('\n', ' ');
+        labelsGroup.appendChild(text);
+      });
+
+      // Draw data
+      const points = [];
+      const dotsGroup = document.getElementById('hex-dots');
+      dotsGroup.innerHTML = '';
+
+      dimensions.forEach(d => {
+        const score = ratings[d.key] || 0;
+        const r = (score / 5) * maxR;
+        const rad = (d.angle * Math.PI) / 180;
+        const x = cx + r * Math.cos(rad);
+        const y = cy + r * Math.sin(rad);
+        points.push(`${x},${y}`);
+
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', x);
+        circle.setAttribute('cy', y);
+        circle.setAttribute('r', '6');
+        circle.setAttribute('fill', '#2980b9');
+        dotsGroup.appendChild(circle);
+      });
+
+      document.getElementById('hex-data').setAttribute('points', points.join(' '));
+
+      // Show scores summary
+      const summary = document.getElementById('scoresSummary');
+      let html = `<div style="font-size: 48px; font-weight: 700; color: #2c3e50; margin-bottom: 10px;">${vcsciScore.toFixed(2)}</div>`;
+      html += `<div style="font-size: 14px; color: #7f8c8d; margin-bottom: 20px;">VCSCI Score</div>`;
+      html += '<div style="font-size: 13px;">';
+      dimensions.forEach(d => {
+        const score = ratings[d.key] || 0;
+        html += `<div style="margin: 5px 0;">${d.label.replace('\n', ' ')}: <strong>${score}</strong></div>`;
+      });
+      html += '</div>';
+      summary.innerHTML = html;
+    }
+
+    function displayChainOfThought(chain) {
+      const container = document.getElementById('chainOfThought');
+      let html = '';
+
+      if (chain['1_input']) {
+        const input = chain['1_input'];
+        html += `
+          <div class="chain-step">
+            <h4>1️⃣ Input</h4>
+            <p><strong>Phrase:</strong> ${input.phrase?.spanish || 'N/A'} / ${input.phrase?.english || 'N/A'}</p>
+            <p><strong>Domain:</strong> ${input.phrase?.domain || 'N/A'}</p>
+            <p><strong>Style Profile:</strong> ${input.style_profile_id || 'N/A'}</p>
+            <p><strong>Pipeline:</strong> ${input.pipeline_version || 'N/A'}</p>
+          </div>
+        `;
+      }
+
+      if (chain['2_generation']) {
+        const gen = chain['2_generation'];
+        html += `
+          <div class="chain-step">
+            <h4>2️⃣ Generation</h4>
+            <p><strong>Model:</strong> ${gen.model || 'N/A'}</p>
+            <p><strong>Timestamp:</strong> ${gen.timestamp || 'N/A'}</p>
+            ${gen.parameters ? `<p><strong>Parameters:</strong> ${JSON.stringify(gen.parameters)}</p>` : ''}
+          </div>
+        `;
+      }
+
+      if (chain['3_evaluation']) {
+        const eval_ = chain['3_evaluation'];
+        html += `
+          <div class="chain-step">
+            <h4>3️⃣ Evaluation</h4>
+            <p><strong>VCSCI Score:</strong> ${eval_.vcsci_score?.toFixed(2) || 'N/A'} / 5.0</p>
+            <p><strong>Decision:</strong> ${eval_.decision || 'N/A'}</p>
+            <p><strong>Evaluator:</strong> ${eval_.evaluator_role || 'N/A'}</p>
+            ${eval_.notes ? `<p><strong>Notes:</strong> ${eval_.notes}</p>` : ''}
+          </div>
+        `;
+      }
+
+      if (chain['4_provenance']) {
+        const prov = chain['4_provenance'];
+        html += `
+          <div class="chain-step">
+            <h4>4️⃣ Provenance</h4>
+            <p><strong>Created by:</strong> ${prov.created_by || 'N/A'}</p>
+            <p><strong>Created at:</strong> ${prov.created_at || 'N/A'}</p>
+            <p><strong>Iteration:</strong> ${prov.iteration || 'N/A'}</p>
+            ${prov.parent_case_id ? `<p><strong>Parent:</strong> ${prov.parent_case_id}</p>` : ''}
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    function showError(message) {
+      error.textContent = message;
+      error.classList.add('visible');
+      results.classList.remove('visible');
+    }
+
+    function hideError() {
+      error.classList.remove('visible');
+    }
+  </script>
+</body>
+</html>

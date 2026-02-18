@@ -39,6 +39,7 @@ graph LR
     style D fill:#e1ffe1
     style E fill:#f5e1ff
 ```
+Puedes ver el proceso más detallado [acá](/docs/PIPELINE.md).
 
 ### Dos Modos de Generación
 
@@ -49,7 +50,7 @@ Presiona **▶ Play** para ejecutar el pipeline completo automáticamente. Ideal
 Expande cada utterance para acceder a los 3 bloques interiores:
 - **Comprender**: Análisis semántico basado en NSM (65 primitivos universales)
 - **Componer**: Elementos jerárquicos y composición espacial
-- **Producir**: Renderizado de imagen + Evaluación ICAP
+- **Producir**: Renderizado de imagen y vectorización
 
 Cada bloque permite inspeccionar, editar y regenerar resultados intermedios.
 
@@ -62,12 +63,11 @@ Ver el [Tutorial completo](docs/TUTORIAL.md) para guía detallada pantalla por p
 
 **Bitmaps** (para iteración)
 - Almacenados en IndexedDB + localStorage
-- Incluyen trazabilidad completa del pipeline (NLU, elementos, prompts, ICAP)
+- Incluyen trazabilidad completa del pipeline (NLU, elementos, prompts)
 - Exportables como JSON con toda la metadata
 
 **SVGs** (para producción)
 - Biblioteca independiente con principio Single Source of Truth (SSoT)
-- Solo pictogramas de alta calidad (ICAP ≥ 4.0)
 - Metadatos embebidos: NSM, conceptos semánticos, roles, accesibilidad
 - Cumplen con [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema)
 
@@ -78,23 +78,11 @@ Ver el [Tutorial completo](docs/TUTORIAL.md) para guía detallada pantalla por p
 
 Los SVGs generados son autocontenidos e interoperables.
 
-### Evaluación ICAP
-
-Sistema de evaluación multidimensional con 6 métricas:
-- Clarity (Claridad visual)
-- Recognizability (Reconocibilidad)
-- Semantic Transparency (Transparencia semántica)
-- Pragmatic Fit (Ajuste pragmático)
-- Cultural Adequacy (Adecuación cultural)
-- Cognitive Accessibility (Accesibilidad cognitiva)
-
-
 ## Documentación
 
 ### Guías de Usuario
 - **[Tutorial Completo](docs/TUTORIAL.md)** - Guía paso a paso en castellano
 - **[Configuración del Espacio](docs/TUTORIAL.md#configuración-del-espacio)** - Prompt general, geo-context, modelos
-- **[Evaluación ICAP](docs/TUTORIAL.md#evaluación-icap)** - Cómo evaluar pictogramas
 
 ### Documentación Técnica
 - **[Arquitectura](docs/ARCHITECTURE.md)** - Diseño del sistema, flujo de datos, APIs
@@ -103,7 +91,6 @@ Sistema de evaluación multidimensional con 6 métricas:
 
 ### Esquemas de Investigación (Git Submodules)
 - **[NLU Schema](https://github.com/mediafranca/nlu-schema)** - Análisis lingüístico NSM
-- **[ICAP](https://github.com/mediafranca/ICAP)** - Visual Communication Index
 - **[MF-SVG Schema](https://github.com/mediafranca/mf-svg-schema)** - Pictogramas vectoriales estructurados
 
 
@@ -140,7 +127,7 @@ Este pipeline reconoce que la comunicación visual efectiva requiere, primero, *
 Descompone cualquier enunciado en 65 primitivos semánticos universales, facilitando la representación visual culturalmente neutra.
 
 **ICAP (Image-Communication Accessibility Protocol)**
-Marco de evaluación multidimensional que mide la calidad a través de 6 ejes complementarios. Este índice tiene un repositorio dedicado en [https://github.com/mediafranca/ICAP](https://github.com/mediafranca/ICAP).
+Marco de evaluación multidimensional de pictogramas desarrollado como iniciativa independiente dentro de [MediaFranca](https://github.com/mediafranca). Su repositorio dedicado es [https://github.com/mediafranca/ICAP](https://github.com/mediafranca/ICAP).
 
 Ver [Arquitectura](docs/ARCHITECTURE.md) para detalles técnicos completos.
 
@@ -182,7 +169,6 @@ Ver [Arquitectura](docs/ARCHITECTURE.md) para detalles técnicos completos.
 - ✅ Pipeline Trace + Format
 - ✅ Biblioteca SVG independiente (SSoT)
 - ✅ Sistema de estilos CSS configurables
-- ✅ Filtro ICAP ≥ 4.0
 
 ### Próximas Versiones
 - Control fino de estilos desde corpus
@@ -202,7 +188,7 @@ PICTOS es un proyecto abierto que invita a:
 
 - **Lingüistas** → Refinar análisis NLU y NSM
 - **Diseñadores** → Mejorar composición visual y consistencia gráfica
-- **Investigadores** → Validar criterios ICAP
+- **Investigadores** → Validar calidad y accesibilidad de pictogramas
 - **Desarrolladores** → Extender funcionalidades
 - **Usuarios finales** → Reportar necesidades y enviar ejemplos de uso
 
@@ -219,7 +205,7 @@ Si usas PICTOS en tu investigación:
   author = {Spencer, Herbert},
   year = {2026},
   url = {https://pictos.net},
-  note = {Sistema de generación automática basado en NSM y evaluación ICAP}
+  note = {Sistema de generación automática de pictogramas basado en NSM}
 }
 ```
 
@@ -246,4 +232,4 @@ Para preguntas, sugerencias o colaboraciones:
 
 *PICTOS.NET - Iniciativa de código abierto de [MediaFranca](https://github.com/mediafranca)*
 
-**v1.0.1** - Pictogramas semánticos para la investigación gráfica en lingüística aplicada y accesibilidad cognitiva.
+**v1.0.2** - Pictogramas semánticos para la investigación gráfica en lingüística aplicada y accesibilidad cognitiva.

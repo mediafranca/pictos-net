@@ -1,0 +1,49 @@
+{
+  "style_profile_id": "default-v1",
+  "version": "1.0.0",
+  "name": "Default Style v1",
+  "description": "Clean, minimalist pictograms with high contrast and simple shapes. Optimized for clarity and recognizability in AAC contexts.",
+  "created_date": "2025-01-26",
+  "visual_characteristics": {
+    "style": "minimalist",
+    "technique": "flat-design",
+    "colors": "high-contrast",
+    "color_palette": ["#000000", "#FFFFFF", "#primary-accent"],
+    "complexity": "simple",
+    "line_weight": "medium",
+    "fill": "solid",
+    "background": "transparent"
+  },
+  "design_principles": [
+    "Maximize clarity and recognizability",
+    "Use simple, bold shapes",
+    "High contrast for visibility",
+    "Avoid unnecessary detail",
+    "Cultural neutrality where possible",
+    "AAC-appropriate representation"
+  ],
+  "prompt_template": "Create a simple, clear pictogram representing: '{phrase_spanish}' (English: '{phrase_english}'). Use minimalist flat design with high contrast. Focus on immediate recognizability. The pictogram should be culturally appropriate for Spanish-speaking contexts and suitable for augmentative and alternative communication (AAC). Output as clean SVG.",
+  "prompt_parameters": {
+    "temperature": 0.7,
+    "guidance_scale": 7.5,
+    "negative_prompt": "complex details, gradients, shadows, 3D effects, text, labels, photorealistic"
+  },
+  "output_specifications": {
+    "format": "svg",
+    "size": "512x512",
+    "viewBox": "0 0 512 512",
+    "stroke_width": 3,
+    "preserve_aspect_ratio": true
+  },
+  "target_audience": {
+    "primary": "AAC users (children and adults)",
+    "secondary": "Educators, clinicians, family members",
+    "accessibility_requirements": [
+      "ISO/IEC 24751 compliance",
+      "Cognitive accessibility",
+      "Visual clarity for low vision"
+    ]
+  },
+  "tags": ["minimalist", "aac", "high-contrast", "default"],
+  "notes": "This is the baseline style profile for VCSCI evaluation. All variants should be compared against this default."
+}
