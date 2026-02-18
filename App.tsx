@@ -5,7 +5,7 @@ import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
   Play, BookOpen, Search, FileDown, Square, Sliders,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
-  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp
+  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -20,6 +20,8 @@ import { StyleEditor } from './components/PictoForge/StyleEditor';
 import { GeoAutocomplete } from './components/GeoAutocomplete';
 import * as IndexedDBService from './services/indexedDBService';
 import packageJson from './package.json';
+import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
+
 
 const STORAGE_KEY = 'pictonet_v19_storage';
 const CONFIG_KEY = 'pictonet_v19_config';
@@ -174,6 +176,16 @@ const App: React.FC = () => {
   });
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [loadingLibraryName, setLoadingLibraryName] = useState('');
+  const [svgEditorState, setSvgEditorState] = useState<{
+    isOpen: boolean;
+    rowIndex: number | null;
+    svg: string | null;
+  }>({
+    isOpen: false,
+    rowIndex: null,
+    svg: null
+  });
+
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -223,12 +235,38 @@ const App: React.FC = () => {
       if (loadedRows.length > 0) {
         try {
           const bitmapsMap = await IndexedDBService.getAllBitmaps();
-          loadedRows = loadedRows.map(row => ({
-            ...row,
-            bitmap: bitmapsMap.get(row.id) || row.bitmap
-          }));
+          const svgsMap = await IndexedDBService.getAllSvgs();
+
+          // Fallback: Try to load from SVG Library in localStorage (migration/recovery)
+          const savedLibrary = localStorage.getItem('pictonet_svg_lib');
+          const librarySvgs = new Map();
+          if (savedLibrary) {
+            try {
+              const parsedLib = JSON.parse(savedLibrary);
+              if (Array.isArray(parsedLib)) {
+                parsedLib.forEach((item: any) => {
+                  if (item.sourceRowId && item.svg) {
+                    librarySvgs.set(item.sourceRowId, item.svg);
+                  }
+                });
+              }
+            } catch (e) { console.error('Failed to parse SVG library fallback', e); }
+          }
+
+          loadedRows = loadedRows.map(row => {
+            const svgs = svgsMap.get(row.id);
+            // Recover SVG from Library if missing in IDB (this handles migration to IDB)
+            const fallbackSvg = librarySvgs.get(row.id);
+
+            return {
+              ...row,
+              bitmap: bitmapsMap.get(row.id) || row.bitmap,
+              rawSvg: svgs?.rawSvg || row.rawSvg || fallbackSvg,
+              structuredSvg: svgs?.structuredSvg || row.structuredSvg || fallbackSvg
+            };
+          });
         } catch (err) {
-          console.error('Failed to load bitmaps from IndexedDB:', err);
+          console.error('Failed to load data from IndexedDB:', err);
         }
 
         setRows(loadedRows);
@@ -254,46 +292,71 @@ const App: React.FC = () => {
     if (!isInitialized) return;
 
     const saveData = async () => {
-      try {
-        // Save bitmaps to IndexedDB first (they're too large for localStorage)
-        const bitmapSavePromises = rows
-          .filter((row: RowData) => row.bitmap)
-          .map((row: RowData) => IndexedDBService.saveBitmap(row.id, row.bitmap!));
+      // 1. Trigger IndexedDB saves (Parallel)
+      const bitmapSavePromises = rows
+        .filter((row: RowData) => row.bitmap)
+        .map((row: RowData) => IndexedDBService.saveBitmap(row.id, row.bitmap!));
 
-        await Promise.all(bitmapSavePromises).catch(err => {
-          console.error('Failed to save bitmaps to IndexedDB:', err);
-        });
-
-        // Strip bitmaps from rows before saving to localStorage
-        const rowsWithoutBitmaps = rows.map((row: RowData) => ({
-          ...row,
-          bitmap: undefined, // Remove bitmap to save space (stored in IndexedDB)
-          rawSvg: undefined, // Also remove SVGs to save space
-          structuredSvg: undefined
+      const svgSavePromises = rows
+        .filter((row: RowData) => row.rawSvg || row.structuredSvg)
+        .map((row: RowData) => IndexedDBService.saveSvgs(row.id, {
+          rawSvg: row.rawSvg,
+          structuredSvg: row.structuredSvg
         }));
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsWithoutBitmaps));
+      const idbPromise = Promise.all([...bitmapSavePromises, ...svgSavePromises]).catch(err => {
+        console.error('Failed to save data to IndexedDB:', err);
+      });
+
+      // 2. Save to localStorage immediately (Synchronous fallback)
+      try {
+        // Try to keep SVGs in localStorage as first attempt backup
+        const rowsToSave = rows.map((row: RowData) => ({
+          ...row,
+          bitmap: undefined, // Always remove bitmaps (too large)
+        }));
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsToSave));
         localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-          console.error('localStorage quota exceeded');
-          addLog('error', t('messages.storageQuotaExceeded'));
+        // Handle Quota Exceeded
+        const isQuotaError = error instanceof DOMException &&
+          (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
 
-          // Try to save at least the config
+        if (isQuotaError) {
+          console.warn('localStorage quota exceeded. Retrying without SVGs...');
+
           try {
+            // Fallback: Strip SVGs and save only metadata
+            // We rely on IndexedDB for the actual content in this case
+            const strippedRows = rows.map((row: RowData) => ({
+              ...row,
+              bitmap: undefined,
+              rawSvg: undefined,
+              structuredSvg: undefined
+            }));
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(strippedRows));
             localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-          } catch (e) {
-            console.error('Failed to save even config:', e);
+
+            // Only log warning once maybe? or use specific warning level
+            // addLog('warn', t('messages.storageQuotaWarning')); 
+          } catch (retryError) {
+            console.error('CRITICAL: Failed to save even metadata to localStorage', retryError);
+            addLog('error', t('messages.storageSaveCriticalFail'));
           }
         } else {
           console.error('Failed to save to localStorage:', error);
           addLog('error', t('messages.storageSaveFailed'));
         }
       }
+
+      // Await IDB just for lifecycle management (though useEffect cleanup won't wait)
+      await idbPromise;
     };
 
     saveData();
-  }, [rows, config, isInitialized]);
+  }, [rows, isInitialized, config]);
 
   // Load available libraries from index.json
   useEffect(() => {
@@ -385,6 +448,12 @@ const App: React.FC = () => {
   const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Warn user about replacement
+    if (!window.confirm("Advertencia: Al cargar una librería, se REEMPLAZARÁN todos los pictogramas actuales y la configuración (nombre, prompt, geolocalización, etc.). ¿Deseas continuar?")) {
+      e.target.value = ''; // Reset input
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -767,6 +836,40 @@ const App: React.FC = () => {
     }
   };
 
+  const openSVGEditor = (index: number) => {
+    const row = rows[index];
+    const svgToEdit = row.structuredSvg || row.rawSvg;
+
+    if (!svgToEdit) {
+      addLog('error', 'No hay SVG para editar. Primero vectoriza la imagen.');
+      return;
+    }
+
+    setSvgEditorState({
+      isOpen: true,
+      rowIndex: index,
+      svg: svgToEdit
+    });
+    addLog('info', `Abriendo editor SVG para: ${row.UTTERANCE}`);
+  };
+
+  const handleSVGEditorSave = (updatedSvg: string) => {
+    if (svgEditorState.rowIndex === null) return;
+
+    updateRow(svgEditorState.rowIndex, {
+      structuredSvg: updatedSvg,
+    });
+
+    addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
+
+    // Close modal
+    setSvgEditorState({
+      isOpen: false,
+      rowIndex: null,
+      svg: null
+    });
+  };
+
   const filteredRows = useMemo(() => {
     // First filter by search
     let filtered = rows;
@@ -1098,17 +1201,25 @@ const App: React.FC = () => {
                   }}
                   onCascade={() => processCascade(globalIndex)}
                   onDelete={() => {
-                    // Delete bitmap from IndexedDB
+                    // Delete bitmap and SVG from IndexedDB
                     IndexedDBService.deleteBitmap(row.id).catch(err => {
                       console.error('Failed to delete bitmap from IndexedDB:', err);
                     });
+                    IndexedDBService.deleteSvgs(row.id).catch(err => {
+                      console.error('Failed to delete SVG from IndexedDB:', err);
+                    });
                     // Remove row from state
                     setRows(prev => prev.filter(r => r.id !== row.id));
+                    // If the deleted row was in focus mode, clear focus mode
+                    if (focusMode?.rowId === row.id) {
+                      setFocusMode(null);
+                    }
                   }}
                   onFocus={step => setFocusMode({ step, rowId: row.id })}
                   onShare={() => sharePictogram(globalIndex)}
                   onLog={addLog}
                   config={config}
+                  onOpenEditor={() => openSVGEditor(globalIndex)}
                 />
               );
             })}
@@ -1150,6 +1261,17 @@ const App: React.FC = () => {
           config={config}
           onUpdateConfig={setConfig}
           onClose={() => setShowStyleEditor(false)}
+        />
+      )}
+
+      {/* SVG Editor Modal */}
+      {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowIndex !== null && (
+        <SVGEditorModal
+          isOpen={svgEditorState.isOpen}
+          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null })}
+          initialSvg={svgEditorState.svg}
+          utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
+          onSave={handleSVGEditorSave}
         />
       )}
 
@@ -1208,7 +1330,8 @@ const RowComponent: React.FC<{
   onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config }) => {
+  onOpenEditor: () => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -1372,34 +1495,17 @@ const RowComponent: React.FC<{
                 {/* SVG Generation - same height as bitmap */}
                 {row.bitmap && (
                   <div className="border-t border-slate-200 min-h-[250px] flex flex-col">
-                    <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} />
+                    <SVGGenerator
+                      row={row}
+                      config={config}
+                      onLog={onLog}
+                      onUpdate={onUpdate}
+                      onOpenEditor={onOpenEditor}
+                    />
                   </div>
                 )}
 
-                {/* Share button - available for any pictogram with bitmap */}
-                {row.bitmap && (
-                  <div className="mt-4 pt-4 border-t border-slate-200 flex justify-end">
-                    {(() => {
-                      const isShared = row.shared;
-                      return (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!isShared) onShare();
-                          }}
-                          disabled={isShared}
-                          className={`p-1.5 border transition-all rounded-full flex items-center justify-center ${isShared
-                            ? 'border-emerald-500 text-emerald-600 bg-emerald-50 cursor-default'
-                            : 'border-emerald-500 text-emerald-600 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-600'
-                            }`}
-                          title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
-                        >
-                          {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
-                        </button>
-                      );
-                    })()}
-                  </div>
-                )}
+
               </div>
             </StepBox>
           </div>

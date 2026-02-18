@@ -1,0 +1,65 @@
+{
+  "name": "@pictos/style-editor",
+  "version": "1.0.0",
+  "description": "Componente de interfaz para la edición de estilos de pictogramas generados en PICTOS.net",
+  "type": "module",
+  "main": "./dist/style-editor.umd.js",
+  "module": "./dist/style-editor.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/style-editor.es.js",
+      "require": "./dist/style-editor.umd.js"
+    }
+  },
+  "files": [
+    "dist",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:lib && npm run build:types",
+    "build:lib": "vite build --mode lib",
+    "build:demo": "vite build",
+    "build:types": "tsc --project tsconfig.build.json",
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "svg",
+    "styles",
+    "css",
+    "editor",
+    "pictos",
+    "pictograms",
+    "react",
+    "component"
+  ],
+  "author": "mediafranca",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mediafranca/style-editor.git"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "lucide-react": "^0.563.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "uuid": "^13.0.0",
+    "@google/genai": "^1.38.0"
+  }
+}

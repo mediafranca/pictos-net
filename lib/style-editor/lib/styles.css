@@ -1,0 +1,64 @@
+/**
+ * Style Editor - Global CSS
+ * Este archivo contiene las animaciones y estilos base necesarios para los pictogramas SVG
+ */
+
+/* Animaciones para accesibilidad cognitiva */
+@keyframes kf-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes kf-beat {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes kf-swing {
+  20% {
+    transform: rotate(15deg);
+  }
+  40% {
+    transform: rotate(-10deg);
+  }
+  60% {
+    transform: rotate(5deg);
+  }
+  80% {
+    transform: rotate(-5deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes kf-slide-r {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(10px);
+  }
+}
+
+@keyframes kf-slide-u {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Placeholder para estilos dinámicos generados por el usuario */
+#dynamic-svg-styles {
+  /* Los estilos se inyectan aquí dinámicamente */
+}

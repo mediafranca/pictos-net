@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, RefreshCw, AlertCircle, FileCode, Check } from 'lucide-react';
+import { Download, RefreshCw, AlertCircle, FileCode, Check, Edit } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
 import { vectorizeBitmap } from '../services/vtracerService';
 import { structureSVG, canGenerateSVG } from '../services/svgStructureService';
@@ -12,14 +12,14 @@ import { generateStylesheet } from '../services/svgStructureService';
 
 // Helper function to sanitize filename for downloads
 const sanitizeFilename = (text: string, maxLength: number = 30): string => {
-  return text
-    .normalize('NFD') // Decompose accented characters
-    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-    .replace(/[^a-z0-9]/gi, '_') // Replace non-alphanumeric with underscore
-    .replace(/_+/g, '_') // Collapse multiple underscores
-    .replace(/^_|_$/g, '') // Remove leading/trailing underscores
-    .substring(0, maxLength)
-    .toLowerCase();
+    return text
+        .normalize('NFD') // Decompose accented characters
+        .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
+        .replace(/[^a-z0-9]/gi, '_') // Replace non-alphanumeric with underscore
+        .replace(/_+/g, '_') // Collapse multiple underscores
+        .replace(/^_|_$/g, '') // Remove leading/trailing underscores
+        .substring(0, maxLength)
+        .toLowerCase();
 };
 
 interface SVGGeneratorProps {
@@ -27,9 +27,10 @@ interface SVGGeneratorProps {
     config: GlobalConfig;
     onLog: (type: 'info' | 'error' | 'success', message: string) => void;
     onUpdate: (updates: Partial<RowData>) => void;
+    onOpenEditor?: () => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, downloadSVG } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -40,8 +41,23 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null); // Load from row or null
 
-    // Check if SVG already exists in library
-    const existingSVG = getSVGByRowId(row.id);
+    // Check if SVG already exists in library OR in row data (from IndexedDB)
+    const existingSVG = React.useMemo(() => {
+        const libSvg = getSVGByRowId(row.id);
+        if (libSvg) return libSvg;
+
+        if (row.structuredSvg || row.rawSvg) {
+            return {
+                id: `svg-${row.id}`,
+                utterance: row.UTTERANCE,
+                svg: row.structuredSvg || row.rawSvg || '',
+                sourceRowId: row.id,
+                createdAt: new Date().toISOString(),
+                // Mock other fields if needed
+            };
+        }
+        return undefined;
+    }, [row.id, row.structuredSvg, row.rawSvg, row.UTTERANCE, getSVGByRowId]);
 
     // Calculate eligibility (re-runs strictly when row updates)
     const eligibility = canGenerateSVG({
@@ -338,14 +354,25 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-10 font-medium">
                         Click parts to cycle through styles
                     </div>
-                    {/* Download overlay — bottom-right on hover */}
-                    <button
-                        onClick={() => downloadSVG(existingSVG.id)}
-                        className="absolute bottom-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg z-10"
-                        title="Download SVG"
-                    >
-                        <Download size={14} />
-                    </button>
+                    {/* Download & Edit overlay — bottom-right */}
+                    <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
+                        {onOpenEditor && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onOpenEditor(); }}
+                                className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
+                                title="Editar SVG"
+                            >
+                                <Edit size={14} />
+                            </button>
+                        )}
+                        <button
+                            onClick={() => downloadSVG(existingSVG.id)}
+                            className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
+                            title="Descargar SVG"
+                        >
+                            <Download size={14} />
+                        </button>
+                    </div>
                     <div
                         dangerouslySetInnerHTML={{ __html: displaySvg }}
                         onClick={handleSvgInteraction}

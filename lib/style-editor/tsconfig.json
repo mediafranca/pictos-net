@@ -14,7 +14,6 @@
       "node"
     ],
     "moduleResolution": "bundler",
-    "resolveJsonModule": true,
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
@@ -22,15 +21,23 @@
     "paths": {
       "@/*": [
         "./*"
-      ],
-      "@style-editor/*": [
-        "./lib/style-editor/*"
-      ],
-      "@schema/*": [
-        "./lib/mf-schema/*"
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
-  }
+    "noEmit": true,
+
+    /* Type declaration generation */
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false
+  },
+  "include": [
+    "lib/**/*",
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-demo"
+  ]
 }
