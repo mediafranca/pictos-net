@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0.0",
+  "composition_type": "hierarchical",
+  "elements": [
+    {
+      "id": "composicion_dormitorio",
+      "type": "scene",
+      "role": "root",
+      "description": "Complete bedroom scene composition",
+      "children": [
+        {
+          "id": "figura_protagonista",
+          "type": "agent",
+          "role": "subject",
+          "semantic_role": "Agent",
+          "description": "Person making the bed",
+          "children": [
+            {
+              "id": "cabeza",
+              "type": "body_part",
+              "description": "Head of the person"
+            },
+            {
+              "id": "torso_inclinado",
+              "type": "body_part",
+              "description": "Torso leaning towards the bed"
+            },
+            {
+              "id": "brazos_extendidos",
+              "type": "body_part",
+              "description": "Arms extended towards the bed",
+              "children": [
+                {
+                  "id": "manos_en_accion",
+                  "type": "body_part",
+                  "description": "Hands in action, smoothing sheets",
+                  "visual_emphasis": "high"
+                }
+              ]
+            },
+            {
+              "id": "piernas",
+              "type": "body_part",
+              "description": "Legs providing stable stance"
+            }
+          ]
+        },
+        {
+          "id": "cama_central",
+          "type": "object",
+          "role": "patient",
+          "semantic_role": "Theme",
+          "description": "Bed being made",
+          "visual_emphasis": "high",
+          "children": [
+            {
+              "id": "estructura_cama",
+              "type": "furniture_part",
+              "description": "Bed frame structure",
+              "children": [
+                {
+                  "id": "marco",
+                  "type": "structural",
+                  "description": "Bed frame"
+                },
+                {
+                  "id": "patas",
+                  "type": "structural",
+                  "description": "Bed legs"
+                }
+              ]
+            },
+            {
+              "id": "colchon",
+              "type": "furniture_part",
+              "description": "Mattress"
+            },
+            {
+              "id": "sabanas_en_movimiento",
+              "type": "textile",
+              "description": "Sheets showing movement and wrinkles transitioning to smooth",
+              "visual_emphasis": "high",
+              "motion_indicator": true
+            },
+            {
+              "id": "almohadas_mullidas",
+              "type": "textile",
+              "description": "Fluffy pillows at the head of the bed"
+            },
+            {
+              "id": "cabecero_madera",
+              "type": "furniture_part",
+              "description": "Wooden headboard",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "id": "entorno_periferico",
+          "type": "context",
+          "role": "background",
+          "description": "Peripheral bedroom environment",
+          "visual_emphasis": "low",
+          "children": [
+            {
+              "id": "mesita_noche",
+              "type": "furniture",
+              "description": "Bedside table",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "composition_rules": {
+    "shot_type": "medium_shot",
+    "angle": "slightly_elevated",
+    "focal_point": "manos_en_accion",
+    "depth_layers": [
+      {
+        "layer": "foreground",
+        "elements": ["cama_central", "sabanas_en_movimiento"]
+      },
+      {
+        "layer": "midground",
+        "elements": ["figura_protagonista", "brazos_extendidos"]
+      },
+      {
+        "layer": "background",
+        "elements": ["entorno_periferico"]
+      }
+    ],
+    "visual_flow": {
+      "primary_line": "diagonal from hands to bed center",
+      "secondary_lines": "arms forming diagonal guides",
+      "balance": "vertical balance with pillows at top"
+    }
+  },
+  "prompt": "La `composicion_dormitorio` se organiza mediante un plano medio o ligeramente picado. La `cama_central` ocupa el primer plano inferior y medio, actuando como el ancla visual. La `figura_protagonista` se sitúa detrás o al lado de la cama, con el `torso_inclinado` hacia el centro de la escena. Los `brazos_extendidos` forman líneas diagonales que dirigen la mirada hacia las `sabanas_en_movimiento`. Las `manos_en_accion` están en contacto directo con la tela, sugiriendo tensión y alisado; visualmente, las sábanas deben mostrar una transición de arrugas a una superficie plana bajo las manos. Las `almohadas_mullidas` se sitúan en la parte superior del encuadre, equilibrando la composición vertical. El `entorno_periferico` es secundario y desenfocado en los bordes."
+}

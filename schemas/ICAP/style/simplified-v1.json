@@ -1,0 +1,49 @@
+{
+  "style_profile_id": "simplified-v1",
+  "version": "1.0.0",
+  "name": "Simplified Style v1",
+  "description": "Extra-simplified pictograms with minimal detail, optimized for cognitive accessibility and users with intellectual disabilities.",
+  "created_date": "2025-01-26",
+  "visual_characteristics": {
+    "style": "ultra-minimalist",
+    "technique": "simple-shapes",
+    "colors": "monochrome-accent",
+    "color_palette": ["#000000", "#FFFFFF", "#primary-accent"],
+    "complexity": "very-simple",
+    "line_weight": "bold",
+    "fill": "solid",
+    "background": "white"
+  },
+  "design_principles": [
+    "Maximum simplicity - reduce to essential elements only",
+    "Use geometric primitives (circles, squares, triangles)",
+    "Extra bold lines for visibility",
+    "Minimal elements per pictogram (3-5 max)",
+    "Strong figure-ground contrast",
+    "Immediate recognition without cognitive load"
+  ],
+  "prompt_template": "Create an extremely simple pictogram for: '{phrase_spanish}' (English: '{phrase_english}'). Use only basic geometric shapes and bold lines. Reduce to absolute minimum elements needed for recognition. Optimized for users with cognitive disabilities. Output as clean SVG with bold strokes.",
+  "prompt_parameters": {
+    "temperature": 0.5,
+    "guidance_scale": 8.0,
+    "negative_prompt": "complex shapes, details, patterns, textures, gradients, shadows, multiple elements, text, labels"
+  },
+  "output_specifications": {
+    "format": "svg",
+    "size": "512x512",
+    "viewBox": "0 0 512 512",
+    "stroke_width": 6,
+    "preserve_aspect_ratio": true
+  },
+  "target_audience": {
+    "primary": "AAC users with intellectual disabilities",
+    "secondary": "Early learners, users with limited visual processing",
+    "accessibility_requirements": [
+      "ISO/IEC 24751 Level AAA",
+      "Maximum cognitive accessibility",
+      "Clear for users with learning disabilities"
+    ]
+  },
+  "tags": ["simplified", "cognitive-accessibility", "minimalist", "bold"],
+  "notes": "This profile prioritizes cognitive accessibility over aesthetic considerations. Each pictogram should be instantly recognizable with minimal cognitive effort."
+}

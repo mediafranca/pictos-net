@@ -33,31 +33,25 @@
     "graphManagement": "Gestión de Grafo",
     "sortBy": "Ordenar por:",
     "alphabetical": "Alfabético",
-    "completeness": "Completitud",
-    "evaluation": "Evaluación"
+    "completeness": "Completitud"
   },
   "home": {
     "graphArchitecture": "Arquitectura de Grafo",
     "description": "Sistema generativo de pictogramas paso-a-paso desde la intención comunicativa a la representación visual",
-    "icapModule": "Listado de 50 frases ICAP",
-    "icapNamespace": "mediafranca.icap.corpus",
-    "icapDescription": "El corpus ICAP-50 es un conjunto de 50 frases organizadas en 8 categorías pragmáticas: Solicitar, Rechazar, Dirigir, Aceptar, Social, Emoción, Comentar y Preguntar.",
-    "icapRepository": "Ver repositorio ICAP",
     "importTextNode": "Sube Tus Propias Frases",
     "importNamespace": "vocabulario_personalizado",
     "importDescription": "Define tu propio vocabulario a partir de frases personalizadas. Sube un archivo .txt con una frase por línea.",
-    "loadICAPWarning": "Tiene {count} pictograma(s) en su biblioteca. Cargar una nueva biblioteca sobreescribirá su trabajo actual. ¿Desea continuar?",
+    "loadLibraryWarning": "Tiene {count} pictograma(s) en su biblioteca. Cargar una nueva biblioteca sobreescribirá su trabajo actual. ¿Desea continuar?",
     "aboutProject": "Acerca de este proyecto",
     "exampleLibraries": "Bibliotecas de Ejemplo",
-    "exampleLibrariesDescription": "Colecciones curadas de pictogramas con evaluaciones completas",
+    "exampleLibrariesDescription": "Colecciones curadas de pictogramas",
     "loadLibrary": "Cargar biblioteca",
     "items": "elementos"
   },
   "pipeline": {
     "understand": "Comprender",
     "compose": "Componer",
-    "produce": "Producir",
-    "evaluate": "Evaluar"
+    "produce": "Producir"
   },
   "editor": {
     "hierarchicalElements": "Elementos Jerárquicos",
@@ -73,44 +67,6 @@
     "noBitmapReference": "Sin Referencia de Bitmap",
     "fullSizeRender": "Renderizado tamaño completo",
     "evaluationContext": "Contexto de Evaluación"
-  },
-  "evaluation": {
-    "icap": "Evaluación ICAP",
-    "evaluate": "Evaluar Pictograma",
-    "confirm": "Confirmar Evaluación",
-    "openEditor": "Abrir Editor de Evaluación",
-    "evaluationSaved": "Evaluación guardada para: {utterance}",
-    "clarity": "Claridad",
-    "recognizability": "Reconocibilidad",
-    "semantic_transparency": "Transparencia Semántica",
-    "pragmatic_fit": "Adecuación Pragmática",
-    "cultural_adequacy": "Adecuación Cultural",
-    "cognitive_accessibility": "Accesibilidad Cognitiva",
-    "reasoning": "Razonamiento",
-    "humanReasoning": "Razonamiento Humano",
-    "icapLabel": "ICAP",
-    "helpTitle": "Guía de Evaluación: {dimension}",
-    "scaleLevel": "Nivel {level}",
-    "loading": "Cargando guía de evaluación...",
-    "errorLoading": "No se pudo cargar la guía de evaluación. Por favor verifica tu conexión."
-  },
-  "icap": {
-    "descriptions": {
-      "clarity": "El grado en que el pictograma es visualmente claro, legible y libre de ambigüedad visual",
-      "recognizability": "La facilidad con la que un observador puede identificar lo que representa el pictograma",
-      "semantic_transparency": "El grado en que el pictograma transmite con precisión el significado de la frase",
-      "pragmatic_fit": "La utilidad y adecuación del pictograma en contextos reales de comunicación AAC",
-      "cultural_adequacy": "La adecuación y relevancia del pictograma para el contexto cultural y lingüístico",
-      "cognitive_accessibility": "La accesibilidad y usabilidad del pictograma para usuarios con diferencias cognitivas"
-    },
-    "axes": {
-      "cla": "CLA",
-      "rec": "REC",
-      "sem": "SEM",
-      "pra": "PRA",
-      "cul": "CUL",
-      "cog": "COG"
-    }
   },
   "config": {
     "visualStylePrompt": "Prompt de Estilo Visual (Atributo de Nodo)",
@@ -219,8 +175,7 @@
   "steps": {
     "nlu": "NLU",
     "visual": "Visual",
-    "bitmap": "Bitmap",
-    "eval": "Evaluación"
+    "bitmap": "Bitmap"
   },
   "svg": {
     "generate": "Generar SVG",
@@ -232,9 +187,6 @@
   },
   "share": {
     "shareWithPictos": "Compartir con PICTOS",
-    "requiresEvaluation": "Se requiere evaluación para compartir el pictograma",
-    "lowScore": "El pictograma debe tener una evaluación promedio ≥ 4.0 para compartir",
-    "requiresHighScore": "Requiere evaluación ≥ 4.0",
     "alreadyShared": "Este pictograma ya fue compartido con PICTOS",
     "sharing": "Compartiendo \"{utterance}\" con PICTOS...",
     "noToken": "Token de GitHub no configurado. Define GITHUB_TOKEN en las variables de entorno.",

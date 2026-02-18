@@ -1,0 +1,60 @@
+{
+  "style_profile_id": "colorful-v1",
+  "version": "1.0.0",
+  "name": "Colorful Style v1",
+  "description": "Vibrant, engaging pictograms using a limited color palette. Maintains clarity while adding visual appeal for younger users and educational contexts.",
+  "created_date": "2025-01-26",
+  "visual_characteristics": {
+    "style": "friendly-minimalist",
+    "technique": "flat-design-color",
+    "colors": "multi-color-limited",
+    "color_palette": ["#FF6B6B", "#4ECDC4", "#FFD93D", "#6C5CE7", "#FFFFFF", "#2D3436"],
+    "complexity": "simple",
+    "line_weight": "medium",
+    "fill": "solid-color",
+    "background": "transparent"
+  },
+  "design_principles": [
+    "Use color to enhance meaning and engagement",
+    "Limit to 2-3 colors per pictogram",
+    "Maintain high contrast ratios (WCAG AA minimum)",
+    "Color should support, not replace, shape recognition",
+    "Consider color blindness (use shape + color)",
+    "Friendly and approachable aesthetic"
+  ],
+  "prompt_template": "Create a clear, colorful pictogram for: '{phrase_spanish}' (English: '{phrase_english}'). Use a limited color palette with 2-3 vibrant colors. Maintain simple shapes with solid fills. Colors should enhance meaning and engagement while preserving recognizability. Suitable for educational AAC contexts. Output as clean SVG.",
+  "prompt_parameters": {
+    "temperature": 0.7,
+    "guidance_scale": 7.0,
+    "negative_prompt": "too many colors, gradients, complex patterns, shadows, 3D effects, text, photorealistic, cluttered"
+  },
+  "output_specifications": {
+    "format": "svg",
+    "size": "512x512",
+    "viewBox": "0 0 512 512",
+    "stroke_width": 3,
+    "preserve_aspect_ratio": true
+  },
+  "color_usage_guidelines": {
+    "primary_meanings": {
+      "red": "actions, alerts, important items",
+      "blue": "objects, calm, trust",
+      "yellow": "happiness, warmth, attention",
+      "green": "nature, growth, positive",
+      "purple": "creativity, imagination"
+    },
+    "contrast_requirements": "WCAG AA minimum (4.5:1 for text, 3:1 for graphics)",
+    "accessibility_note": "Always ensure shape recognition works without color (for colorblind users)"
+  },
+  "target_audience": {
+    "primary": "Children and young AAC users",
+    "secondary": "Educational settings, family use",
+    "accessibility_requirements": [
+      "ISO/IEC 24751 compliance",
+      "Color contrast standards (WCAG AA)",
+      "Colorblind-friendly design"
+    ]
+  },
+  "tags": ["colorful", "educational", "friendly", "engaging"],
+  "notes": "This profile adds visual engagement while maintaining AAC effectiveness. Use for contexts where color adds value (educational settings, younger users) but test grayscale version for accessibility."
+}

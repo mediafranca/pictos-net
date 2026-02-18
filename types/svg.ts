@@ -27,9 +27,6 @@ export interface SVGPictogram {
     /** Reference to the original RowData ID */
     sourceRowId: string;
 
-    /** ICAP average score at generation time */
-    icapScore: number;
-
     /** Language of the utterance */
     lang?: string;
 }
