@@ -107,7 +107,7 @@ Las contribuciones son bienvenidas. Reporta bugs, propone features o abre un Pul
 ## Citar
 
 ```
-Spencer, H. (2025). PICTOS.NET: Pictogramas generativos para la accesibilidad cognitiva.
+Spencer, H. (2026). PICTOS.NET: Pictogramas generativos para la accesibilidad cognitiva.
 MediaFranca. https://pictos.net
 ```
 
