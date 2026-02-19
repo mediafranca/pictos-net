@@ -27,7 +27,7 @@ Utterance → NLU (NSM) → Composición visual → Bitmap (Gemini)
 
 **3. Producir** — Gemini renderiza la imagen a partir del blueprint. El resultado es un bitmap PNG que puede vectorizarse para obtener un SVG semántico estructurado según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema), con metadatos de accesibilidad embebidos.
 
-Cada fase se puede regenerar de forma independiente y editar manualmente antes de continuar al siguiente paso.
+Cada fase se puede regenerar de forma independiente y editar manualmente antes de continuar al siguiente paso. Los pictogramas generados pueden evaluarse con el marco [ICAP](https://github.com/mediafranca/ICAP).
 
 ---
 
