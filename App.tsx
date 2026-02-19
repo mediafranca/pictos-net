@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom';
+import JSZip from 'jszip';
 import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
   Play, BookOpen, Search, FileDown, Square, Sliders,
@@ -155,7 +156,7 @@ const App: React.FC = () => {
   const [showConsole, setShowConsole] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showLibraryMenu, setShowLibraryMenu] = useState(false);
-  const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, right: 0 });
+  const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, left: 0 });
   const libraryBtnRef = useRef<HTMLDivElement>(null);
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -205,6 +206,7 @@ const App: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const appendPhrasesInputRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
 
   // Sanitize row data to prevent corrupted JSON from breaking the app
@@ -474,7 +476,11 @@ const App: React.FC = () => {
   const handleLibraryMenuToggle = () => {
     if (!showLibraryMenu && libraryBtnRef.current) {
       const rect = libraryBtnRef.current.getBoundingClientRect();
-      setLibraryMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+      const DROPDOWN_WIDTH = 224; // w-56 = 14rem = 224px
+      setLibraryMenuPos({
+        top: rect.bottom + 4,
+        left: Math.max(8, rect.right - DROPDOWN_WIDTH),
+      });
     }
     setShowLibraryMenu(!showLibraryMenu);
   };
@@ -869,6 +875,9 @@ const App: React.FC = () => {
     return rows.find(r => r.id === focusMode.rowId);
   }, [focusMode, rows]);
 
+  const svgCount = svgs?.length ?? 0;
+  const pngCount = rows.filter(r => r.bitmap).length;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
@@ -893,6 +902,7 @@ const App: React.FC = () => {
 
         <div id="header-actions" className="flex gap-2 items-center">
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
+          <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
 
           {/* Language Switcher */}
           <select
@@ -966,7 +976,7 @@ const App: React.FC = () => {
               <div id="field-license">
                 <FieldLabel
                   label="Licencia"
-                  tooltip="Licencia que aplica al trabajo derivado de esta librería. Los modelos Gemini imponen restricciones sobre uso comercial."
+                  tooltip="Licencia que aplica al trabajo derivado de esta librería. Los modelos Gemini no imponen restricciones sobre uso comercial si se respentan las condiciones de uso."
                 />
                 <select
                   value={config.license}
@@ -1317,23 +1327,58 @@ const App: React.FC = () => {
           <div
             id="library-dropdown"
             className="fixed w-56 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
-            style={{ top: libraryMenuPos.top, right: libraryMenuPos.right }}
+            style={{ top: libraryMenuPos.top, left: libraryMenuPos.left }}
           >
-            <div className="p-2 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              {t('library.graphManagement')}
+            <div className="px-4 py-2 border-b border-slate-100 text-[10px] font-bold text-slate-400 tracking-wider tabular-nums">
+              {rows.length} {rows.length === 1 ? 'elemento' : 'elementos'}
             </div>
+            <button
+              onClick={() => { appendPhrasesInputRef.current?.click(); setShowLibraryMenu(false); }}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+            >
+              <Upload size={14} className="text-violet-950" /> Importar frases (.txt)
+            </button>
             <button
               onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
             >
-              <Upload size={14} className="text-violet-950" /> {t('actions.import')}
+              <Upload size={14} className="text-emerald-600" /> Importar librería (.json)
             </button>
+            <div className="border-t border-slate-100 my-1"></div>
             <button
               onClick={() => { exportProject(); setShowLibraryMenu(false); }}
               disabled={rows.length === 0}
-              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Download size={14} className="text-emerald-600" /> {t('actions.export')}
+              <Download size={14} className="text-slate-500" /> Exportar librería (.json)
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={async () => {
+                const rowsWithBitmaps = rows.filter(r => r.bitmap);
+                if (rowsWithBitmaps.length === 0) return;
+                const zip = new JSZip();
+                const folder = zip.folder('pictogramas');
+                rowsWithBitmaps.forEach(row => {
+                  const base64Data = row.bitmap!.split(',')[1];
+                  const filename = sanitizeFilename(row.UTTERANCE) || row.id;
+                  folder!.file(`${filename}.png`, base64Data, { base64: true });
+                });
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
+                a.download = `${safeAuthor}_pngs_${new Date().toISOString().split('T')[0]}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setShowLibraryMenu(false);
+                addLog('success', `${rowsWithBitmaps.length} PNGs exportados como ZIP.`);
+              }}
+              disabled={pngCount === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ImageIcon size={14} className="text-orange-500" /> Descargar PNGs ({pngCount})
             </button>
             <button
               onClick={() => {
@@ -1348,16 +1393,16 @@ const App: React.FC = () => {
                 setShowLibraryMenu(false);
                 addLog('success', 'SVGs exportados correctamente.');
               }}
-              disabled={!svgs || svgs.length === 0}
-              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
+              disabled={svgCount === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <FileDown size={14} className="text-blue-600" /> Exportar SVGs
+              <FileDown size={14} className="text-blue-600" /> Exportar SVGs ({svgCount})
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
               onClick={clearAll}
               disabled={rows.length === 0}
-              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-50 disabled:text-slate-400"
+              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:text-slate-400"
             >
               <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
             </button>
