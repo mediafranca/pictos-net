@@ -22,6 +22,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@style-editor/*": [
+        "./lib/style-editor/*"
+      ],
+      "@schema/*": [
+        "./lib/mf-schema/*"
       ]
     },
     "allowImportingTsExtensions": true,

@@ -15,7 +15,15 @@
     "createNew": "Create new semantic node: \"{query}\""
   },
   "styleEditor": {
-    "title": "Styles of {lang}",
+    "title": "Style Editor",
+    "subtitle": "Visual classes for SVG pictograms",
+    "newStyle": "New Style",
+    "exportCss": "Export CSS",
+    "copyClipboard": "Copy to Clipboard",
+    "gridView": "Grid View",
+    "codeView": "Code View",
+    "animations": "Animations",
+    "deleteConfirm": "Delete this style?",
     "sectionForeground": "Foreground (.f)",
     "sectionKey": "Key / Reference (.k)",
     "fill": "Fill",
@@ -228,7 +236,18 @@
     "download": "Download SVG",
     "library": "SVG Library",
     "compliant": "mf-svg-schema compliant",
-    "unavailable": "Unavailable"
+    "unavailable": "Unavailable",
+    "traceSvg": "Trace SVG",
+    "retrace": "Re-trace",
+    "rawTrace": "Raw Trace",
+    "formatGemini": "Format with Gemini",
+    "traceDone": "Raw vectorization complete. Click Format to apply semantic structure.",
+    "traceConverts": "Converts bitmap to semantic SVG using vtracer + Gemini",
+    "editor": "SVG Editor",
+    "editorLayers": "Layers & Structure",
+    "editorStylePanel": "Style Panel",
+    "editorSave": "Save Changes",
+    "editorExport": "Export"
   },
   "share": {
     "shareWithPictos": "Share with PICTOS",

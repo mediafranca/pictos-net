@@ -1,9 +1,18 @@
 /**
  * VTracer Service - Raster to Vector Conversion
  *
- * Uses the vectortracer WASM package to convert bitmap images (PNG)
- * into SVG vector graphics. Supports per-color-layer tracing so that
- * the output preserves the original flat colors of the input image.
+ * Uses the `vectortracer` WASM package (v0.1.2) which wraps vtracer's
+ * binary trace only — it exposes `BinaryImageConverter` with no native
+ * color mode. Color tracing is implemented manually: we extract unique
+ * colors, build a binary mask per color layer, trace each mask with
+ * BinaryImageConverter, then assemble the final multicolor SVG.
+ *
+ * Parameter semantics follow the vtracer documentation:
+ *   - colorPrecision: bits per RGB channel (like CLI --color_precision).
+ *     step = round(256 / 2^bits). Default 4 bits = step 16.
+ *   - gradientStep: minimum color distance between kept layers
+ *     (like CLI --gradient_step). Default 16.
+ *   - Binary converter params mirror CLI flags directly.
  *
  * @module services/vtracerService
  */
@@ -15,43 +24,78 @@ import {
 } from "vectortracer";
 
 /**
- * Configuration options for vectorization
- * These defaults are optimized for pictograms (high contrast, flat shapes)
+ * Configuration options for vectorization.
+ * Names mirror vtracer CLI/Python flags where possible.
  */
 export interface VectorizerConfig {
-    /** Curve fitting mode: 'polygon', 'spline', or 'none' */
+    /**
+     * Curve fitting mode (vtracer --mode).
+     * 'spline' — smooth Bézier curves, best for icons/posters.
+     * 'polygon' — simplified straight segments, geometric shapes.
+     * 'none' — raw pixel-aligned contours.
+     * Default: 'spline' (recommended by vtracer docs for flat-color icons).
+     */
     mode?: 'polygon' | 'spline' | 'none';
-    /** Minimum momentary angle (degrees) to be considered a corner */
+
+    /**
+     * Color mode: 'auto' uses per-layer color tracing (multicolor output);
+     * 'bw' forces single-layer binary tracing (black paths only).
+     * NOTE: the `vectortracer` npm package only exposes BinaryImageConverter.
+     * Multicolor output is achieved via manual per-layer masking.
+     */
+    colorMode?: 'auto' | 'bw';
+
+    /**
+     * Color precision in bits per RGB channel (vtracer --color_precision).
+     * Quantization step = round(256 / 2^bits).
+     *   4 bits → step 16 (default, good for JPEG bitmaps)
+     *   5 bits → step  8 (fine, more layers)
+     *   3 bits → step 32 (coarse, fewer layers)
+     * Default: 4
+     */
+    colorPrecision?: number;
+
+    /**
+     * Minimum Euclidean color distance between kept layers
+     * (vtracer --gradient_step / layer_difference).
+     * Layers closer than this to an already-kept layer are merged into it.
+     * Default: 16
+     */
+    gradientStep?: number;
+
+    /** Minimum momentary angle (degrees) to be considered a corner (vtracer --corner_threshold). Default: 60 */
     cornerThreshold?: number;
-    /** Minimum segment length for path simplification */
+    /** Max segment length in smoothing subdivision (vtracer --segment_length). Default: 4.0 */
     lengthThreshold?: number;
-    /** Maximum iterations for path optimization */
+    /** Maximum smoothing iterations. Default: 10 */
     maxIterations?: number;
-    /** Minimum angle displacement (degrees) to splice a spline */
+    /** Minimum angle displacement (degrees) to splice a spline (vtracer --splice_threshold). Default: 45 */
     spliceThreshold?: number;
-    /** Discard patches smaller than X pixels (noise removal) */
+    /** Discard patches smaller than X pixels (vtracer --filter_speckle). Default: 4 */
     filterSpeckle?: number;
-    /** Decimal precision for path coordinates */
+    /** Decimal precision for path coordinates (vtracer --path_precision). Default: 3 */
     pathPrecision?: number;
-    /** Enable debug mode (slower) */
+    /** Enable debug mode (slower). */
     debug?: boolean;
 }
 
 /**
- * Default configuration optimized for pictograms.
+ * Default configuration based on vtracer documentation recommendations
+ * for flat-color icons / posters.
  *
- * 'polygon' mode is preferred over 'spline': pictograms are geometric
- * (straight lines, right angles, simple curves) and spline mode
- * over-smooths them into organic blob shapes.
+ * Key doc insight: for flat-color icons, `spline` mode with
+ * cornerThreshold=60 and segmentLength≈4 produces the best compact paths.
  */
 const DEFAULT_CONFIG: VectorizerConfig = {
-    mode: 'polygon',          // Preserves straight lines & corners
-    filterSpeckle: 8,         // Removes noise (pictograms are clean)
-    cornerThreshold: 45,      // More corners detected = better fidelity
-    lengthThreshold: 3.0,     // Shorter min segments = more detail
-    maxIterations: 15,
-    spliceThreshold: 45,
-    pathPrecision: 2,
+    mode: 'spline',           // Docs recommend spline for flat-color icons/posters
+    colorPrecision: 4,        // 4 bits = step 16 (matches vtracer 4-bit color precision)
+    gradientStep: 16,         // Merge color layers within distance 16 (vtracer default)
+    filterSpeckle: 4,         // vtracer default; 8 was too aggressive for thin lines
+    cornerThreshold: 60,      // vtracer default; 45 detected too many false corners
+    lengthThreshold: 4.0,     // vtracer default
+    maxIterations: 10,        // vtracer default
+    spliceThreshold: 45,      // vtracer default
+    pathPrecision: 3,         // slightly more precision than our previous 2
     debug: false,
 };
 
@@ -113,13 +157,39 @@ interface ColorLayer {
     r: number;
     g: number;
     b: number;
+    count: number; // pixel count — used to filter JPEG artifacts
 }
 
 /**
- * Find all unique (quantized) foreground colors in the image.
- * Skips fully transparent pixels and near-white background pixels.
+ * Minimum pixel count for a quantized color to be considered a real layer.
+ * JPEG artifacts at color boundaries appear in very few pixels.
+ * Real pictogram colors (fills, outlines) cover hundreds to thousands of pixels.
+ * 100px ≈ 0.016% of an 800×800 image — safely keeps even thin lines.
  */
-function extractColorLayers(imageData: ImageData): Map<string, ColorLayer> {
+const MIN_LAYER_PIXELS = 100;
+
+/** Euclidean color distance between two RGB triples */
+function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number {
+    return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+}
+
+/**
+ * Find unique foreground color layers in the image, applying:
+ * 1. Pixel-level skips: transparent + near-white original pixels.
+ * 2. Quantized near-white skip: quantized values all ≥ 224 are invisible on white bg.
+ * 3. Pixel count filter: removes JPEG artifact colors (< MIN_LAYER_PIXELS pixels).
+ * 4. Gradient-step merge: merges color layers closer than `gradientStep`
+ *    (Euclidean distance) — mirrors vtracer's --gradient_step / layer_difference.
+ *
+ * @param colorPrecision - bits per RGB channel (1–8, default 4 → step 16)
+ * @param gradientStep   - min color distance between kept layers (default 16)
+ */
+function extractColorLayers(
+    imageData: ImageData,
+    colorPrecision: number = 4,
+    gradientStep: number = 16
+): Map<string, ColorLayer> {
+    const step = Math.round(256 / Math.pow(2, colorPrecision));
     const { data } = imageData;
     const colorMap = new Map<string, ColorLayer>();
 
@@ -128,13 +198,45 @@ function extractColorLayers(imageData: ImageData): Map<string, ColorLayer> {
         if (a < 32) continue;                         // Skip transparent
         if (r > 230 && g > 230 && b > 230) continue; // Skip near-white background
 
-        const qr = quantizeChannel(r);
-        const qg = quantizeChannel(g);
-        const qb = quantizeChannel(b);
-        const key = `${qr},${qg},${qb}`;
+        const qr = quantizeChannel(r, step);
+        const qg = quantizeChannel(g, step);
+        const qb = quantizeChannel(b, step);
 
-        if (!colorMap.has(key)) {
-            colorMap.set(key, { hex: toHex(qr, qg, qb), r: qr, g: qg, b: qb });
+        // Skip quantized near-white — invisible on white backgrounds
+        if (qr >= 224 && qg >= 224 && qb >= 224) continue;
+
+        const key = `${qr},${qg},${qb}`;
+        const existing = colorMap.get(key);
+        if (existing) {
+            existing.count++;
+        } else {
+            colorMap.set(key, { hex: toHex(qr, qg, qb), r: qr, g: qg, b: qb, count: 1 });
+        }
+    }
+
+    // Pass 1: remove sparse artifact colors
+    for (const [key, layer] of colorMap) {
+        if (layer.count < MIN_LAYER_PIXELS) {
+            colorMap.delete(key);
+        }
+    }
+
+    // Pass 2: gradient-step merge — mirrors vtracer's layer_difference.
+    // Sort layers by descending pixel count (dominant colors first).
+    // For each layer, if it's within `gradientStep` distance of a larger layer, discard it.
+    if (gradientStep > 0) {
+        const sorted = Array.from(colorMap.values()).sort((a, b) => b.count - a.count);
+        const kept: ColorLayer[] = [];
+        for (const layer of sorted) {
+            const tooClose = kept.some(k =>
+                colorDistance(layer.r, layer.g, layer.b, k.r, k.g, k.b) < gradientStep
+            );
+            if (!tooClose) kept.push(layer);
+        }
+        // Rebuild map with only kept layers
+        colorMap.clear();
+        for (const layer of kept) {
+            colorMap.set(`${layer.r},${layer.g},${layer.b}`, layer);
         }
     }
 
@@ -144,8 +246,18 @@ function extractColorLayers(imageData: ImageData): Map<string, ColorLayer> {
 /**
  * Build a binary ImageData mask where pixels belonging to the target
  * (quantized) color are black and everything else is white.
+ * @param colorPrecision - Must match the value used in extractColorLayers.
+ * @param gradientStep   - Pixels within this Euclidean distance of the target
+ *   are also treated as the target, capturing JPEG boundary artifacts that
+ *   didn't get their own layer.
  */
-function createBinaryMask(imageData: ImageData, targetR: number, targetG: number, targetB: number): ImageData {
+function createBinaryMask(
+    imageData: ImageData,
+    targetR: number, targetG: number, targetB: number,
+    colorPrecision: number = 4,
+    gradientStep: number = 16
+): ImageData {
+    const step = Math.round(256 / Math.pow(2, colorPrecision));
     const { data, width, height } = imageData;
     const maskData = new Uint8ClampedArray(width * height * 4);
 
@@ -154,9 +266,13 @@ function createBinaryMask(imageData: ImageData, targetR: number, targetG: number
 
         let isTarget = false;
         if (a >= 32 && !(r > 230 && g > 230 && b > 230)) {
-            isTarget = quantizeChannel(r) === targetR
-                    && quantizeChannel(g) === targetG
-                    && quantizeChannel(b) === targetB;
+            const qr = quantizeChannel(r, step);
+            const qg = quantizeChannel(g, step);
+            const qb = quantizeChannel(b, step);
+            // Exact match on the quantized bucket, OR within gradientStep distance
+            // of the target — captures boundary artifacts that belong to this layer.
+            isTarget = (qr === targetR && qg === targetG && qb === targetB)
+                    || colorDistance(r, g, b, targetR, targetG, targetB) < gradientStep;
         }
 
         const v = isTarget ? 0 : 255;
@@ -337,7 +453,7 @@ async function vectorizeBitmapInternal(
  * - >MAX_COLOR_LAYERS colors (photo-like input, too expensive to layer-trace).
  * - Extracted path count is 0 (unexpected vtracer output format).
  */
-const MAX_COLOR_LAYERS = 16;
+const MAX_COLOR_LAYERS = 32;
 
 async function vectorizeBitmapMulticolor(
     base64Png: string,
@@ -347,7 +463,15 @@ async function vectorizeBitmapMulticolor(
     const imageData = await base64ToImageData(base64Png);
     const { width, height } = imageData;
 
-    const colorLayers = extractColorLayers(imageData);
+    const colorPrecision = config.colorPrecision ?? 4;
+    const gradientStep   = config.gradientStep   ?? 16;
+    const colorLayers = extractColorLayers(imageData, colorPrecision, gradientStep);
+
+    console.info(
+        `[vtracer] ${colorLayers.size} color layer(s) detected`,
+        `(colorPrecision=${colorPrecision}→step${Math.round(256 / Math.pow(2, colorPrecision))}, gradientStep=${gradientStep}, image=${width}×${height})`,
+        Array.from(colorLayers.values()).map(c => `${c.hex}(${c.count}px)`)
+    );
 
     if (colorLayers.size === 0 || colorLayers.size > MAX_COLOR_LAYERS) {
         console.info(
@@ -363,9 +487,9 @@ async function vectorizeBitmapMulticolor(
 
     for (let ci = 0; ci < colors.length; ci++) {
         const { hex, r, g, b } = colors[ci];
-        const mask = createBinaryMask(imageData, r, g, b);
 
         try {
+            const mask = createBinaryMask(imageData, r, g, b, colorPrecision, gradientStep);
             const layerSvg = await traceLayer(mask, hex, config);
             const paths = extractPathElements(layerSvg);
             allPaths.push(...paths);
@@ -415,15 +539,20 @@ export async function vectorizeBitmap(
 ): Promise<string> {
     const finalConfig = { ...DEFAULT_CONFIG, ...config };
 
+    // colorMode: 'bw' skips per-layer color tracing entirely
+    const traceFn = finalConfig.colorMode === 'bw'
+        ? vectorizeBitmapInternal
+        : vectorizeBitmapMulticolor;
+
     try {
-        return await vectorizeBitmapMulticolor(base64Png, finalConfig, onProgress);
+        return await traceFn(base64Png, finalConfig, onProgress);
     } catch (error) {
-        // If multicolor failed with 'polygon', try 'spline' as fallback
+        // If polygon mode failed, retry with spline as fallback
         if (finalConfig.mode === 'polygon') {
             console.warn('[vtracer] Polygon mode failed, retrying with spline...', error);
             const fallbackConfig = { ...finalConfig, mode: 'spline' as const };
             if (onProgress) onProgress(0);
-            return await vectorizeBitmapMulticolor(base64Png, fallbackConfig, onProgress);
+            return await traceFn(base64Png, fallbackConfig, onProgress);
         }
         throw error;
     }

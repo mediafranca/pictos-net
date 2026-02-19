@@ -107,6 +107,8 @@ export interface SVGStyleConfig {
   [key: string]: any; // Allow custom properties
 }
 
+import type { StyleDefinition, KeyframeDefinition } from './lib/style-editor/lib/types';
+
 export interface GlobalConfig {
   lang: string; // Language for NLU processing (e.g., 'es', 'en')
   uiLang?: 'en-GB' | 'es-419'; // UI language (independent from NLU language)
@@ -115,11 +117,18 @@ export interface GlobalConfig {
     lng: string;
     region: string;
   };
+  /** Free-text context the author provides to help Gemini understand the vocabulary use case */
+  annotatedContext?: string;
   aspectRatio: string; // '1:1', '3:4', '4:3', '9:16', '16:9'
   imageModel: string; // 'flash' | 'pro'
   author: string;
   license: string;
   visualStylePrompt: string;
+  /** Structured style definitions — single source of truth for CSS classes embedded in SVGs */
+  svgStyleDefs?: StyleDefinition[];
+  /** Structured keyframe definitions */
+  svgKeyframes?: KeyframeDefinition[];
+  /** @deprecated Use svgStyleDefs instead */
   svgStyles?: {
     [className: string]: SVGStyleConfig;
   };

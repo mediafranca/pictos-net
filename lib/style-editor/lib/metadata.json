@@ -1,0 +1,5 @@
+{
+  "name": "Style Editor",
+  "description": "Editor de estilos SVG para PICTOS.net de mediafranca. Permite la gestión semántica de estilos CSS orientados a SVG con visualización en tiempo real.",
+  "requestFramePermissions": []
+}

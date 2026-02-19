@@ -15,7 +15,15 @@
     "createNew": "Crear nuevo nodo semántico: \"{query}\""
   },
   "styleEditor": {
-    "title": "Estilos de {lang}",
+    "title": "Editor de Estilos",
+    "subtitle": "Clases visuales para pictogramas SVG",
+    "newStyle": "Nuevo Estilo",
+    "exportCss": "Exportar CSS",
+    "copyClipboard": "Copiar al portapapeles",
+    "gridView": "Vista de grilla",
+    "codeView": "Vista de código",
+    "animations": "Animaciones",
+    "deleteConfirm": "¿Eliminar este estilo?",
     "sectionForeground": "Primer Plano (.f)",
     "sectionKey": "Referencia / Fondo (.k)",
     "fill": "Relleno",
@@ -228,7 +236,18 @@
     "download": "Descargar SVG",
     "library": "Biblioteca SVG",
     "compliant": "Compatible con mf-svg-schema",
-    "unavailable": "No disponible"
+    "unavailable": "No disponible",
+    "traceSvg": "Vectorizar SVG",
+    "retrace": "Re-vectorizar",
+    "rawTrace": "Traza Cruda",
+    "formatGemini": "Formatear con Gemini",
+    "traceDone": "Vectorización cruda completa. Clic en Formatear para aplicar la estructura semántica.",
+    "traceConverts": "Convierte el bitmap a SVG semántico con vtracer + Gemini",
+    "editor": "Editor SVG",
+    "editorLayers": "Capas y Estructura",
+    "editorStylePanel": "Panel de Estilos",
+    "editorSave": "Guardar Cambios",
+    "editorExport": "Exportar"
   },
   "share": {
     "shareWithPictos": "Compartir con PICTOS",
