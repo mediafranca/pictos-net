@@ -135,6 +135,18 @@ const SearchComponent: React.FC<{
 };
 
 
+const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
+  <label className="text-[10px] font-medium uppercase text-slate-400 mb-2 flex items-center gap-1">
+    {label}
+    <div className="group/tooltip relative">
+      <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
+      <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-[56] leading-relaxed">
+        {tooltip}
+      </div>
+    </div>
+  </label>
+);
+
 const App: React.FC = () => {
   const { t, lang, setLang } = useTranslation();
   const { svgs, exportSVGs, importSVGs } = useSVGLibrary();
@@ -143,6 +155,8 @@ const App: React.FC = () => {
   const [showConsole, setShowConsole] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showLibraryMenu, setShowLibraryMenu] = useState(false);
+  const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, right: 0 });
+  const libraryBtnRef = useRef<HTMLDivElement>(null);
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
@@ -153,6 +167,7 @@ const App: React.FC = () => {
     aspectRatio: '1:1',
     imageModel: 'flash',
     author: 'PICTOS.NET',
+    credits: '',
     license: 'CC BY 4.0',
     visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados, sin sombras, sin texturas y sin contornos. Geometría: Usa trazos gruesos y consistentes y simplificación geométrica. Todas las extremidades y terminales deben tener puntas redondeadas y vértices suavizados. Composición: Representación plana 2D centrada. Usa el espacio negativo (blanco) para definir la separación interna entre formas negras superpuestas (por ejemplo, el espacio entre una cabeza y un torso). Claridad: Maximiza la legibilidad y el reconocimiento semántico a escalas pequeñas. Evita cualquier rasgo facial o detalles intrincados. Usa color solo en el elemento distintivo, si es necesario.",
     geoContext: { lat: '40.4168', lng: '-3.7038', region: 'Madrid, ES' },
@@ -420,6 +435,8 @@ const App: React.FC = () => {
             const newConfig = { ...parsed.config };
             if (!newConfig.aspectRatio) newConfig.aspectRatio = '1:1';
             if (!newConfig.imageModel) newConfig.imageModel = 'flash';
+            if (!newConfig.credits) newConfig.credits = '';
+            if (!newConfig.license) newConfig.license = 'cc-by';
             setConfig(newConfig);
             addLog('info', 'Configuración global restaurada.');
           }
@@ -452,6 +469,14 @@ const App: React.FC = () => {
     setOpenRowId(newId);
     setSearchValue('');
     setIsSearching(false);
+  };
+
+  const handleLibraryMenuToggle = () => {
+    if (!showLibraryMenu && libraryBtnRef.current) {
+      const rect = libraryBtnRef.current.getBoundingClientRect();
+      setLibraryMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    }
+    setShowLibraryMenu(!showLibraryMenu);
   };
 
   const clearAll = () => {
@@ -847,7 +872,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
-        <div className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
@@ -855,7 +880,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex-1 max-w-xl mx-8">
+        <div id="search-area" className="flex-1 max-w-xl mx-8">
           <SearchComponent
             rows={rows}
             searchValue={searchValue}
@@ -866,7 +891,7 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div id="header-actions" className="flex gap-2 items-center">
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
 
           {/* Language Switcher */}
@@ -880,7 +905,7 @@ const App: React.FC = () => {
             <option value="es-419">Español</option>
           </select>
 
-          <div className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
+          <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
               onClick={() => setViewMode('list')}
               className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-100 flex items-center gap-2"
@@ -890,166 +915,177 @@ const App: React.FC = () => {
               <span className="text-xs font-medium text-slate-500 hidden md:inline">{t('header.library')}</span>
             </button>
             <button
-              onClick={() => setShowLibraryMenu(!showLibraryMenu)}
+              onClick={handleLibraryMenuToggle}
               className={`p-1.5 hover:bg-slate-50 text-slate-400 border-l border-transparent hover:text-violet-950 transition-colors ${showLibraryMenu ? 'bg-slate-50 text-violet-950' : ''}`}
             >
               <ChevronDown size={14} />
             </button>
-
-            {showLibraryMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowLibraryMenu(false)}></div>
-                <div className="absolute top-full right-0 mt-2 w-56 bg-white border border-slate-200 shadow-xl z-50 rounded-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="p-2 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                    {t('library.graphManagement')}
-                  </div>
-                  <button
-                    onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
-                  >
-                    <Upload size={14} className="text-violet-950" /> {t('actions.import')}
-                  </button>
-                  <button
-                    onClick={() => { exportProject(); setShowLibraryMenu(false); }}
-                    disabled={rows.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
-                  >
-                    <Download size={14} className="text-emerald-600" /> {t('actions.export')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      const allSvgs = exportSVGs();
-                      const blob = new Blob([allSvgs], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${config.author.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_svgs_${new Date().toISOString().split('T')[0]}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      setShowLibraryMenu(false);
-                      addLog('success', 'SVGs exportados correctamente.');
-                    }}
-                    disabled={!svgs || svgs.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
-                  >
-                    <FileDown size={14} className="text-blue-600" /> Exportar SVGs
-                  </button>
-                  <div className="border-t border-slate-100 my-1"></div>
-                  <button
-                    onClick={clearAll}
-                    disabled={rows.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-50 disabled:text-slate-400"
-                  >
-                    <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
-                  </button>
-                </div>
-              </>
-            )}
           </div>
 
           <div className="w-px h-8 bg-slate-200 mx-2"></div>
 
-          <button onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')}><Sliders size={18} /></button>
-          <button onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')}><Terminal size={18} /></button>
+          <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')}><Sliders size={18} /></button>
+          <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')}><Terminal size={18} /></button>
         </div>
       </header>
 
       {showConfig && (
         <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-8 animate-in slide-in-from-top duration-200">
-          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="md:col-span-4">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Visual Style Prompt (Node Attribute)</label>
-              <textarea value={config.visualStylePrompt} onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-24" />
-            </div>
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
 
-            <div className="md:col-span-4">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 flex items-center gap-1">
-                Contexto Anotado
-                <div className="group/tooltip relative">
-                  <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
-                  <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-72 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-50 leading-relaxed">
-                    Descripción libre del uso de este vocabulario: quién lo usa, en qué contexto, qué necesidades comunicativas tiene. Gemini lo usará en la fase COMPRENDER para interpretar mejor cada utterance.
-                  </div>
-                </div>
-              </label>
-              <textarea
-                value={config.annotatedContext || ''}
-                onChange={e => setConfig({ ...config, annotatedContext: e.target.value })}
-                placeholder="Ej: Vocabulario para adulto con discapacidad cognitiva moderada, contexto de vida cotidiana en Santiago de Chile..."
-                className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
-              />
-            </div>
+            {/* ── Columna izquierda ── */}
+            <div className="flex flex-col gap-6">
 
-            <div className="md:col-span-1 relative group">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">
-                Geo-Linguistic Context
-              </label>
-              <div className="flex flex-col gap-2">
-                <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Globe size={14} className="text-slate-400" />
-                    <input type="text" placeholder="Language (es, en...)" value={config.lang} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })} className="w-full text-xs bg-transparent border-none outline-none font-medium" />
-                  </div>
-                </div>
-                <GeoAutocomplete
-                  value={{
-                    lat: config.geoContext?.lat || '',
-                    lng: config.geoContext?.lng || '',
-                    region: config.geoContext?.region || ''
-                  }}
-                  onChange={(geoContext: { lat: string; lng: string; region: string }) => setConfig({ ...config, geoContext })}
+              {/* field-author */}
+              <div id="field-author">
+                <FieldLabel label={t('config.spaceName')} tooltip={t('config.spaceNameTooltip')} />
+                <input
+                  type="text"
+                  value={config.author}
+                  onChange={e => setConfig({ ...config, author: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  placeholder="My Pictogram Library"
                 />
+              </div>
+
+              {/* field-credits */}
+              <div id="field-credits">
+                <FieldLabel
+                  label="Créditos"
+                  tooltip="Personas o institución responsables de esta librería. Se incluye en los metadatos al compartir o exportar para garantizar la atribución correcta."
+                />
+                <textarea
+                  value={config.credits || ''}
+                  onChange={e => setConfig({ ...config, credits: e.target.value })}
+                  placeholder="Ej: Herbert Spencer — e[ad] PUCV / Núcleo de Accesibilidad e Inclusión"
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
+                />
+              </div>
+
+              {/* field-license */}
+              <div id="field-license">
+                <FieldLabel
+                  label="Licencia"
+                  tooltip="Licencia que aplica al trabajo derivado de esta librería. Los modelos Gemini imponen restricciones sobre uso comercial."
+                />
+                <select
+                  value={config.license}
+                  onChange={e => setConfig({ ...config, license: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="copyright">© Copyright (todos los derechos reservados)</option>
+                  <option value="cc0">CC0 — Dominio Público</option>
+                  <option value="cc-by">CC BY — Atribución</option>
+                  <option value="cc-by-sa">CC BY-SA — Atribución-CompartirIgual</option>
+                  <option value="cc-by-nc">CC BY-NC — Atribución-NoComercial</option>
+                  <option value="cc-by-nc-sa">CC BY-NC-SA — Atribución-NoComercial-CompartirIgual</option>
+                </select>
+              </div>
+
+              {/* field-geo */}
+              <div id="field-geo">
+                <FieldLabel
+                  label="Geo-Linguistic Context"
+                  tooltip="Idioma de procesamiento NLU y región geográfica de referencia. Afecta la interpretación cultural de los pictogramas."
+                />
+                <div className="flex flex-col gap-2">
+                  <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className="text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Language (es, en...)"
+                        value={config.lang}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })}
+                        className="w-full text-xs bg-transparent border-none outline-none font-medium"
+                      />
+                    </div>
+                  </div>
+                  <GeoAutocomplete
+                    value={{
+                      lat: config.geoContext?.lat || '',
+                      lng: config.geoContext?.lng || '',
+                      region: config.geoContext?.region || ''
+                    }}
+                    onChange={(geoContext: { lat: string; lng: string; region: string }) => setConfig({ ...config, geoContext })}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Aspect Ratio</label>
-              <select value={config.aspectRatio} onChange={e => setConfig({ ...config, aspectRatio: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]">
-                <option value="1:1">Square (1:1)</option>
-                <option value="4:3">Standard (4:3)</option>
-                <option value="3:4">Portrait (3:4)</option>
-                <option value="16:9">Widescreen (16:9)</option>
-                <option value="9:16">Mobile (9:16)</option>
-              </select>
+            {/* ── Columna derecha ── */}
+            <div className="flex flex-col gap-6">
+
+              {/* field-visual-style */}
+              <div id="field-visual-style">
+                <FieldLabel
+                  label="Prompt de estilo visual"
+                  tooltip="Descripción del estilo gráfico que Gemini usará para renderizar todos los pictogramas de este espacio."
+                />
+                <textarea
+                  value={config.visualStylePrompt}
+                  onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-32 resize-none"
+                />
+              </div>
+
+              {/* field-aspect-ratio */}
+              <div id="field-aspect-ratio">
+                <FieldLabel
+                  label="Proporción"
+                  tooltip="Relación de aspecto de las imágenes generadas."
+                />
+                <select
+                  value={config.aspectRatio}
+                  onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="1:1">Square (1:1)</option>
+                  <option value="4:3">Standard (4:3)</option>
+                  <option value="3:4">Portrait (3:4)</option>
+                  <option value="16:9">Widescreen (16:9)</option>
+                  <option value="9:16">Mobile (9:16)</option>
+                </select>
+              </div>
+
+              {/* field-image-model */}
+              <div id="field-image-model">
+                <FieldLabel
+                  label="Modelo"
+                  tooltip="NanoBanana Flash es más rápido; NanoBanana Pro produce mayor calidad pero tarda más."
+                />
+                <select
+                  value={config.imageModel || 'flash'}
+                  onChange={e => setConfig({ ...config, imageModel: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="flash">NanoBanana (Flash 2.5)</option>
+                  <option value="pro">NanoBanana Pro (Gemini 3 Pro)</option>
+                </select>
+              </div>
+
+              {/* field-style-editor */}
+              <div id="field-style-editor">
+                <FieldLabel
+                  label="Estilos"
+                  tooltip="Editor visual de estilos CSS para los SVGs generados. Define clases reutilizables para animaciones y apariencia."
+                />
+                <button
+                  onClick={() => setShowStyleEditor(true)}
+                  className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors flex items-center justify-center gap-2"
+                >
+                  <Palette size={14} /> Abrir editor
+                </button>
+              </div>
             </div>
 
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Image Model</label>
-              <select value={config.imageModel || 'flash'} onChange={e => setConfig({ ...config, imageModel: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]">
-                <option value="flash">NanoBanana (Flash 2.5)</option>
-                <option value="pro">NanoBanana Pro (Gemini 3 Pro)</option>
-              </select>
-            </div>
-
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Graphic Style</label>
-              <button
-                onClick={() => setShowStyleEditor(true)}
-                className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors h-[42px] flex items-center justify-center gap-2"
-              >
-                <Palette size={14} /> Open Style Editor
-              </button>
-            </div>
-
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 flex items-center gap-1">
-                {t('config.spaceName')}
-                <div className="group/tooltip relative">
-                  <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
-                  <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-50 leading-relaxed">
-                    {t('config.spaceNameTooltip')}
-                  </div>
-                </div>
-              </label>
-              <input type="text" value={config.author} onChange={e => setConfig({ ...config, author: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]" placeholder="My Pictogram Library" />
-            </div>
           </div>
         </div>
       )}
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
-          <div className="mb-6 flex justify-end gap-2">
+          <div id="sort-controls" className="mb-6 flex justify-end gap-2">
             <span className="text-[10px] font-medium uppercase text-slate-400 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
             <button
               onClick={() => setSortBy('alphabetical')}
@@ -1066,8 +1102,8 @@ const App: React.FC = () => {
           </div>
         )}
         {viewMode === 'home' ? (
-          <div className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
-            <div className="space-y-4">
+          <div id="home-view" className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
+            <div id="hero-area" className="space-y-4">
               <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.4em] shadow-lg">
                 <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
               </div>
@@ -1078,7 +1114,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex justify-center max-w-2xl mx-auto">
-              <div onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md">
+              <div id="import-card" onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md">
                 <div className="text-white group-hover:scale-110 transition-transform"><FileText size={40} /></div>
                 <div>
                   <h3 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h3>
@@ -1097,7 +1133,7 @@ const App: React.FC = () => {
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="example-libraries" className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {availableLibraries.map((library: LibraryMetadata) => (
                     <div
                       key={library.filename}
@@ -1153,7 +1189,7 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+          <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
               const globalIndex = rows.findIndex(r => r.id === row.id);
               return (
@@ -1271,6 +1307,65 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Library Dropdown Portal */}
+      {showLibraryMenu && ReactDOM.createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[55]"
+            onClick={() => setShowLibraryMenu(false)}
+          />
+          <div
+            id="library-dropdown"
+            className="fixed w-56 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
+            style={{ top: libraryMenuPos.top, right: libraryMenuPos.right }}
+          >
+            <div className="p-2 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              {t('library.graphManagement')}
+            </div>
+            <button
+              onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+            >
+              <Upload size={14} className="text-violet-950" /> {t('actions.import')}
+            </button>
+            <button
+              onClick={() => { exportProject(); setShowLibraryMenu(false); }}
+              disabled={rows.length === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
+            >
+              <Download size={14} className="text-emerald-600" /> {t('actions.export')}
+            </button>
+            <button
+              onClick={() => {
+                const allSvgs = exportSVGs();
+                const blob = new Blob([allSvgs], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${config.author.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_svgs_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setShowLibraryMenu(false);
+                addLog('success', 'SVGs exportados correctamente.');
+              }}
+              disabled={!svgs || svgs.length === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
+            >
+              <FileDown size={14} className="text-blue-600" /> Exportar SVGs
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={clearAll}
+              disabled={rows.length === 0}
+              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-50 disabled:text-slate-400"
+            >
+              <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
+            </button>
+          </div>
+        </>,
+        document.body
+      )}
+
       {/* Loading Library Overlay */}
       {isLoadingLibrary && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] animate-in fade-in duration-200">
@@ -1306,18 +1401,19 @@ const RowComponent: React.FC<{
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   return (
-    <div id={`pictogramRow-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
-      <div className="p-6 flex items-center gap-8 group">
+    <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
+      <div id={`row-header-${row.id}`} className="p-6 flex items-center gap-8 group">
         <input
           type="text" value={row.UTTERANCE} onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
           className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light truncate"
         />
-        <div className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
+        <div id={`pipeline-badges-${row.id}`} className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
           <Badge label={t('pipeline.understand').toUpperCase()} status={row.nluStatus} />
           <Badge label={t('pipeline.compose').toUpperCase()} status={row.visualStatus} />
           <Badge label={t('pipeline.produce').toUpperCase()} status={row.bitmapStatus} />
         </div>
         <div
+          id={`picto-thumbnail-${row.id}`}
           className="w-14 h-14 border border-slate-200 bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
@@ -1332,7 +1428,7 @@ const RowComponent: React.FC<{
             <div className="text-slate-200"><ImageIcon size={20} /></div>
           )}
         </div>
-        <div className="flex gap-2 transition-all">
+        <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
           {row.status === 'processing' ? (
             <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title="Detener proceso">
               <Square size={18} />
@@ -1348,7 +1444,7 @@ const RowComponent: React.FC<{
 
       {isOpen && (
         <>
-          <div className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
+          <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
             <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
               <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />
             </StepBox>
@@ -1448,8 +1544,8 @@ const RowComponent: React.FC<{
             >
               <div className="flex flex-col h-full gap-4">
                 <div
-                  style={{ backgroundColor: '#eeeeee' }}
-                  className="relative flex-1 border border-slate-200 flex items-center justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px]"
+                  id="bitmap-preview"
+                  className="relative flex-1 border border-slate-200 flex items-center justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px] bg-neutral-200"
                 >
                   {row.bitmap ? (
                     <>

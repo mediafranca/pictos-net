@@ -117,11 +117,12 @@ export interface GlobalConfig {
     lng: string;
     region: string;
   };
-  /** Free-text context the author provides to help Gemini understand the vocabulary use case */
+  /** @deprecated Moved to COMPRENDER pipeline step. Do not use in UI. */
   annotatedContext?: string;
   aspectRatio: string; // '1:1', '3:4', '4:3', '9:16', '16:9'
   imageModel: string; // 'flash' | 'pro'
   author: string;
+  credits?: string; // Autores/institución para atribución de la librería
   license: string;
   visualStylePrompt: string;
   /** Structured style definitions — single source of truth for CSS classes embedded in SVGs */
