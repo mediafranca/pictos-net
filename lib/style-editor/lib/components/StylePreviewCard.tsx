@@ -37,6 +37,8 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
         return <line x1="12" y1="12" x2="88" y2="88" {...shapeProps} />;
       case 'path':
         return <path d="M 26.79,48.39 C 19.17,37.49 13.22,32.84 21.63,24.72 36.85,10.00 48.35,14.05 55.73,24.60 61.98,33.52 50.00,39.42 60.18,44.99 70.26,50.50 67.33,30.93 79.05,30.81 86.78,30.73 83.89,57.58 83.74,63.50 83.50,72.29 77.42,90.00 67.92,81.20 56.91,71.01 53.03,70.18 47.76,73.11 42.49,76.04 34.64,85.18 34.64,85.18 L 14.13,62.10 Z" {...shapeProps} />;
+      case 'heart':
+        return <path d="M 50 30 C 50 22 58 12 70 14 C 83 16 88 30 84 44 C 80 58 50 80 50 80 C 50 80 20 58 16 44 C 12 30 17 16 30 14 C 42 12 50 22 50 30 Z" {...shapeProps} />;
       case 'square':
       default:
         return <rect x="10" y="10" width="80" height="80" {...shapeProps} />;
@@ -46,7 +48,7 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
   return (
     <div
       onClick={onClick}
-      className="group w-9 flex flex-col items-center gap-1 cursor-pointer select-none"
+      className="group w-16 flex flex-col items-center gap-1 cursor-pointer select-none"
     >
       <svg viewBox="0 0 100 100" className="w-full aspect-square overflow-visible">
         <defs>

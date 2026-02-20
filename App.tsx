@@ -1381,17 +1381,24 @@ const App: React.FC = () => {
               <ImageIcon size={14} className="text-orange-500" /> Descargar PNGs ({pngCount})
             </button>
             <button
-              onClick={() => {
-                const allSvgs = exportSVGs();
-                const blob = new Blob([allSvgs], { type: 'application/json' });
+              onClick={async () => {
+                if (svgs.length === 0) return;
+                const zip = new JSZip();
+                const folder = zip.folder('svgs');
+                svgs.forEach(picto => {
+                  const filename = sanitizeFilename(picto.utterance) || picto.id;
+                  folder!.file(`${filename}.svg`, picto.svg);
+                });
+                const blob = await zip.generateAsync({ type: 'blob' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${config.author.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_svgs_${new Date().toISOString().split('T')[0]}.json`;
+                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
+                a.download = `${safeAuthor}_svgs_${new Date().toISOString().split('T')[0]}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
                 setShowLibraryMenu(false);
-                addLog('success', 'SVGs exportados correctamente.');
+                addLog('success', `${svgs.length} SVGs exportados como ZIP.`);
               }}
               disabled={svgCount === 0}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"

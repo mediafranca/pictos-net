@@ -6,7 +6,7 @@ import { updateDynamicStyles, generateCssString } from './utils/cssGenerator';
 import StylePreviewCard from './components/StylePreviewCard';
 import EditModal from './components/EditModal';
 import KeyframeEditor from './components/KeyframeEditor';
-import { Plus, Code, Grid, Download, Square, Circle, Triangle, Slash, Activity, Film } from 'lucide-react';
+import { Plus, Code, Grid, Download, Square, Circle, Triangle, Slash, Activity, Film, Heart } from 'lucide-react';
 
 export interface StyleEditorProps {
   /** Initial styles to load. Defaults to INITIAL_STYLES */
@@ -46,7 +46,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
   hideExport = false,
   hideNewButton = false,
   defaultView = ViewMode.GRID,
-  availableShapes = ['square', 'circle', 'triangle', 'line', 'path'],
+  availableShapes = ['square', 'circle', 'triangle', 'line', 'path', 'heart'],
   onSave,
   onDelete,
   onExport,
@@ -133,6 +133,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
     triangle: Triangle,
     line: Slash,
     path: Activity,
+    heart: Heart,
   };
 
   return (
@@ -223,7 +224,14 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
       <main className="flex-1 overflow-y-auto p-4">
 
         {viewMode === ViewMode.GRID && (
-          <div className="flex flex-wrap gap-2">
+          <div
+            className="p-4"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(4rem, 1fr))',
+              gap: '0.75rem',
+            }}
+          >
             {styles.map(style => (
               <StylePreviewCard
                 key={style.id}
@@ -236,7 +244,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
             {!hideNewButton && (
               <button
                 onClick={handleCreateNew}
-                className="group w-9 flex flex-col items-center gap-1 cursor-pointer select-none"
+                className="group w-16 flex flex-col items-center gap-1 cursor-pointer select-none"
               >
                 <div className="w-full aspect-square border-2 border-dashed border-gray-200 rounded group-hover:border-blue-400 transition-colors flex items-center justify-center text-gray-300 group-hover:text-blue-400">
                   <Plus size={20} />

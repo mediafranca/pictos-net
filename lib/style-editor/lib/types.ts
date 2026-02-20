@@ -24,4 +24,4 @@ export enum ViewMode {
   ANIMATIONS = 'ANIMATIONS',
 }
 
-export type ShapeType = 'square' | 'circle' | 'triangle' | 'line' | 'path';
+export type ShapeType = 'square' | 'circle' | 'triangle' | 'line' | 'path' | 'heart';
