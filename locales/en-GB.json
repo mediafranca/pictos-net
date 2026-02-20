@@ -7,8 +7,8 @@
     "libraryTooltip": "Go to Library (Workbench)",
     "settings": "Graph Settings",
     "settingsTooltip": "Graph Settings",
-    "console": "Semantic Monitor",
-    "consoleTooltip": "Semantic Monitor"
+    "console": "PICTOS Console",
+    "consoleTooltip": "PICTOS Console"
   },
   "search": {
     "placeholder": "search or create new",
@@ -106,7 +106,7 @@
     "geoNoResults": "No results found"
   },
   "console": {
-    "title": "Semantic Trace Monitor",
+    "title": "PICTOS Console",
     "flush": "Flush"
   },
   "actions": {

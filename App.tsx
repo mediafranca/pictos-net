@@ -150,7 +150,7 @@ const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, toolt
 
 const App: React.FC = () => {
   const { t, lang, setLang } = useTranslation();
-  const { svgs, exportSVGs, importSVGs } = useSVGLibrary();
+  const { svgs, exportSVGs, importSVGs, clearLibrary } = useSVGLibrary();
   const [rows, setRows] = useState<RowData[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showConsole, setShowConsole] = useState(false);
@@ -493,6 +493,7 @@ const App: React.FC = () => {
       onConfirm: async () => {
         setRows([]);
         setLogs([]);
+        clearLibrary();
         localStorage.removeItem(STORAGE_KEY);
 
         // Clear all IndexedDB data (rows, bitmaps, svgs)
@@ -885,7 +886,7 @@ const App: React.FC = () => {
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
-            <span id="tagline" className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">v{APP_VERSION}</span>
+            <span id="tagline" className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
           </div>
         </div>
 
@@ -1242,7 +1243,7 @@ const App: React.FC = () => {
       {showConsole && (
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-400 mono text-[10px] p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
-            <span className="flex items-center gap-3"><Terminal size={14} /> Semantic Trace Monitor</span>
+            <span className="flex items-center gap-3"><Terminal size={14} /> PICTOS Console</span>
             <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush</button>
           </div>
           {logs.slice().reverse().map(l => (

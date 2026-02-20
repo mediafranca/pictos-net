@@ -5,7 +5,7 @@
 
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useMemo, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Edit2, Check, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, Edit2, Check, X, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import type { SVGElement } from '../../stores/svgEditorStore';
@@ -50,10 +50,11 @@ function TreeNode({
     dragOverId,
     dragMode,
 }: TreeNodeProps) {
-    const { selectedElementId, selectElement, updateElementId } = useSVGEditorStore();
+    const { selectedElementId, selectElement, updateElementId, deleteElement } = useSVGEditorStore();
     const [isExpanded, setIsExpanded] = useState(true);
     const [isEditingId, setIsEditingId] = useState(false);
     const [editedId, setEditedId] = useState(node.id);
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const styleInfo = getStyleInfo(node);
     const classLabels = styleInfo.classes.map((cls) => `.${cls.name}`);
     const classText = classLabels.join(' ');
@@ -219,18 +220,63 @@ function TreeNode({
                     )}
                 </div>
 
-                {!isEditingId && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setIsEditingId(true);
-                        }}
+                {!isEditingId && !isConfirmingDelete && (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsEditingId(true);
+                            }}
+                            title="Renombrar"
+                        >
+                            <Edit2 className="w-3 h-3" />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 hover:text-rose-600"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsConfirmingDelete(true);
+                            }}
+                            title="Eliminar"
+                        >
+                            <Trash2 className="w-3 h-3" />
+                        </Button>
+                    </>
+                )}
+
+                {isConfirmingDelete && (
+                    <div
+                        className="flex items-center gap-1 ml-auto"
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        <Edit2 className="w-3 h-3" />
-                    </Button>
+                        <span className="text-[10px] text-rose-600 font-medium">¿Eliminar?</span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-rose-600 hover:bg-rose-50"
+                            onClick={() => {
+                                deleteElement(node.id);
+                                setIsConfirmingDelete(false);
+                            }}
+                            title="Confirmar"
+                        >
+                            <Check className="w-3 h-3" />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => setIsConfirmingDelete(false)}
+                            title="Cancelar"
+                        >
+                            <X className="w-3 h-3" />
+                        </Button>
+                    </div>
                 )}
             </div>
 

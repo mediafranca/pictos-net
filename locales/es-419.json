@@ -7,8 +7,8 @@
     "libraryTooltip": "Ir a la Librería (Workbench)",
     "settings": "Ajustes de Grafo",
     "settingsTooltip": "Ajustes de Grafo",
-    "console": "Monitor Semántico",
-    "consoleTooltip": "Monitor Semántico"
+    "console": "Consola PICTOS",
+    "consoleTooltip": "Consola PICTOS"
   },
   "search": {
     "placeholder": "buscar o crear nuevo",
@@ -106,7 +106,7 @@
     "geoNoResults": "No se encontraron resultados"
   },
   "console": {
-    "title": "Monitor de Trazabilidad Semántica",
+    "title": "Consola PICTOS",
     "flush": "Limpiar"
   },
   "actions": {
