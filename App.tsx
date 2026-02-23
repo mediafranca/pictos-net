@@ -1147,7 +1147,7 @@ const App: React.FC = () => {
         {viewMode === 'home' ? (
           <div id="home-view" className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
             <div id="hero-area" className="space-y-4">
-              <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.4em] shadow-lg">
+              <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
                 <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
               </div>
               <h2 className="text-8xl font-black tracking-tighter text-slate-900 leading-none">{config.author}</h2>
