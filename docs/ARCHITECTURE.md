@@ -3,7 +3,7 @@
 **Semantic Image Architect / Semantic Pictogram Architect**
 
 Generated: 2026-01-27
-Updated: SVG Generation Pipeline
+Updated: 2026-02-23
 
 ---
 
@@ -591,7 +591,16 @@ App (Main Container)
 │
 ├── FocusViewModal (full-screen detail views)
 ├── ConsolePanel (Semantic Trace Monitor)
-└── ConfigPanel (global settings)
+├── ConfigPanel (global settings)
+│   └── StyleEditor (lib/style-editor) — CSS style gallery + keyframe editor
+│       └── EditModal — create/edit individual CSS class rules
+│
+├── SVGEditorModal — fullscreen SVG semantic editor
+│   ├── SemanticTree — SVG DOM as expandable/editable layer tree
+│   ├── SVGCanvas — zoom/pan viewport with element selection
+│   └── StylePanel — CSS class assignment + inline style controls
+│
+└── VectorizerModal — bitmap→SVG vectorization (vtracer WASM)
 ```
 
 ### Key Components

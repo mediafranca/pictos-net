@@ -5,6 +5,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import SemanticTree from './SemanticTree';
 import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
+import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 
 interface SVGEditorModalProps {
     isOpen: boolean;
@@ -12,15 +13,16 @@ interface SVGEditorModalProps {
     initialSvg: string;
     utterance: string;
     onSave: (svg: string) => void;
+    styleDefs?: StyleDefinition[];
 }
 
 export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
-    // ... (destructuring remains same)
     isOpen,
     onClose,
     initialSvg,
     utterance,
-    onSave
+    onSave,
+    styleDefs = []
 }) => {
     const { t } = useTranslation();
     const [currentSvg, setCurrentSvg] = useState(initialSvg);
@@ -57,7 +59,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
             onSave(currentSvg);
         }
     };
-    // ... (handleExport remains same)
+
     const handleExport = () => {
         if (!svgDocument) return;
 
@@ -73,10 +75,10 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center animate-in fade-in duration-200">
-            <div className="bg-slate-900 w-full h-full flex flex-col">
+        <div id="svg-editor-modal" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center animate-in fade-in duration-200">
+            <div id="svg-editor-container" className="bg-slate-900 w-full h-full flex flex-col">
                 {/* Header */}
-                <header className="h-16 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-6">
+                <header id="svg-editor-header" className="h-16 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-6">
                     <div className="flex items-center gap-4">
                         <button onClick={onClose} className="text-white hover:text-slate-300">
                             <X size={24} />
@@ -93,7 +95,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
                     <div className="flex items-center gap-2">
                         {/* Undo/Redo */}
-                        <div className="flex bg-slate-800 rounded-md border border-slate-700 mr-4">
+                        <div id="svg-editor-history-controls" className="flex bg-slate-800 rounded-md border border-slate-700 mr-4">
                             <button
                                 onClick={undo}
                                 disabled={!canUndo()}
@@ -134,26 +136,25 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                 {/* Main Content */}
                 <div className="flex-1 flex overflow-hidden">
                     {/* Left Panel: Semantic Tree */}
-                    <aside className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-xl">
-                        <div className="p-3 border-b border-slate-100 bg-slate-50">
+                    <aside id="svg-editor-tree-panel" className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-xl">
+                        <div id="svg-editor-tree-header" className="p-3 border-b border-slate-100 bg-slate-50">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                                 {t('svg.editorLayers')}
                             </h3>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-2">
+                        <div id="svg-editor-tree-content" className="flex-1 overflow-y-auto p-2">
                             <SemanticTree />
                         </div>
                     </aside>
 
                     {/* Center: Canvas */}
-                    <main className="flex-1 bg-slate-100 overflow-hidden relative">
+                    <main id="svg-editor-canvas" className="flex-1 bg-slate-100 overflow-hidden relative">
                         <SVGCanvas />
                     </main>
 
-                    {/* Right Panel: Style Forge (placeholder) */}
                     {/* Right Panel: Style Properties */}
-                    <aside className="w-80 border-l border-slate-200 bg-white flex flex-col shrink-0 z-10 shadow-lg">
-                        <StylePanel />
+                    <aside id="svg-editor-properties-panel" className="w-80 border-l border-slate-200 bg-white flex flex-col shrink-0 z-10 shadow-lg">
+                        <StylePanel styleDefs={styleDefs} />
                     </aside>
                 </div>
             </div>

@@ -1,9 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, RefreshCw, AlertCircle, FileCode, Check, Edit, Spline, Pentagon, Palette, Binary } from 'lucide-react';
+import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2 } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
-import { vectorizeBitmap } from '../services/vtracerService';
 import { structureSVG, canGenerateSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
@@ -28,9 +27,10 @@ interface SVGGeneratorProps {
     onLog: (type: 'info' | 'error' | 'success', message: string) => void;
     onUpdate: (updates: Partial<RowData>) => void;
     onOpenEditor?: () => void;
+    onOpenVectorizer?: () => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, downloadSVG } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -41,13 +41,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null); // Load from row or null
 
-    // vtracer settings — names mirror vtracer CLI/docs
-    const [traceMode, setTraceMode] = useState<'polygon' | 'spline'>('spline');
-    const [colorMode, setColorMode] = useState<'auto' | 'bw'>('auto');
-    // colorPrecision: bits per RGB channel (vtracer --color_precision). step = 256/2^bits
-    const [colorPrecision, setColorPrecision] = useState<3 | 4 | 5>(4); // 4 bits = step 16
-    // gradientStep: min color distance between kept layers (vtracer --gradient_step)
-    const [gradientStep, setGradientStep] = useState<8 | 16 | 32>(16);
 
     // Check if SVG already exists in library OR in row data (from IndexedDB)
     const existingSVG = React.useMemo(() => {
@@ -220,55 +213,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         }
     }, [existingSVG, row.id]);
 
-    // Sync rawSvg state when row changes
+    // Sync rawSvg when the row's rawSvg prop changes (e.g. from VectorizerModal applied via App.tsx)
     useEffect(() => {
-        if (row.rawSvg && !rawSvg) {
+        if (row.rawSvg && row.rawSvg !== rawSvg) {
             setRawSvg(row.rawSvg);
-            setStatus('traced');
+            if (status !== 'completed') setStatus('traced');
         }
-    }, [row.id, row.rawSvg]);
-
-    const handleTrace = async () => {
-        if (!eligibility.eligible || !row.bitmap) return;
-
-        try {
-            setError(undefined);
-            const startTime = performance.now();
-            setProcessStartTime(Date.now());
-            setElapsedTime(0);
-
-            onLog('info', `Iniciando vectorización para: ${row.UTTERANCE}`);
-
-            // Step 1: Vectorize
-            setStatus('vectorizing');
-            setSubStatus('Vectorizando bitmap (vtracer)...');
-            setProgress(0);
-            await new Promise(r => setTimeout(r, 600)); // UX Delay
-
-            const vStart = performance.now();
-            const tracedSvg = await vectorizeBitmap(
-                row.bitmap.replace(/^data:image\/\w+;base64,/, ""),
-                { mode: traceMode, colorMode, colorPrecision, gradientStep },
-                (p) => setProgress(p)
-            );
-            const vEnd = performance.now();
-            onLog('success', `Vectorización completada en ${((vEnd - vStart) / 1000).toFixed(2)}s`);
-
-            // Store raw SVG in local state and persist to row
-            setRawSvg(tracedSvg);
-            onUpdate({ rawSvg: tracedSvg });
-            setStatus('traced');
-            setProcessStartTime(null);
-            setElapsedTime(0);
-
-        } catch (err) {
-            console.error(err);
-            setStatus('error');
-            const msg = err instanceof Error ? err.message : "Unknown error";
-            setError(msg);
-            onLog('error', `Fallo en vectorización: ${msg}`);
-        }
-    };
+    }, [row.rawSvg]);
 
     const handleFormat = async () => {
         if (!rawSvg) return;
@@ -342,74 +293,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         }
     };
 
-    // Compact vtracer settings toolbar
-    const TraceSettings = () => (
-        <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 mb-1">
-            {/* Curve mode */}
-            <div className="flex rounded overflow-hidden border border-slate-200 text-[10px]">
-                <button
-                    onClick={() => setTraceMode('polygon')}
-                    title="Polygon mode — sharp corners, geometric shapes"
-                    className={`flex items-center gap-1 px-2 py-1 transition-colors ${traceMode === 'polygon' ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                >
-                    <Pentagon size={10} /> Poly
-                </button>
-                <button
-                    onClick={() => setTraceMode('spline')}
-                    title="Spline mode — smooth organic curves"
-                    className={`flex items-center gap-1 px-2 py-1 border-l border-slate-200 transition-colors ${traceMode === 'spline' ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                >
-                    <Spline size={10} /> Spline
-                </button>
-            </div>
-
-            {/* Color mode */}
-            <div className="flex rounded overflow-hidden border border-slate-200 text-[10px]">
-                <button
-                    onClick={() => setColorMode('auto')}
-                    title="Color mode — traces each color as a separate layer"
-                    className={`flex items-center gap-1 px-2 py-1 transition-colors ${colorMode === 'auto' ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                >
-                    <Palette size={10} /> Color
-                </button>
-                <button
-                    onClick={() => setColorMode('bw')}
-                    title="B&W mode — single black trace layer"
-                    className={`flex items-center gap-1 px-2 py-1 border-l border-slate-200 transition-colors ${colorMode === 'bw' ? 'bg-slate-700 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                >
-                    <Binary size={10} /> B&W
-                </button>
-            </div>
-
-            {/* Color precision + gradient step (only relevant in color mode) */}
-            {colorMode === 'auto' && (<>
-                <div className="flex rounded overflow-hidden border border-slate-200 text-[10px]">
-                    {([5, 4, 3] as const).map((bits, i) => (
-                        <button
-                            key={bits}
-                            onClick={() => setColorPrecision(bits)}
-                            title={bits === 5 ? `5-bit precision — step 8, more color layers` : bits === 4 ? `4-bit precision — step 16 (vtracer default)` : `3-bit precision — step 32, fewer layers`}
-                            className={`px-2 py-1 transition-colors ${i > 0 ? 'border-l border-slate-200' : ''} ${colorPrecision === bits ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            {bits === 5 ? '5bit' : bits === 4 ? '4bit' : '3bit'}
-                        </button>
-                    ))}
-                </div>
-                <div className="flex rounded overflow-hidden border border-slate-200 text-[10px]">
-                    {([8, 16, 32] as const).map((gs, i) => (
-                        <button
-                            key={gs}
-                            onClick={() => setGradientStep(gs)}
-                            title={`gradient_step=${gs} — min color distance between layers`}
-                            className={`px-2 py-1 transition-colors ${i > 0 ? 'border-l border-slate-200' : ''} ${gradientStep === gs ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            Δ{gs}
-                        </button>
-                    ))}
-                </div>
-            </>)}
-        </div>
-    );
 
     if (!eligibility.eligible) {
         return (
@@ -430,6 +313,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                     <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-10 font-medium">
                         Click parts to cycle through styles
+                    </div>
+                    <div className="absolute top-2 left-2 bg-emerald-600 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                        {t('svg.structureLabel')}
                     </div>
                     {/* Download & Edit overlay — bottom-right */}
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
@@ -459,7 +345,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
                 <div className="flex gap-2">
                     <button
-                        onClick={handleTrace}
+                        onClick={() => onOpenVectorizer?.()}
                         title="Re-trace bitmap"
                         className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
                     >
@@ -467,9 +353,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     </button>
                 </div>
 
-                <div className="mt-2 flex items-center justify-center gap-1 text-[10px] text-emerald-600 font-medium">
-                    <Check size={12} /> {t('svg.compliant')}
-                </div>
             </div>
         );
     }
@@ -481,16 +364,27 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview">
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                     <div className="absolute top-2 right-2 bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
-                        {t('svg.rawTrace')}
+                        {t('svg.traceSvg')}
                     </div>
-                    {/* Download overlay — bottom-right on hover */}
-                    <button
-                        onClick={downloadRawSvg}
-                        className="absolute bottom-2 right-2 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg z-10"
-                        title="Download raw SVG"
-                    >
-                        <Download size={14} />
-                    </button>
+                    {/* Download & Edit overlay — bottom on hover */}
+                    <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
+                        {onOpenEditor && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onOpenEditor(); }}
+                                className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                                title="Editar SVG"
+                            >
+                                <Edit size={14} />
+                            </button>
+                        )}
+                        <button
+                            onClick={downloadRawSvg}
+                            className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                            title="Download raw SVG"
+                        >
+                            <Download size={14} />
+                        </button>
+                    </div>
                     <div
                         dangerouslySetInnerHTML={{ __html: displayRawSvg }}
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
@@ -506,15 +400,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     </button>
 
                     <button
-                        onClick={handleTrace}
-                        title="Re-trace bitmap"
-                        className="flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200"
+                        onClick={() => onOpenVectorizer?.()}
+                        title={t('vectorizer.adjustTrace')}
+                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px]"
                     >
-                        <RefreshCw size={14} />
+                        <Settings2 size={13} />
                     </button>
                 </div>
-
-                <TraceSettings />
 
                 <div className="mt-1 text-center text-[10px] text-slate-500">
                     {t('svg.traceDone')}
@@ -529,7 +421,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <div className="text-center w-full">
                     <div className="mb-3 mx-auto w-8 h-8 rounded-full border-2 border-slate-200 border-t-violet-600 animate-spin"></div>
                     <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-1">
-                        {status === 'vectorizing' ? 'Vectorizing...' : 'Structuring...'}
+                        {status === 'vectorizing' ? t('svg.generating') : t('svg.structuring')}
                     </p>
                     <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
                         <div
@@ -550,12 +442,11 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <>
                     <FileCode size={32} className="text-slate-300 group-hover:text-violet-500 mb-3 transition-colors" />
                     <button
-                        onClick={handleTrace}
+                        onClick={() => onOpenVectorizer?.()}
                         className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
                     >
                         {t('svg.traceSvg')}
                     </button>
-                    <TraceSettings />
                     <p className="text-[10px] text-slate-400 mt-2 text-center max-w-[200px]">
                         {t('svg.traceConverts')}
                     </p>
@@ -567,5 +458,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 </>
             )}
         </div>
+
     );
 };

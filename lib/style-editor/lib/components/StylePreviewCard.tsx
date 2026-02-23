@@ -48,7 +48,7 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
   return (
     <div
       onClick={onClick}
-      className="group w-16 flex flex-col items-center gap-1 cursor-pointer select-none"
+      className="group w-full flex flex-col items-center gap-1 cursor-pointer select-none"
     >
       <svg viewBox="0 0 100 100" className="w-full aspect-square overflow-visible">
         <defs>

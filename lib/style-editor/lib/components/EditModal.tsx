@@ -180,15 +180,16 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center py-[8vh] px-[10vw]">
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto py-10 px-[10vw]">
       <div
+        id="style-edit-modal-backdrop"
         className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+      <div id="style-edit-modal" className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col min-h-[80vh]">
 
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <div id="style-edit-modal-header" className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
           <h2 className="text-lg font-bold text-gray-800">
             {styleDef ? `Editar: ${selectors}` : 'Nueva clase'}
           </h2>
@@ -207,7 +208,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
 
               {/* Meta Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div id="style-edit-modal-selectors" className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
                     Selectores
@@ -235,7 +236,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
               </div>
 
               {/* Rules Editor */}
-              <div>
+              <div id="style-edit-modal-properties">
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Propiedades CSS
@@ -292,7 +293,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
+            <div id="style-edit-modal-footer" className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
               {styleDef ? (
                  <button
                    onClick={() => { onDelete(styleDef.id); onClose(); }}
@@ -311,7 +312,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-6 py-2 bg-gray-900 text-white font-medium rounded-lg hover:bg-black transition-colors shadow-lg shadow-gray-300/50"
+                  className="px-6 py-2 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors"
                 >
                   Guardar
                 </button>
@@ -321,7 +322,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
           </div>
 
           {/* RIGHT: Preview */}
-          <div className="w-56 flex-none bg-gray-100 border-l border-gray-200 p-4 flex flex-col items-center gap-4">
+          <div id="style-edit-modal-preview" className="w-56 flex-none bg-gray-100 border-l border-gray-200 p-4 flex flex-col items-center gap-4">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider self-start">Vista previa</h3>
 
             {/* Shape selector */}

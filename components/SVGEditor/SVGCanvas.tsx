@@ -289,37 +289,35 @@ export default function SVGCanvas() {
             style={{ position: 'relative' }}
             onWheel={handleWheelZoom}
         >
-            <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-md border bg-white/90 p-1 text-xs shadow-sm backdrop-blur">
-                <Button
-                    variant="ghost"
-                    size="sm"
+            <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-md border border-slate-300 bg-white p-1 text-xs text-slate-700 shadow-md">
+                <button
                     onClick={handleZoomOut}
                     title="Zoom out"
-                    className="h-6 w-6 p-0"
+                    className="h-6 w-6 p-0 rounded flex items-center justify-center text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
                 >
                     <ZoomOut className="h-4 w-4" />
-                </Button>
+                </button>
                 <div className="min-w-[3.5rem] text-center tabular-nums text-slate-600 font-mono">
                     {Math.round(zoom * 100)}%
                 </div>
-                <Button
-                    variant="ghost"
-                    size="sm"
+                <button
                     onClick={handleZoomIn}
                     title="Zoom in"
-                    className="h-6 w-6 p-0"
+                    className="h-6 w-6 p-0 rounded flex items-center justify-center text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
                 >
                     <ZoomIn className="h-4 w-4" />
-                </Button>
-                <Button
-                    variant={fitMode ? 'default' : 'ghost'}
-                    size="sm"
+                </button>
+                <button
                     onClick={handleZoomFit}
                     title={`Zoom to fit (${Math.round(fitZoom * 100)}%)`}
-                    className={`h-6 w-6 p-0 ${fitMode ? 'bg-slate-200 text-slate-900' : ''}`}
+                    className={`h-6 w-6 p-0 rounded flex items-center justify-center transition-colors
+                        ${fitMode
+                          ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+                          : 'text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                        }`}
                 >
                     <Maximize2 className="h-4 w-4" />
-                </Button>
+                </button>
             </div>
             <div
                 ref={svgContainerRef}

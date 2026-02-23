@@ -137,11 +137,11 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-gray-50 text-gray-900 ${className}`}>
+    <div id="style-editor-root" className={`flex flex-col h-full bg-gray-50 text-gray-900 ${className}`}>
 
       {/* Navbar */}
       {!hideHeader && (
-        <header className="flex-none bg-white border-b border-gray-200 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-20">
+        <header id="style-editor-toolbar" className="flex-none bg-white border-b border-gray-200 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <div className="flex">
               <h1 className="text-xl font-bold tracking-tight text-gray-900 leading-tight">Style Editor</h1>
@@ -221,42 +221,34 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
       )}
 
       {/* Content Area */}
-      <main className="flex-1 overflow-y-auto p-4">
+      <main id="style-editor-content" className="flex-1 overflow-y-auto p-4">
 
         {viewMode === ViewMode.GRID && (
-          <div
-            className="p-4"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(4rem, 1fr))',
-              gap: '0.75rem',
-            }}
-          >
+          <div id="style-editor-gallery" className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(15em, 1fr))' }}>
             {styles.map(style => (
-              <StylePreviewCard
-                key={style.id}
-                styleDef={style}
-                shape={currentShape}
-                onClick={() => handleEditClick(style)}
-              />
+              <div key={style.id} className="bg-slate-100 rounded-lg p-1.5">
+                <StylePreviewCard
+                  styleDef={style}
+                  shape={currentShape}
+                  onClick={() => handleEditClick(style)}
+                />
+              </div>
             ))}
             {/* Add New */}
             {!hideNewButton && (
               <button
                 onClick={handleCreateNew}
-                className="group w-16 flex flex-col items-center gap-1 cursor-pointer select-none"
+                className="group bg-slate-100 rounded-lg aspect-square flex flex-col items-center justify-center gap-1 cursor-pointer select-none border-2 border-dashed border-slate-300 hover:border-violet-400 hover:bg-violet-50 transition-colors"
               >
-                <div className="w-full aspect-square border-2 border-dashed border-gray-200 rounded group-hover:border-blue-400 transition-colors flex items-center justify-center text-gray-300 group-hover:text-blue-400">
-                  <Plus size={20} />
-                </div>
-                <span className="text-[10px] font-mono text-gray-300 group-hover:text-blue-500 transition-colors">new</span>
+                <Plus size={20} className="text-slate-400 group-hover:text-violet-500 transition-colors" />
+                <span className="text-[10px] font-mono text-slate-400 group-hover:text-violet-500 transition-colors">nuevo</span>
               </button>
             )}
           </div>
         )}
 
         {viewMode === ViewMode.CODE && (
-          <div className="max-w-4xl mx-auto">
+          <div id="style-editor-code-view" className="max-w-4xl mx-auto">
             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
                 <span className="text-xs font-mono text-gray-400">generated-styles.css</span>
@@ -275,10 +267,12 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
         )}
 
         {viewMode === ViewMode.ANIMATIONS && (
-          <KeyframeEditor
-            keyframes={keyframes}
-            onUpdate={setKeyframes}
-          />
+          <div id="style-editor-animations-view">
+            <KeyframeEditor
+              keyframes={keyframes}
+              onUpdate={setKeyframes}
+            />
+          </div>
         )}
       </main>
 

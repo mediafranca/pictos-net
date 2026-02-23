@@ -100,6 +100,30 @@ const DEFAULT_CONFIG: VectorizerConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// Vectorizer result types
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured result returned by the public vectorizeBitmap() API.
+ */
+export interface VectorizerResult {
+    svg: string;
+    warnings: string[];
+    layersTraced: number;
+    layersTotal: number;
+    tiersUsed: number;   // 1, 2, or 3 — how many fallback tiers were needed
+    usedConfig: VectorizerConfig;
+}
+
+/** Internal result shared between trace functions. */
+interface InternalResult {
+    svg: string;
+    warnings: string[];
+    layersTraced: number;
+    layersTotal: number;
+}
+
+// ---------------------------------------------------------------------------
 // Image utilities
 // ---------------------------------------------------------------------------
 
@@ -135,6 +159,36 @@ async function base64ToImageData(base64: string): Promise<ImageData> {
         };
 
         img.onerror = () => reject(new Error('Failed to load image from Base64'));
+        img.src = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+    });
+}
+
+/**
+ * Downscale a Base64 PNG so neither dimension exceeds maxDim.
+ * Returns the original string unchanged if already within bounds.
+ * Prevents OOM panics in WASM when processing large bitmaps.
+ */
+async function downscaleBitmapIfNeeded(base64: string, maxDim = 1024): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const { width, height } = img;
+            if (width <= maxDim && height <= maxDim) {
+                resolve(base64);
+                return;
+            }
+            const scale = maxDim / Math.max(width, height);
+            const newW = Math.round(width * scale);
+            const newH = Math.round(height * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = newW;
+            canvas.height = newH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { resolve(base64); return; }
+            ctx.drawImage(img, 0, 0, newW, newH);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => reject(new Error('Failed to load image for downscaling'));
         img.src = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
     });
 }
@@ -354,7 +408,15 @@ async function traceLayer(
             converter.init();
             const tick = () => {
                 try {
-                    const done = converter.tick();
+                    let done: boolean;
+                    try {
+                        done = converter.tick();
+                    } catch (tickErr) {
+                        // Catch WASM unreachable traps (e.g. "parallel lines" spline panic)
+                        // and rethrow with a recognizable prefix so callers can fallback.
+                        const msg = tickErr instanceof Error ? tickErr.message : String(tickErr);
+                        throw new Error(`WASM_PARALLEL_PANIC: ${msg}`);
+                    }
                     if (!done) {
                         setTimeout(tick, 0);
                     } else {
@@ -382,7 +444,7 @@ async function vectorizeBitmapInternal(
     base64Png: string,
     config: VectorizerConfig,
     onProgress?: (progress: number) => void
-): Promise<string> {
+): Promise<InternalResult> {
     const imageData = await base64ToImageData(base64Png);
     const { width, height } = imageData;
 
@@ -412,7 +474,13 @@ async function vectorizeBitmapInternal(
             converter.init();
             const tick = () => {
                 try {
-                    const done = converter.tick();
+                    let done: boolean;
+                    try {
+                        done = converter.tick();
+                    } catch (tickErr) {
+                        const msg = tickErr instanceof Error ? tickErr.message : String(tickErr);
+                        throw new Error(`WASM_PARALLEL_PANIC: ${msg}`);
+                    }
                     if (onProgress) onProgress(Math.round(converter.progress() * 100));
                     if (!done) {
                         setTimeout(tick, 0);
@@ -420,7 +488,7 @@ async function vectorizeBitmapInternal(
                         const result = converter.getResult();
                         try { converter.free(); } catch (e) { console.warn('Free error:', e); }
                         // vtracer does not set viewBox — inject it from image dimensions
-                        resolve(ensureViewBox(result, width, height));
+                        resolve({ svg: ensureViewBox(result, width, height), warnings: [], layersTraced: 1, layersTotal: 1 });
                     }
                 } catch (err) {
                     try { converter.free(); } catch { /* ignore */ }
@@ -459,7 +527,7 @@ async function vectorizeBitmapMulticolor(
     base64Png: string,
     config: VectorizerConfig,
     onProgress?: (progress: number) => void
-): Promise<string> {
+): Promise<InternalResult> {
     const imageData = await base64ToImageData(base64Png);
     const { width, height } = imageData;
 
@@ -484,6 +552,8 @@ async function vectorizeBitmapMulticolor(
 
     const colors = Array.from(colorLayers.values());
     const allPaths: string[] = [];
+    const warnings: string[] = [];
+    let layersTraced = 0;
 
     for (let ci = 0; ci < colors.length; ci++) {
         const { hex, r, g, b } = colors[ci];
@@ -493,8 +563,11 @@ async function vectorizeBitmapMulticolor(
             const layerSvg = await traceLayer(mask, hex, config);
             const paths = extractPathElements(layerSvg);
             allPaths.push(...paths);
+            layersTraced++;
         } catch (err) {
-            console.warn(`[vtracer] Failed to trace color layer ${hex}:`, err);
+            const msg = `Layer ${hex} skipped: ${err instanceof Error ? err.message : String(err)}`;
+            console.warn(`[vtracer] ${msg}`);
+            warnings.push(msg);
         }
 
         if (onProgress) onProgress(Math.round(((ci + 1) / colors.length) * 100));
@@ -507,11 +580,12 @@ async function vectorizeBitmapMulticolor(
     }
 
     // viewBox exactly matches the source bitmap pixel dimensions
-    return [
+    const svg = [
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
         ...allPaths,
         '</svg>',
     ].join('\n');
+    return { svg, warnings, layersTraced, layersTotal: colors.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -521,12 +595,11 @@ async function vectorizeBitmapMulticolor(
 /**
  * Convert a bitmap image (Base64 PNG) to a color SVG using vtracer WASM.
  *
- * Uses per-color-layer tracing to preserve flat colors. Falls back to
- * binary (black) tracing when the image has no foreground colors or more
- * than 16 distinct colors (photo-like input).
- *
- * The output SVG always has a viewBox matching the input image pixel
- * dimensions (0 0 width height).
+ * Automatically downscales bitmaps larger than 1024px to prevent WASM OOM panics.
+ * Implements a 3-tier fallback chain:
+ *   1. Try with requested config
+ *   2. On WASM panic → retry with colorMode:'bw' (single layer)
+ *   3. On still failing → retry with colorMode:'bw', filterSpeckle:16, mode:'polygon'
  *
  * @param base64Png  - Base64 PNG (with or without data URL prefix)
  * @param config     - Optional vectorization configuration
@@ -536,39 +609,72 @@ export async function vectorizeBitmap(
     base64Png: string,
     config: Partial<VectorizerConfig> = {},
     onProgress?: (progress: number) => void
-): Promise<string> {
-    const finalConfig = { ...DEFAULT_CONFIG, ...config };
+): Promise<VectorizerResult> {
+    const finalConfig: VectorizerConfig = { ...DEFAULT_CONFIG, ...config };
 
-    // colorMode: 'bw' skips per-layer color tracing entirely
+    // Downscale large images to prevent WASM OOM panics
+    const safeBase64 = await downscaleBitmapIfNeeded(base64Png);
+
     const traceFn = finalConfig.colorMode === 'bw'
         ? vectorizeBitmapInternal
         : vectorizeBitmapMulticolor;
 
+    // Tier 1: Try requested config
+    let tier1Error: unknown;
     try {
-        return await traceFn(base64Png, finalConfig, onProgress);
+        const result = await traceFn(safeBase64, finalConfig, onProgress);
+        return { ...result, tiersUsed: 1, usedConfig: finalConfig };
     } catch (error) {
-        // If polygon mode failed, retry with spline as fallback
-        if (finalConfig.mode === 'polygon') {
-            console.warn('[vtracer] Polygon mode failed, retrying with spline...', error);
-            const fallbackConfig = { ...finalConfig, mode: 'spline' as const };
-            if (onProgress) onProgress(0);
-            return await traceFn(base64Png, fallbackConfig, onProgress);
-        }
-        throw error;
+        tier1Error = error;
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn('[vtracer] Tier 1 failed:', msg);
     }
+
+    // Tier 2: if WASM_PARALLEL_PANIC or spline mode → retry with polygon (same colorMode)
+    const isParallelPanic = tier1Error instanceof Error && tier1Error.message.includes('WASM_PARALLEL_PANIC');
+    const wasSpline = finalConfig.mode === 'spline';
+    if (isParallelPanic || wasSpline) {
+        const tier2Config: VectorizerConfig = { ...finalConfig, mode: 'polygon' };
+        try {
+            if (onProgress) onProgress(0);
+            console.warn('[vtracer] Tier 2: retrying with mode:polygon');
+            const result = await traceFn(safeBase64, tier2Config, onProgress);
+            return {
+                ...result,
+                tiersUsed: 2,
+                usedConfig: tier2Config,
+                warnings: [...result.warnings, 'Tier 1 failed (parallel lines) — fell back to polygon mode'],
+            };
+        } catch (error) {
+            console.warn('[vtracer] Tier 2 failed:', error instanceof Error ? error.message : error);
+        }
+    }
+
+    // Tier 3: Coarsest settings — polygon + bw + coarse speckle filter
+    const tier3Config: VectorizerConfig = { ...finalConfig, mode: 'polygon', colorMode: 'bw', filterSpeckle: 16 };
+    if (onProgress) onProgress(0);
+    console.warn('[vtracer] Tier 3: retrying with polygon + B&W + filterSpeckle:16');
+    const result = await vectorizeBitmapInternal(safeBase64, tier3Config, onProgress);
+    return {
+        ...result,
+        tiersUsed: 3,
+        usedConfig: tier3Config,
+        warnings: [...result.warnings, 'Tiers 1 & 2 failed — fell back to coarse B&W polygon mode'],
+    };
 }
 
 /**
  * Vectorize with a simple preset for pictograms
  */
 export async function vectorizePictogram(base64Png: string): Promise<string> {
-    return vectorizeBitmap(base64Png, {
+    const result = await vectorizeBitmap(base64Png, {
         mode: 'polygon',
         filterSpeckle: 6,
         cornerThreshold: 45,
         lengthThreshold: 3.0,
         pathPrecision: 2,
     });
+    return result.svg;
 }
 
 /**

@@ -137,4 +137,14 @@ export type TranslationKey =
   | 'svg.editorLayers'
   | 'svg.editorStylePanel'
   | 'svg.editorSave'
-  | 'svg.editorExport';
+  | 'svg.editorExport'
+  | 'svg.structureTooltip'
+  | 'svg.structuring'
+  | 'svg.structureDone'
+  | 'svg.structureLabel'
+  | 'vectorizer.preview'
+  | 'vectorizer.retrace'
+  | 'vectorizer.apply'
+  | 'vectorizer.adjustTrace'
+  | 'vectorizer.warnings'
+  | 'vectorizer.layersTraced';

@@ -2,6 +2,9 @@
 > Mapa estructural de la interfaz. Fuente de verdad para todos los IDs semánticos.
 > Actualizar este archivo siempre que se cree, renombre o elimine una región de la UI.
 
+> Última actualización: 2026-02-23
+> Cobertura: ~85% (estimado post-tarea)
+
 ## Estado de los IDs
 - ✅ Implementado
 - 🔲 Pendiente (el elemento existe pero sin ID semántico)
@@ -99,8 +102,45 @@ APP-SHELL (#app-shell) ✅[via div.min-h-screen]
     │   ├── modo: visual → ElementsEditor + PromptRenderer
     │   ├── modo: bitmap → imagen full
     │   └── modo: eval → layout 2-col (imagen + SVGGenerator)
-    ├── StyleEditor 🔲                [fullscreen modal]
-    ├── SVGEditorModal 🔲             [modal SVG editor]
+    ├── StyleEditor [#style-editor-root] ✅   [modal: Editor de Estilos CSS]
+    │   ├── #style-editor-toolbar ✅          [selector de forma + vista + export]
+    │   ├── #style-editor-content ✅          [área principal overflow-y-auto]
+    │   ├── #style-editor-gallery ✅          [auto-fill grid, StylePreviewCard × N]
+    │   ├── #style-editor-code-view ✅        [vista CSS raw, condicional]
+    │   ├── #style-editor-animations-view ✅  [vista de animaciones, condicional]
+    │   └── EditModal [#style-edit-modal] ✅  [sub-modal de edición/creación]
+    │       ├── #style-edit-modal-backdrop ✅  [overlay con blur]
+    │       ├── #style-edit-modal-header ✅    [título + botón cerrar]
+    │       ├── #style-edit-modal-selectors ✅ [input de selectores CSS]
+    │       ├── #style-edit-modal-properties ✅ [lista de propiedades fill/stroke/etc]
+    │       ├── #style-edit-modal-preview ✅   [previsualización de formas]
+    │       └── #style-edit-modal-footer ✅    [Cancelar + Guardar]
+    │
+    ├── SVGEditorModal [#svg-editor-modal] ✅ [fullscreen modal editor SVG]
+    │   ├── #svg-editor-container ✅          [bg-slate-900, w-full h-full]
+    │   ├── #svg-editor-header ✅             [h-16, bg-slate-800]
+    │   │   └── #svg-editor-history-controls ✅ [undo/redo]
+    │   ├── #svg-editor-tree-panel ✅         [aside w-80, izquierda]
+    │   │   ├── #svg-editor-tree-header ✅    [label "Capas y estructura"]
+    │   │   └── #svg-editor-tree-content ✅   [overflow-y-auto]
+    │   │       └── SemanticTree [#svg-editor-tree] ✅
+    │   │           └── TreeNode [#tree-node-{id}] ✅  [por cada elemento]
+    │   ├── #svg-editor-canvas ✅             [main, flex-1]
+    │   │   └── SVGCanvas                    [zoom controls, bounding box]
+    │   └── #svg-editor-properties-panel ✅  [aside w-80, derecha]
+    │       ├── #svg-editor-props-empty ✅    [cuando no hay selección]
+    │       ├── #svg-editor-props-content ✅  [cuando hay elemento seleccionado]
+    │       │   ├── #svg-editor-props-header ✅
+    │       │   ├── #svg-editor-props-styles ✅   [galería StylePreviewCard × N]
+    │       │   ├── #svg-editor-props-inline ✅   [condicional: estilos hardcodeados]
+    │       │   ├── #svg-editor-props-identity ✅ [RenameField]
+    │       │   └── #svg-editor-props-danger ✅   [DeleteButton]
+    │
+    ├── VectorizerModal ✅            [modal vectorizador bitmap→SVG]
+    │   ├── #vectorizer-modal         [fixed inset-0 z-[50], dark backdrop]
+    │   ├── #vectorizer-controls      [w-72, panel izq: segmented controls + actions]
+    │   ├── #vectorizer-original      [flex-1, imagen bitmap original]
+    │   └── #vectorizer-result        [flex-1, SVG result dangerouslySetInnerHTML]
     └── ConfirmDialog 🔲              [modal genérico confirmación]
 ```
 

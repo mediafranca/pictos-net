@@ -82,7 +82,7 @@ function TreeNode({
     };
 
     return (
-        <div className="select-none">
+        <div id={`tree-node-${node.id}`} className="select-none">
             <div
                 className={`group flex items-center gap-2 px-3 py-2 hover:bg-slate-100 cursor-grab active:cursor-grabbing transition-colors ${dragIndicator} ${isSelected ? 'bg-slate-100' : ''
                     }`}
@@ -159,7 +159,17 @@ function TreeNode({
                     </div>
                 ) : (
                     <>
-                        <span className="text-xs font-semibold text-slate-900">{node.id}</span>
+                        <span
+                            className="text-xs font-semibold text-slate-900 cursor-text"
+                            onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setIsEditingId(true);
+                                setEditedId(node.id);
+                            }}
+                            title="Doble click para renombrar"
+                        >
+                            {node.id}
+                        </span>
                         {classText && (
                             <span className="text-[11px] text-slate-500 truncate">{classText}</span>
                         )}
@@ -378,7 +388,7 @@ export default function SemanticTree() {
     }
 
     return (
-        <div id="panel-semantic-tree" className="py-2">
+        <div id="svg-editor-tree" className="py-2">
             {visualGroups.length === 0 ? (
                 <div className="p-4 text-center text-sm text-slate-500">
                     <p>No visual elements found</p>

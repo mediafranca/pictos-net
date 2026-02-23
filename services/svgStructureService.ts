@@ -286,18 +286,43 @@ ${css}
 ${JSON.stringify(elements, null, 2)}
 \`\`\`
 
-**GROUPING STRATEGY (USE THE IMAGE!):**
-1. Look at the PROVIDED IMAGE to see what the pictogram shows
-2. Look at the HIERARCHICAL ELEMENTS to know what elements should exist (e.g., "persona", "vaso")
-3. For each element in the hierarchy:
-   - Identify which part of the IMAGE it represents
-   - Find the SVG paths that draw that same part
-   - Group those paths together in a <g> element with the correct concept ID
-4. Visual cues in the IMAGE:
-   - Agents (usually "persona", "niño", etc.) = human/animal figures
-   - Patients/Objects (usually nouns) = things being acted upon
-   - Context elements = background or secondary objects
-5. If an element is in the hierarchy but not clearly visible, mark it as implicit
+**GROUPING STRATEGY — THE ELEMENT HIERARCHY IS YOUR STRUCTURE:**
+
+The HIERARCHICAL ELEMENTS provided define the exact group structure the SVG must have.
+This is not a suggestion — it is the required DOM outline.
+
+Process:
+1. The root level of the SVG body contains one <g> per top-level element in the hierarchy.
+2. If a hierarchy element has children, its <g> contains nested <g> elements for each child.
+3. The id of each <g> must match the element id in the hierarchy (e.g., id="persona", id="vaso_agua").
+4. Look at the IMAGE to identify which SVG paths visually belong to each element.
+5. Place those paths inside the corresponding <g>.
+6. Paths that don't clearly belong to any named element go into a <g id="context" class="f"> group.
+7. NEVER leave paths outside of a named group.
+
+Example: if the hierarchy is:
+  - persona
+    - cabeza
+    - cuerpo
+  - vaso_agua
+
+The SVG body must be:
+<g id="persona" class="k" role="group" ...>
+  <g id="cabeza" role="group" ...> ... paths ... </g>
+  <g id="cuerpo" role="group" ...> ... paths ... </g>
+</g>
+<g id="vaso_agua" class="f" role="group" ...> ... paths ... </g>
+
+**OPTIONAL VISUAL IMPROVEMENT:**
+If the raw SVG has obvious artifacts from the vectorization process (e.g., excessive
+micro-paths smaller than 5px, redundant overlapping paths, fragmented contours that
+should be a single shape), you may:
+- Omit micro-paths (paths with very small bounding boxes that represent noise)
+- Merge visually fragmented contours of the same color into a single <path>
+  by combining their 'd' attributes using SVG subpath notation (M ... Z M ... Z)
+
+Do NOT simplify or alter paths that are clearly meaningful visual elements.
+When in doubt, preserve the original path data exactly.
 
 **CRITICAL RULES:**
 1. Output ONLY the complete SVG, no explanation
@@ -305,7 +330,14 @@ ${JSON.stringify(elements, null, 2)}
 3. Every path must be inside a semantic <g> group
 4. The metadata JSON must be exactly as provided (inside <metadata> tags)
 5. Remove any path fill/stroke attributes and rely on CSS classes
-6. Maintain proper SVG structure and valid XML`;
+6. Maintain proper SVG structure and valid XML
+7. NEVER use fill, stroke, stroke-width, or style attributes on <path>, <rect>,
+   <circle>, or <ellipse> elements. These MUST be removed entirely.
+8. Apply visual classes ONLY on <g> group elements, not on individual paths.
+   Use class="k" for Agents (key/foreground) and class="f" for secondary elements.
+   This ensures CSS from <defs><style> controls all visual appearance.
+9. A single <g> may combine multiple semantic sub-elements. The class should
+   reflect the semantic role of the entire group, not individual paths.`;
 }
 
 /**
@@ -396,18 +428,19 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
                         }
                     },
                     {
-                        text: `**ORIGINAL PICTOGRAM IMAGE ABOVE** - This is your PRIMARY visual reference.
+                        text: `**ORIGINAL PICTOGRAM IMAGE ABOVE** — Primary visual reference.
 
-**HIERARCHICAL ELEMENTS YOU MUST FIND IN THE IMAGE:**
+**REQUIRED GROUP STRUCTURE (from hierarchy — this defines the SVG DOM outline):**
 ${formatElements(input.elements)}
 
-**RAW SVG GEOMETRY (paths you need to group):**
+**CSS STYLESHEET (classes to apply at group level, NEVER on individual paths):**
+The stylesheet is in the system instruction. Valid classes: "k" (key/agent), "f" (secondary).
+
+**RAW SVG GEOMETRY (paths to distribute into the groups above):**
 ${input.rawSvg}
 
-**INSTRUCTIONS:**
-Look at the IMAGE carefully and identify where each element appears visually.
-Then, group the corresponding SVG paths into semantic <g> groups according to the mf-svg-schema specification.
-Output ONLY the complete, restructured SVG file - no explanation.`
+Distribute each path into its correct semantic group. Output ONLY the complete
+restructured SVG — no explanation, no markdown, no code fences.`
                     }
                 ]
             },

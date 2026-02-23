@@ -24,6 +24,8 @@ import { INITIAL_STYLES } from './lib/style-editor/lib/constants';
 import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
 import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
+import { VectorizerModal } from './components/VectorizerModal';
+import type { VectorizerResult } from './services/vtracerService';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -150,7 +152,7 @@ const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, toolt
 
 const App: React.FC = () => {
   const { t, lang, setLang } = useTranslation();
-  const { svgs, exportSVGs, importSVGs, clearLibrary } = useSVGLibrary();
+  const { svgs, exportSVGs, importSVGs, clearLibrary, addSVG } = useSVGLibrary();
   const [rows, setRows] = useState<RowData[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showConsole, setShowConsole] = useState(false);
@@ -202,6 +204,11 @@ const App: React.FC = () => {
     rowIndex: null,
     svg: null
   });
+
+  const [vectorizerState, setVectorizerState] = useState<{
+    isOpen: boolean;
+    rowIndex: number | null;
+  }>({ isOpen: false, rowIndex: null });
 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -840,6 +847,21 @@ const App: React.FC = () => {
       structuredSvg: updatedSvg,
     });
 
+    // Also update the SVG Library so SVGGenerator reflects the change immediately
+    const savedRow = rows[svgEditorState.rowIndex];
+    if (savedRow) {
+      addSVG({
+        id: savedRow.id,
+        utterance: savedRow.UTTERANCE,
+        svg: updatedSvg,
+        createdAt: new Date().toISOString(),
+        sourceRowId: savedRow.id,
+        lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
+          ? (savedRow.NLU as any).lang
+          : undefined
+      });
+    }
+
     addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
 
     // Close modal
@@ -848,6 +870,16 @@ const App: React.FC = () => {
       rowIndex: null,
       svg: null
     });
+  };
+
+  const handleVectorizerApply = (result: VectorizerResult) => {
+    if (vectorizerState.rowIndex === null) return;
+    updateRow(vectorizerState.rowIndex, { rawSvg: result.svg });
+    addLog('success', `Vectorizado: ${result.layersTraced}/${result.layersTotal} capas (tier ${result.tiersUsed})`);
+    if (result.warnings.length > 0) {
+      result.warnings.forEach(w => addLog('info', w));
+    }
+    setVectorizerState({ isOpen: false, rowIndex: null });
   };
 
   const filteredRows = useMemo(() => {
@@ -1233,6 +1265,7 @@ const App: React.FC = () => {
                   onLog={addLog}
                   config={config}
                   onOpenEditor={() => openSVGEditor(globalIndex)}
+                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: globalIndex })}
                 />
               );
             })}
@@ -1285,6 +1318,18 @@ const App: React.FC = () => {
           initialSvg={svgEditorState.svg}
           utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
+          styleDefs={config.svgStyleDefs ?? []}
+        />
+      )}
+
+      {/* Vectorizer Modal */}
+      {vectorizerState.isOpen && vectorizerState.rowIndex !== null && (
+        <VectorizerModal
+          isOpen={vectorizerState.isOpen}
+          bitmap={rows[vectorizerState.rowIndex]?.bitmap || ''}
+          utterance={rows[vectorizerState.rowIndex]?.UTTERANCE || ''}
+          onClose={() => setVectorizerState({ isOpen: false, rowIndex: null })}
+          onApply={handleVectorizerApply}
         />
       )}
 
@@ -1445,7 +1490,8 @@ const RowComponent: React.FC<{
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
   onOpenEditor: () => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor }) => {
+  onOpenVectorizer: () => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -1625,6 +1671,7 @@ const RowComponent: React.FC<{
                       onLog={onLog}
                       onUpdate={onUpdate}
                       onOpenEditor={onOpenEditor}
+                      onOpenVectorizer={onOpenVectorizer}
                     />
                   </div>
                 )}

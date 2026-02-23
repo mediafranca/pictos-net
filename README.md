@@ -88,11 +88,23 @@ React 19 · TypeScript · Vite · Tailwind CSS · Zustand · Google Gemini API �
 
 ## Documentación
 
+### Arquitectura y desarrollo
+
 | Documento | Descripción |
 |---|---|
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitectura técnica detallada, modelos de datos, servicios |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitectura técnica, modelos de datos, servicios |
+| [docs/PIPELINE.md](./docs/PIPELINE.md) | Pipeline de generación paso a paso |
 | [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) | Guía de desarrollo, submodules, i18n, deployment |
 | [docs/SECURITY.md](./docs/SECURITY.md) | Gestión de API keys, consideraciones de seguridad |
+| [docs/PROMPT_MAESTRO.md](./docs/PROMPT_MAESTRO.md) | Prompt principal de Gemini documentado |
+
+### Interfaz de usuario
+
+| Documento | Descripción |
+|---|---|
+| [docs/UI_MAP.md](./docs/UI_MAP.md) | Mapa estructural de la UI: todos los IDs semánticos |
+| [docs/UI_CONVENTIONS.md](./docs/UI_CONVENTIONS.md) | Convenciones de diseño: colores, tipografía, z-index |
+| [docs/TUTORIAL.md](./docs/TUTORIAL.md) | Tutorial de uso paso a paso |
 
 ---
 
@@ -114,3 +126,12 @@ MediaFranca. https://pictos.net
 ---
 
 *Licencia: MIT (código) · CC-BY-4.0 (pictogramas generados)*
+
+---
+
+## Convención de interfaz
+
+La UI sigue una convención estricta de IDs semánticos documentada en
+[docs/UI_MAP.md](./docs/UI_MAP.md). Todo componente de región o sección principal
+debe tener un `id` semántico. Antes de modificar cualquier componente de interfaz,
+leer [docs/UI_CONVENTIONS.md](./docs/UI_CONVENTIONS.md).
