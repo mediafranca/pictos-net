@@ -32,12 +32,13 @@ type TraceState = 'idle' | 'tracing' | 'done' | 'error';
 // ---------------------------------------------------------------------------
 
 const DEFAULTS: Required<Pick<VectorizerConfig,
-    'mode' | 'colorMode' | 'colorPrecision' | 'gradientStep' |
+    'mode' | 'colorMode' | 'colorPrecision' | 'colorStep' | 'gradientStep' |
     'filterSpeckle' | 'cornerThreshold' | 'lengthThreshold' | 'spliceThreshold' | 'pathPrecision'
 >> = {
     mode: 'spline',
-    colorMode: 'auto',
+    colorMode: 'bw',
     colorPrecision: 4,
+    colorStep: 16,
     gradientStep: 16,
     filterSpeckle: 4,
     cornerThreshold: 60,
@@ -169,6 +170,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     const [mode, setMode] = useState<'polygon' | 'spline'>(initialConfig?.mode ?? DEFAULTS.mode);
     const [colorMode, setColorMode] = useState<'auto' | 'bw'>(initialConfig?.colorMode ?? DEFAULTS.colorMode);
     const [colorPrecision, setColorPrecision] = useState<number>(initialConfig?.colorPrecision ?? DEFAULTS.colorPrecision);
+    const [colorStep, setColorStep] = useState<number>(initialConfig?.colorStep ?? DEFAULTS.colorStep);
     const [gradientStep, setGradientStep] = useState<number>(initialConfig?.gradientStep ?? DEFAULTS.gradientStep);
     const [filterSpeckle, setFilterSpeckle] = useState<number>(initialConfig?.filterSpeckle ?? DEFAULTS.filterSpeckle);
     const [cornerThreshold, setCornerThreshold] = useState<number>(initialConfig?.cornerThreshold ?? DEFAULTS.cornerThreshold);
@@ -193,6 +195,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
             setMode(initialConfig?.mode ?? DEFAULTS.mode);
             setColorMode(initialConfig?.colorMode ?? DEFAULTS.colorMode);
             setColorPrecision(initialConfig?.colorPrecision ?? DEFAULTS.colorPrecision);
+            setColorStep(initialConfig?.colorStep ?? DEFAULTS.colorStep);
             setGradientStep(initialConfig?.gradientStep ?? DEFAULTS.gradientStep);
             setFilterSpeckle(initialConfig?.filterSpeckle ?? DEFAULTS.filterSpeckle);
             setCornerThreshold(initialConfig?.cornerThreshold ?? DEFAULTS.cornerThreshold);
@@ -205,9 +208,9 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
 
     // --- Current config snapshot ---
     const currentConfig = useCallback((): Partial<VectorizerConfig> => ({
-        mode, colorMode, colorPrecision, gradientStep,
+        mode, colorMode, colorStep, gradientStep,
         filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision,
-    }), [mode, colorMode, colorPrecision, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
+    }), [mode, colorMode, colorStep, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
 
     // --- Core trace function ---
     const runTrace = useCallback(async (cfg: Partial<VectorizerConfig>) => {
@@ -250,7 +253,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         debounceRef.current = setTimeout(() => runTrace(currentConfig()), 600);
         return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, colorMode, colorPrecision, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
+    }, [mode, colorMode, colorStep, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
 
     const handleRetrace = () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -336,12 +339,12 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <>
                                 <LabeledSlider
                                     label="Color Detail"
-                                    value={colorPrecision}
-                                    min={3} max={5} step={1}
+                                    value={52 - colorStep}
+                                    min={4} max={48} step={4}
                                     leftLabel="Fewer colors"
                                     rightLabel="More colors"
                                     disabled={isTracing}
-                                    onChange={setColorPrecision}
+                                    onChange={(v) => setColorStep(52 - v)}
                                 />
                                 <LabeledSlider
                                     label="Color Merging"

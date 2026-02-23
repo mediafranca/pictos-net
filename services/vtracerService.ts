@@ -56,6 +56,14 @@ export interface VectorizerConfig {
     colorPrecision?: number;
 
     /**
+     * Direct quantization step per RGB channel (4–64).
+     * Overrides colorPrecision when provided.
+     * Lower = more colors/layers; higher = fewer colors/layers.
+     * Default: undefined (colorPrecision is used instead)
+     */
+    colorStep?: number;
+
+    /**
      * Minimum Euclidean color distance between kept layers
      * (vtracer --gradient_step / layer_difference).
      * Layers closer than this to an already-kept layer are merged into it.
@@ -88,6 +96,7 @@ export interface VectorizerConfig {
  */
 const DEFAULT_CONFIG: VectorizerConfig = {
     mode: 'spline',           // Docs recommend spline for flat-color icons/posters
+    colorMode: 'bw',          // Default: single-layer binary trace (robust, fast)
     colorPrecision: 4,        // 4 bits = step 16 (matches vtracer 4-bit color precision)
     gradientStep: 16,         // Merge color layers within distance 16 (vtracer default)
     filterSpeckle: 4,         // vtracer default; 8 was too aggressive for thin lines
@@ -241,9 +250,10 @@ function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: numbe
 function extractColorLayers(
     imageData: ImageData,
     colorPrecision: number = 4,
-    gradientStep: number = 16
+    gradientStep: number = 16,
+    colorStep?: number
 ): Map<string, ColorLayer> {
-    const step = Math.round(256 / Math.pow(2, colorPrecision));
+    const step = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
     const { data } = imageData;
     const colorMap = new Map<string, ColorLayer>();
 
@@ -309,9 +319,10 @@ function createBinaryMask(
     imageData: ImageData,
     targetR: number, targetG: number, targetB: number,
     colorPrecision: number = 4,
-    gradientStep: number = 16
+    gradientStep: number = 16,
+    colorStep?: number
 ): ImageData {
-    const step = Math.round(256 / Math.pow(2, colorPrecision));
+    const step = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
     const { data, width, height } = imageData;
     const maskData = new Uint8ClampedArray(width * height * 4);
 
@@ -521,7 +532,7 @@ async function vectorizeBitmapInternal(
  * - >MAX_COLOR_LAYERS colors (photo-like input, too expensive to layer-trace).
  * - Extracted path count is 0 (unexpected vtracer output format).
  */
-const MAX_COLOR_LAYERS = 32;
+const MAX_COLOR_LAYERS = 7;
 
 async function vectorizeBitmapMulticolor(
     base64Png: string,
@@ -533,11 +544,13 @@ async function vectorizeBitmapMulticolor(
 
     const colorPrecision = config.colorPrecision ?? 4;
     const gradientStep   = config.gradientStep   ?? 16;
-    const colorLayers = extractColorLayers(imageData, colorPrecision, gradientStep);
+    const colorStep      = config.colorStep;
+    const effectiveStep  = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
+    const colorLayers = extractColorLayers(imageData, colorPrecision, gradientStep, colorStep);
 
     console.info(
         `[vtracer] ${colorLayers.size} color layer(s) detected`,
-        `(colorPrecision=${colorPrecision}→step${Math.round(256 / Math.pow(2, colorPrecision))}, gradientStep=${gradientStep}, image=${width}×${height})`,
+        `(step=${effectiveStep}, gradientStep=${gradientStep}, image=${width}×${height})`,
         Array.from(colorLayers.values()).map(c => `${c.hex}(${c.count}px)`)
     );
 
@@ -559,7 +572,7 @@ async function vectorizeBitmapMulticolor(
         const { hex, r, g, b } = colors[ci];
 
         try {
-            const mask = createBinaryMask(imageData, r, g, b, colorPrecision, gradientStep);
+            const mask = createBinaryMask(imageData, r, g, b, colorPrecision, gradientStep, colorStep);
             const layerSvg = await traceLayer(mask, hex, config);
             const paths = extractPathElements(layerSvg);
             allPaths.push(...paths);

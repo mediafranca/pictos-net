@@ -199,10 +199,12 @@ const App: React.FC = () => {
     isOpen: boolean;
     rowIndex: number | null;
     svg: string | null;
+    svgSource: 'raw' | 'structured' | null;
   }>({
     isOpen: false,
     rowIndex: null,
-    svg: null
+    svg: null,
+    svgSource: null,
   });
 
   const [vectorizerState, setVectorizerState] = useState<{
@@ -826,6 +828,7 @@ const App: React.FC = () => {
   const openSVGEditor = (index: number) => {
     const row = rows[index];
     const svgToEdit = row.structuredSvg || row.rawSvg;
+    const source = row.structuredSvg ? 'structured' : 'raw';
 
     if (!svgToEdit) {
       addLog('error', 'No hay SVG para editar. Primero vectoriza la imagen.');
@@ -835,41 +838,42 @@ const App: React.FC = () => {
     setSvgEditorState({
       isOpen: true,
       rowIndex: index,
-      svg: svgToEdit
+      svg: svgToEdit,
+      svgSource: source,
     });
     addLog('info', `Abriendo editor SVG para: ${row.UTTERANCE}`);
   };
 
   const handleSVGEditorSave = (updatedSvg: string) => {
     if (svgEditorState.rowIndex === null) return;
+    const source = svgEditorState.svgSource;
 
-    updateRow(svgEditorState.rowIndex, {
-      structuredSvg: updatedSvg,
-    });
+    // Write only to the origin field — do not promote rawSvg to structuredSvg
+    const update: Partial<RowData> = source === 'structured'
+      ? { structuredSvg: updatedSvg }
+      : { rawSvg: updatedSvg };
 
-    // Also update the SVG Library so SVGGenerator reflects the change immediately
-    const savedRow = rows[svgEditorState.rowIndex];
-    if (savedRow) {
-      addSVG({
-        id: savedRow.id,
-        utterance: savedRow.UTTERANCE,
-        svg: updatedSvg,
-        createdAt: new Date().toISOString(),
-        sourceRowId: savedRow.id,
-        lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
-          ? (savedRow.NLU as any).lang
-          : undefined
-      });
+    updateRow(svgEditorState.rowIndex, update);
+
+    // Only update the SVG Library for structured SVGs (the "official" pictogram)
+    if (source === 'structured') {
+      const savedRow = rows[svgEditorState.rowIndex];
+      if (savedRow) {
+        addSVG({
+          id: savedRow.id,
+          utterance: savedRow.UTTERANCE,
+          svg: updatedSvg,
+          createdAt: new Date().toISOString(),
+          sourceRowId: savedRow.id,
+          lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
+            ? (savedRow.NLU as any).lang
+            : undefined
+        });
+      }
     }
 
     addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
-
-    // Close modal
-    setSvgEditorState({
-      isOpen: false,
-      rowIndex: null,
-      svg: null
-    });
+    setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null });
   };
 
   const handleVectorizerApply = (result: VectorizerResult) => {
@@ -1314,7 +1318,7 @@ const App: React.FC = () => {
       {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowIndex !== null && (
         <SVGEditorModal
           isOpen={svgEditorState.isOpen}
-          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null })}
+          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null })}
           initialSvg={svgEditorState.svg}
           utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
