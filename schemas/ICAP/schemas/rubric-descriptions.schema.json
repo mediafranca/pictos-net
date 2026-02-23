@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vcsci.project/schemas/rubric-descriptions.schema.json",
+  "title": "VCSCI Rubric Scale Descriptions",
+  "description": "Schema for rubric scale operational definitions across all evaluation dimensions",
+  "type": "object",
+  "required": ["version", "scale", "dimensions"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of rubric definitions"
+    },
+    "description": {
+      "type": "string"
+    },
+    "scale": {
+      "type": "object",
+      "description": "General scale level definitions applicable across all dimensions",
+      "required": ["1", "2", "3", "4", "5"],
+      "properties": {
+        "1": { "$ref": "#/definitions/scaleLevel" },
+        "2": { "$ref": "#/definitions/scaleLevel" },
+        "3": { "$ref": "#/definitions/scaleLevel" },
+        "4": { "$ref": "#/definitions/scaleLevel" },
+        "5": { "$ref": "#/definitions/scaleLevel" }
+      },
+      "additionalProperties": false
+    },
+    "dimensions": {
+      "type": "object",
+      "description": "Dimension-specific scale descriptions",
+      "required": [
+        "clarity",
+        "recognizability",
+        "semantic_transparency",
+        "pragmatic_fit",
+        "cultural_adequacy",
+        "cognitive_accessibility"
+      ],
+      "properties": {
+        "clarity": { "$ref": "#/definitions/dimension" },
+        "recognizability": { "$ref": "#/definitions/dimension" },
+        "semantic_transparency": { "$ref": "#/definitions/dimension" },
+        "pragmatic_fit": { "$ref": "#/definitions/dimension" },
+        "cultural_adequacy": { "$ref": "#/definitions/dimension" },
+        "cognitive_accessibility": { "$ref": "#/definitions/dimension" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "scaleLevel": {
+      "type": "object",
+      "required": ["label", "label_en", "general", "general_en"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Label in Spanish"
+        },
+        "label_en": {
+          "type": "string",
+          "description": "Label in English"
+        },
+        "general": {
+          "type": "string",
+          "description": "General description in Spanish"
+        },
+        "general_en": {
+          "type": "string",
+          "description": "General description in English"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dimension": {
+      "type": "object",
+      "required": ["name", "name_es", "description", "description_es", "levels"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Dimension name in English"
+        },
+        "name_es": {
+          "type": "string",
+          "description": "Dimension name in Spanish"
+        },
+        "description": {
+          "type": "string",
+          "description": "Dimension operational definition in English"
+        },
+        "description_es": {
+          "type": "string",
+          "description": "Dimension operational definition in Spanish"
+        },
+        "levels": {
+          "type": "object",
+          "required": ["1", "2", "3", "4", "5"],
+          "properties": {
+            "1": { "$ref": "#/definitions/levelDescription" },
+            "2": { "$ref": "#/definitions/levelDescription" },
+            "3": { "$ref": "#/definitions/levelDescription" },
+            "4": { "$ref": "#/definitions/levelDescription" },
+            "5": { "$ref": "#/definitions/levelDescription" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "levelDescription": {
+      "type": "object",
+      "required": ["text", "text_en"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Dimension-specific description for this level in Spanish",
+          "minLength": 10
+        },
+        "text_en": {
+          "type": "string",
+          "description": "Dimension-specific description for this level in English",
+          "minLength": 10
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

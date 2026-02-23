@@ -11,11 +11,10 @@ Bienvenido a la documentación completa de PICTOS.NET. Aquí encontrarás toda l
 Guía paso a paso en castellano sobre cómo usar PICTOS.NET.
 
 **Contenido:**
-- Primeros pasos (cargar ICAP-50, importar frases)
+- Primeros pasos (cargar vocabulario ejemplo, importar frases)
 - Configuración del espacio (prompt general, geo-context, modelos)
 - Generación en cascada vs paso por paso
 - Edición y regeneración de pasos intermedios
-- Evaluación ICAP (6 dimensiones)
 - Gestión de biblioteca SVG
 - Consejos y buenas prácticas
 
@@ -69,8 +68,8 @@ Políticas de seguridad y consideraciones importantes.
 ### Esquemas de Investigación (Git Submodules)
 
 - **[NLU Schema](https://github.com/mediafranca/nlu-schema)** - Análisis lingüístico basado en NSM
-- **[ICAP](https://github.com/mediafranca/ICAP)** - Visual Communication Semiotic Construction Index
 - **[MF-SVG Schema](https://github.com/mediafranca/mf-svg-schema)** - Esquema para pictogramas vectoriales estructurados
+- **[ICAP](https://github.com/mediafranca/ICAP)** - Protocolo de evaluación de accesibilidad visual (repositorio independiente MediaFranca)
 
 
 ## Estructura de esta Carpeta
@@ -100,9 +99,9 @@ docs/
 3. Sigue la [Guía de Contribución](CONTRIBUTING.md) para setup del entorno
 4. Lee [SECURITY.md](SECURITY.md) antes de trabajar con API keys
 
-### 🔬 Investigador/Lingüista
+### Investigador / Lingüista
 1. Lee el [README principal](../README.md), sección Filosofía del Proyecto
-2. Explora los esquemas externos (NLU Schema, ICAP, MF-SVG)
+2. Explora los esquemas externos (NLU Schema, MF-SVG)
 3. Usa el [Tutorial](TUTORIAL.md) para generar corpus de pictogramas
 4. Consulta [ARCHITECTURE.md](ARCHITECTURE.md) para detalles del pipeline NSM
 

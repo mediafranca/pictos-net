@@ -1,0 +1,212 @@
+{
+  "$schema": "../schemas/rubric-descriptions.schema.json",
+  "version": "1.0.0",
+  "description": "Operational definitions for VCSCI evaluation rubric scale levels across all dimensions",
+  "scale": {
+    "5": {
+      "label_es": "Excelente",
+      "label_en": "Excellent",
+      "general_es": "No necesita mejoras. Listo para uso inmediato.",
+      "general_en": "No improvements needed. Ready for immediate use.",
+      "color": "#16a34a"
+    },
+    "4": {
+      "label_es": "Bien",
+      "label_en": "Good",
+      "general_es": "Funciona bien, pero se puede mejorar. Mejoras menores opcionales.",
+      "general_en": "Works well, but can be improved. Minor improvements optional.",
+      "color": "#84cc16"
+    },
+    "3": {
+      "label_es": "Funciona",
+      "label_en": "Works",
+      "general_es": "Funciona pero requiere mejoras. Cumple mínimo para AAC.",
+      "general_en": "Works but requires improvements. Meets minimum for AAC.",
+      "color": "#ffd93d"
+    },
+    "2": {
+      "label_es": "Insuficiente",
+      "label_en": "Insufficient",
+      "general_es": "No apto para público general. Necesita mejoras significativas.",
+      "general_en": "Not suitable for general public. Needs significant improvements.",
+      "color": "#ea580c"
+    },
+    "1": {
+      "label_es": "No funcional",
+      "label_en": "Not Functional",
+      "general_es": "No funciona. Necesita repensarse completamente desde cero.",
+      "general_en": "Does not work. Needs to be completely rethought from scratch.",
+      "color": "#dc2626"
+    }
+  },
+  "dimensions": {
+    "clarity": {
+      "name_es": "Claridad",
+      "name_en": "Clarity",
+      "description_es": "El grado en que el pictograma es visualmente claro, legible y libre de ambigüedad visual.",
+      "description_en": "The degree to which the pictogram is visually clear, legible, and free from visual ambiguity.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma tiene líneas nítidas y limpias sin artefactos visuales. El contraste es alto y los elementos se distinguen inmediatamente. No hay ruido visual. Escala perfectamente a cualquier tamaño. La calidad técnica es profesional y lista para uso en producción.",
+          "text_en": "The pictogram has sharp, clean lines without visual artifacts. Contrast is high and elements are immediately distinguishable. No visual noise. Scales perfectly to any size. Technical quality is professional and production-ready."
+        },
+        "4": {
+          "text_es": "El pictograma es visualmente claro con contraste adecuado. Puede tener detalles menores que podrían simplificarse, pero no afectan la legibilidad. Es legible en la mayoría de tamaños. La calidad técnica es buena con imperfecciones mínimas que no impactan el uso.",
+          "text_en": "The pictogram is visually clear with adequate contrast. May have minor details that could be simplified, but they don't affect legibility. Readable at most sizes. Technical quality is good with minimal imperfections that don't impact use."
+        },
+        "3": {
+          "text_es": "El pictograma es generalmente claro pero tiene algunos problemas menores. El contraste es adecuado en la mayoría de contextos. Algunos detalles no esenciales están presentes. Es legible en tamaños típicos de dispositivos AAC. Hay imperfecciones técnicas menores pero funciona para comunicación básica.",
+          "text_en": "The pictogram is generally clear but has some minor issues. Contrast is adequate in most contexts. Some non-essential details are present. Readable at typical AAC device sizes. Minor technical imperfections but works for basic communication."
+        },
+        "2": {
+          "text_es": "El pictograma tiene problemas de claridad que dificultan su uso. El contraste es bajo en varios contextos. Hay elementos confusos o detalles excesivos. La legibilidad es comprometida en algunos tamaños. Los problemas técnicos son evidentes y afectan la usabilidad para el público general.",
+          "text_en": "The pictogram has clarity issues that hinder its use. Contrast is low in several contexts. Contains confusing elements or excessive details. Legibility is compromised at some sizes. Technical problems are evident and affect usability for the general public."
+        },
+        "1": {
+          "text_es": "El pictograma es borroso, pixelado o de baja calidad. El contraste es pobre y es difícil distinguir elementos. Está saturado con detalles excesivos. Es ilegible cuando se escala. Hay problemas técnicos mayores. No es apto para uso en AAC y necesita rediseñarse completamente.",
+          "text_en": "The pictogram is blurry, pixelated, or low quality. Contrast is poor and elements are hard to distinguish. Saturated with excessive details. Illegible when scaled. Major technical problems. Not suitable for AAC use and needs complete redesign."
+        }
+      }
+    },
+    "recognizability": {
+      "name_es": "Reconocibilidad",
+      "name_en": "Recognizability",
+      "description_es": "La facilidad con la que un observador puede identificar lo que representa el pictograma sin contexto adicional o explicación.",
+      "description_en": "The ease with which a viewer can identify what the pictogram represents without additional context or explanation.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma es instantáneamente reconocible por cualquier persona sin necesidad de contexto adicional. Representa el concepto de forma inequívoca utilizando convenciones visuales universales. No requiere etiqueta de texto. Coincide perfectamente con estándares AAC existentes como ARASAAC o PCS. La interpretación es única y clara.",
+          "text_en": "The pictogram is instantly recognizable by anyone without need for additional context. Represents the concept unambiguously using universal visual conventions. No text label needed. Perfectly matches existing AAC standards like ARASAAC or PCS. Interpretation is unique and clear."
+        },
+        "4": {
+          "text_es": "El pictograma es fácilmente reconocible tras una observación breve. La representación es clara y utiliza elementos visuales convencionales. Puede tener una interpretación alternativa menor pero el significado principal es evidente. Es consistente con convenciones AAC. Funciona bien sin contexto adicional en la mayoría de situaciones.",
+          "text_en": "The pictogram is easily recognizable after brief observation. Representation is clear and uses conventional visual elements. May have a minor alternative interpretation but main meaning is evident. Consistent with AAC conventions. Works well without additional context in most situations."
+        },
+        "3": {
+          "text_es": "El pictograma es reconocible con consideración breve (2-3 segundos). El significado principal es claro aunque pueden existir interpretaciones alternativas menores. Utiliza elementos visuales comunes. Puede beneficiarse de contexto pero no lo requiere absolutamente. Generalmente coincide con convenciones AAC. Es funcional para comunicación básica.",
+          "text_en": "The pictogram is recognizable with brief consideration (2-3 seconds). Main meaning is clear although minor alternative interpretations may exist. Uses common visual elements. May benefit from context but doesn't absolutely require it. Generally matches AAC conventions. Functional for basic communication."
+        },
+        "2": {
+          "text_es": "El pictograma es difícil de reconocer sin ayuda adicional. Tiene múltiples interpretaciones posibles o el significado no es claro. Utiliza simbolismo poco convencional o poco familiar. Requiere contexto significativo o explicación para comprenderlo. No es adecuado para uso general sin apoyo adicional.",
+          "text_en": "The pictogram is difficult to recognize without additional help. Has multiple possible interpretations or meaning is unclear. Uses unconventional or unfamiliar symbolism. Requires significant context or explanation to understand. Not suitable for general use without additional support."
+        },
+        "1": {
+          "text_es": "El pictograma es imposible de reconocer o altamente ambiguo. Utiliza simbolismo oscuro, personal o abstracto sin conexión clara con el concepto. Requiere explicación extensa para comprenderse. Contradice convenciones AAC establecidas. No es funcional para comunicación y necesita rediseñarse completamente desde un enfoque diferente.",
+          "text_en": "The pictogram is impossible to recognize or highly ambiguous. Uses obscure, personal, or abstract symbolism without clear connection to the concept. Requires extensive explanation to understand. Contradicts established AAC conventions. Not functional for communication and needs complete redesign from a different approach."
+        }
+      }
+    },
+    "semantic_transparency": {
+      "name_es": "Transparencia Semántica",
+      "name_en": "Semantic Transparency",
+      "description_es": "El grado en que el pictograma transmite con precisión el significado específico de la frase objetivo.",
+      "description_en": "The degree to which the pictogram accurately conveys the specific meaning of the target phrase.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma captura perfectamente el significado de la frase. Todos los elementos semánticos clave están presentes. El nivel de especificidad es correcto. Es apropiado para la estructura lingüística (verbo vs. sustantivo, etc.). No hay pérdida ni distorsión semántica. Comunica exactamente lo que la frase expresa.",
+          "text_en": "The pictogram perfectly captures the phrase meaning. All key semantic elements are present. The level of specificity is correct. Appropriate to linguistic structure (verb vs. noun, etc.). No semantic loss or distortion. Communicates exactly what the phrase expresses."
+        },
+        "4": {
+          "text_es": "El pictograma captura muy bien el significado principal de la frase. La mayoría de los elementos semánticos clave están presentes. Puede perder algunos matices menores pero el mensaje principal es claro. El nivel de especificidad es generalmente apropiado. La estructura lingüística está bien representada. La distorsión semántica es mínima.",
+          "text_en": "The pictogram captures the main phrase meaning very well. Most key semantic elements are present. May lose some minor nuances but main message is clear. Level of specificity is generally appropriate. Linguistic structure is well represented. Semantic distortion is minimal."
+        },
+        "3": {
+          "text_es": "El pictograma captura el significado central de la frase. Puede perder algunos elementos semánticos pero los componentes principales están presentes. El nivel de especificidad es generalmente apropiado aunque puede ser algo genérico. La estructura lingüística básica está representada. Hay desviación semántica menor pero aceptable para comunicación funcional.",
+          "text_en": "The pictogram captures the core phrase meaning. May miss some semantic elements but main components are present. Level of specificity is generally appropriate though may be somewhat generic. Basic linguistic structure is represented. Minor but acceptable semantic drift for functional communication."
+        },
+        "2": {
+          "text_es": "El pictograma captura solo parcialmente el significado de la frase. Faltan elementos semánticos importantes. El nivel de especificidad es inadecuado (demasiado genérico o específico). La estructura lingüística no está bien representada. Hay distorsión semántica significativa que puede causar malentendidos en contextos de comunicación real.",
+          "text_en": "The pictogram only partially captures the phrase meaning. Important semantic elements are missing. Level of specificity is inadequate (too generic or specific). Linguistic structure is not well represented. Significant semantic distortion that may cause misunderstandings in real communication contexts."
+        },
+        "1": {
+          "text_es": "El pictograma no representa adecuadamente el significado de la frase. Faltan elementos semánticos críticos o están distorsionados. El nivel de especificidad es incorrecto. La estructura lingüística es inapropiada para el concepto. Hay distorsión semántica severa. No comunica efectivamente la intención de la frase y necesita replantearse completamente.",
+          "text_en": "The pictogram does not adequately represent the phrase meaning. Critical semantic elements are missing or distorted. Level of specificity is incorrect. Linguistic structure is inappropriate for the concept. Severe semantic distortion. Does not effectively communicate the phrase intent and needs complete rethinking."
+        }
+      }
+    },
+    "pragmatic_fit": {
+      "name_es": "Adecuación Pragmática",
+      "name_en": "Pragmatic Fit",
+      "description_es": "La utilidad y adecuación del pictograma en contextos reales de comunicación AAC.",
+      "description_en": "The usefulness and appropriateness of the pictogram in real-world AAC communication contexts.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma es altamente práctico para uso en AAC. Es apropiado para la edad y capacidades del usuario objetivo. Apoya la comunicación efectiva en múltiples contextos. Es socialmente apropiado en todas las situaciones. Facilita la autonomía y dignidad del usuario. Se puede usar con confianza en espacios públicos, escolares, domésticos, etc.",
+          "text_en": "The pictogram is highly practical for AAC use. Appropriate for target user age and abilities. Supports effective communication in multiple contexts. Socially appropriate in all situations. Facilitates user autonomy and dignity. Can be used confidently in public, school, home, etc."
+        },
+        "4": {
+          "text_es": "El pictograma es muy práctico para uso en AAC. Es apropiado para la mayoría de usuarios del rango objetivo. Apoya bien la comunicación en contextos típicos. Es socialmente apropiado en la gran mayoría de situaciones. Facilita la autonomía del usuario. Funciona bien en la mayoría de entornos con necesidad mínima de adaptación.",
+          "text_en": "The pictogram is very practical for AAC use. Appropriate for most users in target range. Supports communication well in typical contexts. Socially appropriate in vast majority of situations. Facilitates user autonomy. Works well in most environments with minimal need for adaptation."
+        },
+        "3": {
+          "text_es": "El pictograma es generalmente práctico para AAC. Es apropiado para la mayoría de contextos aunque puede necesitar complementación en algunos casos. Es funcionalmente adecuado para necesidades básicas de comunicación. No tiene problemas mayores de adecuación social. Apoya las necesidades básicas del usuario aunque podría optimizarse para mayor efectividad.",
+          "text_en": "The pictogram is generally practical for AAC. Appropriate for most contexts though may need supplementation in some cases. Functionally adequate for basic communication needs. No major social appropriateness issues. Supports user's basic needs though could be optimized for greater effectiveness."
+        },
+        "2": {
+          "text_es": "El pictograma tiene limitaciones prácticas significativas para uso en AAC. Puede no ser apropiado para algunos usuarios o contextos objetivo. La efectividad comunicativa es limitada. Puede tener problemas de adecuación social en ciertos contextos. No apoya adecuadamente la autonomía del usuario. Requiere adaptaciones significativas o contexto adicional para ser útil.",
+          "text_en": "The pictogram has significant practical limitations for AAC use. May not be appropriate for some target users or contexts. Communication effectiveness is limited. May have social appropriateness issues in certain contexts. Does not adequately support user autonomy. Requires significant adaptations or additional context to be useful."
+        },
+        "1": {
+          "text_es": "El pictograma es impráctico para uso real en AAC. Es inapropiado para los usuarios objetivo. No facilita comunicación efectiva. Es socialmente problemático o inadecuado. No apoya las necesidades del usuario. Puede ser embarazoso, poco claro en contexto, o no habilita comunicación real. Necesita replantease completamente con enfoque en usabilidad práctica.",
+          "text_en": "The pictogram is impractical for real AAC use. Inappropriate for target users. Does not facilitate effective communication. Socially problematic or inadequate. Does not support user needs. May be embarrassing, unclear in context, or doesn't enable actual communication. Needs complete rethinking with focus on practical usability."
+        }
+      }
+    },
+    "cultural_adequacy": {
+      "name_es": "Adecuación Cultural",
+      "name_en": "Cultural Adequacy",
+      "description_es": "La adecuación y relevancia del pictograma para el contexto cultural y lingüístico del público objetivo.",
+      "description_en": "The appropriateness and relevance of the pictogram for the cultural and linguistic context of the target audience.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma es perfectamente adecuado culturalmente. Refleja auténticamente la cultura objetivo. No contiene estereotipos ni elementos insensibles. Está alineado lingüística y culturalmente con el contexto español/latinoamericano. Es ampliamente aceptable entre diferentes subgrupos culturales. Representa elementos cotidianos (comida, vestimenta, actividades) que coinciden con la vida diaria de la cultura objetivo.",
+          "text_en": "The pictogram is perfectly culturally adequate. Authentically reflects target culture. Contains no stereotypes or insensitive elements. Linguistically and culturally aligned with Spanish/Latin American context. Broadly acceptable across different cultural subgroups. Represents everyday elements (food, clothing, activities) that match target culture's daily life."
+        },
+        "4": {
+          "text_es": "El pictograma es culturalmente apropiado con alta adecuación. Refleja bien la cultura objetivo con elementos reconocibles. No tiene problemas significativos de estereotipos. Está bien alineado con el contexto cultural y lingüístico. Es aceptable para la gran mayoría de los subgrupos culturales. Puede tener detalles menores que podrían adaptarse mejor pero no causan problemas.",
+          "text_en": "The pictogram is culturally appropriate with high adequacy. Reflects target culture well with recognizable elements. No significant stereotype issues. Well aligned with cultural and linguistic context. Acceptable to vast majority of cultural subgroups. May have minor details that could be better adapted but don't cause problems."
+        },
+        "3": {
+          "text_es": "El pictograma es generalmente adecuado culturalmente. No hay violaciones culturales mayores. Puede ser culturalmente neutral más que específico. Es aceptable en la mayoría de contextos culturales. Utiliza símbolos suficientemente universales o reconocibles. Son posibles adaptaciones culturales menores pero no esenciales para funcionalidad básica.",
+          "text_en": "The pictogram is generally culturally adequate. No major cultural violations. May be culturally neutral rather than specific. Acceptable in most cultural contexts. Uses sufficiently universal or recognizable symbols. Minor cultural adaptations possible but not essential for basic functionality."
+        },
+        "2": {
+          "text_es": "El pictograma tiene problemas de adecuación cultural. Puede reflejar un contexto cultural incorrecto o ajeno. Contiene elementos que pueden percibirse como estereotipos. El alineamiento lingüístico o cultural es débil. Puede ser inapropiado para algunos subgrupos culturales significativos. Requiere adaptaciones culturales importantes para ser apropiado en el contexto objetivo.",
+          "text_en": "The pictogram has cultural adequacy problems. May reflect incorrect or foreign cultural context. Contains elements that may be perceived as stereotypes. Linguistic or cultural alignment is weak. May be inappropriate for some significant cultural subgroups. Requires significant cultural adaptations to be appropriate in target context."
+        },
+        "1": {
+          "text_es": "El pictograma es culturalmente inapropiado u ofensivo. Refleja claramente un contexto cultural equivocado. Contiene estereotipos evidentes o representaciones insensibles. Está desalineado lingüística y culturalmente. No es aceptable para el contexto cultural objetivo. Representa elementos (comida, vestimenta, prácticas) de otra cultura o en forma estereotipada. Requiere rediseño completo con sensibilidad cultural adecuada.",
+          "text_en": "The pictogram is culturally inappropriate or offensive. Clearly reflects wrong cultural context. Contains evident stereotypes or insensitive representations. Linguistically and culturally misaligned. Not acceptable for target cultural context. Represents elements (food, clothing, practices) from another culture or in stereotyped form. Requires complete redesign with appropriate cultural sensitivity."
+        }
+      }
+    },
+    "cognitive_accessibility": {
+      "name_es": "Accesibilidad Cognitiva",
+      "name_en": "Cognitive Accessibility",
+      "description_es": "La accesibilidad y usabilidad del pictograma para usuarios con diferencias cognitivas, dificultades de aprendizaje o discapacidad intelectual.",
+      "description_en": "The accessibility and usability of the pictogram for users with cognitive differences, learning disabilities, or intellectual disabilities.",
+      "levels": {
+        "5": {
+          "text_es": "El pictograma es extremadamente simple y claro para procesamiento cognitivo. Requiere carga cognitiva mínima. Es inmediatamente procesable sin esfuerzo. Capta la atención sin ser distractor. Cumple completamente con estándares de accesibilidad ISO/IEC 24751. Utiliza 2-3 formas simples y audaces con alto contraste. Permite reconocimiento instantáneo sin necesidad de memorización.",
+          "text_en": "The pictogram is extremely simple and clear for cognitive processing. Requires minimal cognitive load. Immediately processable without effort. Captures attention without being distracting. Fully compliant with ISO/IEC 24751 accessibility standards. Uses 2-3 bold, simple shapes with high contrast. Allows instant recognition without need for memorization."
+        },
+        "4": {
+          "text_es": "El pictograma es muy accesible cognitivamente. La carga cognitiva es baja. Es procesable con esfuerzo mínimo. Mantiene bien la atención sin distraer. Cumple con estándares de accesibilidad con alto nivel. Es simple con detalles mínimos bien integrados. El reconocimiento es rápido y no requiere memorización significativa. Apropiado para amplio rango de capacidades cognitivas.",
+          "text_en": "The pictogram is very cognitively accessible. Cognitive load is low. Processable with minimal effort. Maintains attention well without distraction. Meets accessibility standards at high level. Simple with minimal well-integrated details. Recognition is quick and doesn't require significant memorization. Appropriate for wide range of cognitive abilities."
+        },
+        "3": {
+          "text_es": "El pictograma es adecuadamente accesible cognitivamente. La carga cognitiva es razonable. Es procesable con algo de esfuerzo pero no excesivo. Mantiene la atención adecuadamente. Cumple con estándares básicos de accesibilidad. Tiene complejidad moderada pero manejable. Requiere algún procesamiento cognitivo pero está dentro de capacidades de usuarios objetivo. Es funcional para comunicación AAC básica.",
+          "text_en": "The pictogram is adequately cognitively accessible. Cognitive load is reasonable. Processable with some but not excessive effort. Maintains attention adequately. Meets basic accessibility standards. Has moderate but manageable complexity. Requires some cognitive processing but within target users' capabilities. Functional for basic AAC communication."
+        },
+        "2": {
+          "text_es": "El pictograma presenta desafíos significativos de accesibilidad cognitiva. La carga cognitiva es alta. Requiere esfuerzo considerable para procesarse. Puede perder la atención del usuario o ser confuso. No cumple adecuadamente con estándares de accesibilidad. Tiene demasiados detalles o complejidad. El procesamiento es difícil para usuarios con diferencias cognitivas. No es apropiado para público general AAC sin simplificación.",
+          "text_en": "The pictogram presents significant cognitive accessibility challenges. Cognitive load is high. Requires considerable effort to process. May lose user attention or be confusing. Does not adequately meet accessibility standards. Has too many details or complexity. Processing is difficult for users with cognitive differences. Not appropriate for general AAC public without simplification."
+        },
+        "1": {
+          "text_es": "El pictograma es inaccesible cognitivamente. La carga cognitiva es excesiva. Es muy difícil de procesar incluso con esfuerzo. No mantiene la atención o es abrumador. No cumple con estándares de accesibilidad. Es altamente complejo con muchos elementos. Requiere interpretación abstracta o habilidades cognitivas avanzadas. No es funcional para usuarios con diferencias cognitivas. Necesita simplificación radical y rediseño completo con enfoque en accesibilidad cognitiva.",
+          "text_en": "The pictogram is cognitively inaccessible. Cognitive load is excessive. Very difficult to process even with effort. Doesn't maintain attention or is overwhelming. Fails accessibility standards. Highly complex with many elements. Requires abstract interpretation or advanced cognitive skills. Not functional for users with cognitive differences. Needs radical simplification and complete redesign focused on cognitive accessibility."
+        }
+      }
+    }
+  }
+}

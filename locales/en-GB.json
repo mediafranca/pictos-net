@@ -7,15 +7,23 @@
     "libraryTooltip": "Go to Library (Workbench)",
     "settings": "Graph Settings",
     "settingsTooltip": "Graph Settings",
-    "console": "Semantic Monitor",
-    "consoleTooltip": "Semantic Monitor"
+    "console": "PICTOS Console",
+    "consoleTooltip": "PICTOS Console"
   },
   "search": {
     "placeholder": "search or create new",
     "createNew": "Create new semantic node: \"{query}\""
   },
   "styleEditor": {
-    "title": "Styles of {lang}",
+    "title": "Style Editor",
+    "subtitle": "Visual classes for SVG pictograms",
+    "newStyle": "New Style",
+    "exportCss": "Export CSS",
+    "copyClipboard": "Copy to Clipboard",
+    "gridView": "Grid View",
+    "codeView": "Code View",
+    "animations": "Animations",
+    "deleteConfirm": "Delete this style?",
     "sectionForeground": "Foreground (.f)",
     "sectionKey": "Key / Reference (.k)",
     "fill": "Fill",
@@ -33,31 +41,25 @@
     "graphManagement": "Graph Management",
     "sortBy": "Sort by:",
     "alphabetical": "Alphabetical",
-    "completeness": "Completeness",
-    "evaluation": "Evaluation"
+    "completeness": "Completeness"
   },
   "home": {
     "graphArchitecture": "Graph Architecture",
     "description": "Step-by-step generative system for pictograms from communicative intent to visual representation",
-    "icapModule": "ICAP-50 Phrase List",
-    "icapNamespace": "mediafranca.icap.corpus",
-    "icapDescription": "The ICAP-50 corpus represents a set of 50 phrases organized into 8 pragmatic categories: Request, Reject, Direct, Accept, Social, Emotion, Comment, and Question.",
-    "icapRepository": "View ICAP repository",
     "importTextNode": "Upload Your Own Phrases",
     "importNamespace": "custom_vocabulary",
     "importDescription": "Define your own vocabulary from custom phrases. Upload a .txt file with one phrase per line.",
-    "loadICAPWarning": "You have {count} pictogram(s) in your library. Loading a new library will overwrite your current work. Do you want to continue?",
+    "loadLibraryWarning": "You have {count} pictogram(s) in your library. Loading a new library will overwrite your current work. Do you want to continue?",
     "aboutProject": "About this project",
     "exampleLibraries": "Example Libraries",
-    "exampleLibrariesDescription": "Curated collections of pictograms with complete evaluations",
+    "exampleLibrariesDescription": "Curated collections of pictograms",
     "loadLibrary": "Load library",
     "items": "items"
   },
   "pipeline": {
     "understand": "Understand",
     "compose": "Compose",
-    "produce": "Produce",
-    "evaluate": "Evaluate"
+    "produce": "Produce"
   },
   "editor": {
     "hierarchicalElements": "Hierarchical Elements",
@@ -73,44 +75,6 @@
     "noBitmapReference": "No Bitmap Reference",
     "fullSizeRender": "Full size render",
     "evaluationContext": "Evaluation Context"
-  },
-  "evaluation": {
-    "icap": "ICAP Evaluation",
-    "evaluate": "Evaluate Pictogram",
-    "confirm": "Confirm Evaluation",
-    "openEditor": "Open Evaluation Editor",
-    "evaluationSaved": "Evaluation saved for: {utterance}",
-    "clarity": "Clarity",
-    "recognizability": "Recognizability",
-    "semantic_transparency": "Semantic Transparency",
-    "pragmatic_fit": "Pragmatic Fit",
-    "cultural_adequacy": "Cultural Adequacy",
-    "cognitive_accessibility": "Cognitive Accessibility",
-    "reasoning": "Reasoning",
-    "humanReasoning": "Human Reasoning",
-    "icapLabel": "ICAP",
-    "helpTitle": "Evaluation Guide: {dimension}",
-    "scaleLevel": "Level {level}",
-    "loading": "Loading evaluation guide...",
-    "errorLoading": "Could not load evaluation guide. Please check your connection."
-  },
-  "icap": {
-    "descriptions": {
-      "clarity": "The degree to which the pictogram is visually clear, legible and free from visual ambiguity",
-      "recognizability": "The ease with which a viewer can identify what the pictogram represents",
-      "semantic_transparency": "The degree to which the pictogram accurately conveys the specific meaning of the phrase",
-      "pragmatic_fit": "The usefulness and appropriateness of the pictogram in real-world AAC contexts",
-      "cultural_adequacy": "The appropriateness and relevance of the pictogram for the cultural and linguistic context",
-      "cognitive_accessibility": "The accessibility and usability of the pictogram for users with cognitive differences"
-    },
-    "axes": {
-      "cla": "CLA",
-      "rec": "REC",
-      "sem": "SEM",
-      "pra": "PRA",
-      "cul": "CUL",
-      "cog": "COG"
-    }
   },
   "config": {
     "visualStylePrompt": "Visual Style Prompt (Node Attribute)",
@@ -142,7 +106,7 @@
     "geoNoResults": "No results found"
   },
   "console": {
-    "title": "Semantic Trace Monitor",
+    "title": "PICTOS Console",
     "flush": "Flush"
   },
   "actions": {
@@ -219,8 +183,7 @@
   "steps": {
     "nlu": "NLU",
     "visual": "Visual",
-    "bitmap": "Bitmap",
-    "eval": "Evaluation"
+    "bitmap": "Bitmap"
   },
   "svg": {
     "generate": "Generate SVG",
@@ -228,13 +191,33 @@
     "download": "Download SVG",
     "library": "SVG Library",
     "compliant": "mf-svg-schema compliant",
-    "unavailable": "Unavailable"
+    "unavailable": "Unavailable",
+    "traceSvg": "Trace",
+    "retrace": "Re-trace",
+    "rawTrace": "Raw Trace",
+    "formatGemini": "Structure with Gemini",
+    "traceDone": "Raw tracing complete. Click Structure to apply semantic grouping.",
+    "traceConverts": "Converts bitmap to SVG (trace) then applies semantic structure with Gemini",
+    "structureTooltip": "Group paths into semantic layers using Gemini + mf-svg-schema",
+    "structuring": "Structuring…",
+    "structureDone": "Semantic structure applied.",
+    "structureLabel": "Structured",
+    "editor": "SVG Editor",
+    "editorLayers": "Layers & Structure",
+    "editorStylePanel": "Style Panel",
+    "editorSave": "Save Changes",
+    "editorExport": "Export"
+  },
+  "vectorizer": {
+    "preview": "Vectorizer Preview",
+    "retrace": "Re-trace",
+    "apply": "Apply",
+    "adjustTrace": "Adjust trace settings",
+    "warnings": "Trace warnings",
+    "layersTraced": "{traced}/{total} layers traced"
   },
   "share": {
     "shareWithPictos": "Share with PICTOS",
-    "requiresEvaluation": "Evaluation required to share the pictogram",
-    "lowScore": "The pictogram must have an average evaluation ≥ 4.0 to share",
-    "requiresHighScore": "Requires evaluation ≥ 4.0",
     "alreadyShared": "This pictogram has already been shared with PICTOS",
     "sharing": "Sharing \"{utterance}\" with PICTOS...",
     "noToken": "GitHub token not configured. Define GITHUB_TOKEN in environment variables.",

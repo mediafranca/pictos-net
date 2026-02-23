@@ -1,0 +1,54 @@
+{
+  "utterance": "voy a hacer mi cama",
+  "lang": "es",
+  "english_translation": "I'm going to make my bed",
+  "metadata": {
+    "speech_act": "commissive",
+    "intent": "tidy_object",
+    "domain": "Activities of Daily Living"
+  },
+  "frames": [
+    {
+      "frame_name": "Arranging",
+      "lexical_unit": "hacer (cama)",
+      "roles": {
+        "Agent": {
+          "type": "person",
+          "ref": "SPEAKER",
+          "surface": "voy (implicit yo)"
+        },
+        "Theme": {
+          "type": "artifact",
+          "ref": "BED",
+          "surface": "mi cama"
+        }
+      }
+    }
+  ],
+  "nsm_explications": {
+    "MAKE_BED": "I want to do something to this thing. I want to move parts of this thing. I want this thing to be good.",
+    "primes_used": ["WANT", "DO", "SOMETHING", "THING", "MOVE", "PARTS", "GOOD"]
+  },
+  "logical_form": {
+    "event": "ARRANGE(Speaker, Bed)",
+    "modality": "INTENTION_IMMEDIATE",
+    "tense": "FUTURE_IMMEDIATE",
+    "aspect": "INCHOATIVE"
+  },
+  "pragmatics": {
+    "politeness": "neutral",
+    "formality": "informal",
+    "expected_response": "acknowledgement_optional",
+    "social_distance": "close",
+    "context": "domestic"
+  },
+  "visual_guidelines": {
+    "focus_actor": "speaker",
+    "action_core": "hands_smoothing_sheets",
+    "object_core": "bed_with_pillows",
+    "context": "bedroom_interior",
+    "temporal": "immediate_future",
+    "composition": "medium_shot",
+    "perspective": "slightly_elevated"
+  }
+}

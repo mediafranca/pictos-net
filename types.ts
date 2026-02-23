@@ -51,23 +51,11 @@ export interface NLUData {
 
 export type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdated';
 
-export type SortCriteria = 'alphabetical' | 'completeness' | 'evaluation';
+export type SortCriteria = 'alphabetical' | 'completeness';
 
 export interface VisualElement {
   id: string;
   children?: VisualElement[];
-}
-
-// ICAP Hexagonal Dimensions (Manual Input - Likert 1-5)
-// Aligned with official ICAP schema (mediafranca/ICAP)
-export interface EvaluationMetrics {
-  clarity: number;
-  recognizability: number;
-  semantic_transparency: number;
-  pragmatic_fit: number;
-  cultural_adequacy: number;
-  cognitive_accessibility: number;
-  reasoning: string;
 }
 
 export interface RowData {
@@ -82,27 +70,24 @@ export interface RowData {
   elements?: VisualElement[];
   prompt?: string;
 
-  // Phase 3: "Producir" (Produce) - Bitmap Generation + Evaluation
+  // Phase 3: "Producir" (Produce) - Bitmap Generation
   bitmap?: string; // Base64 data URL
   rawSvg?: string; // Vectorized SVG from vtracer (raw)
   structuredSvg?: string; // mf-svg-schema compliant SVG (Gemini-processed)
-  evaluation?: EvaluationMetrics; // Manual Evaluation (part of Producir phase)
   shared?: boolean; // Whether this pictogram has been shared with PICTOS
 
   // Global Pipeline Status
   status: 'idle' | 'processing' | 'completed' | 'error';
 
-  // Step Statuses (3 phases + evaluation integrated in phase 3)
+  // Step Statuses (3 phases)
   nluStatus: StepStatus;       // Phase 1: Comprender
   visualStatus: StepStatus;    // Phase 2: Componer
-  bitmapStatus: StepStatus;    // Phase 3: Producir (includes generation)
-  evalStatus: StepStatus;      // Evaluation (integrated within Producir phase)
+  bitmapStatus: StepStatus;    // Phase 3: Producir
 
   // Metrics
   nluDuration?: number;
   visualDuration?: number;
   bitmapDuration?: number;
-  evalDuration?: number;
 }
 
 export interface LogEntry {
@@ -122,6 +107,8 @@ export interface SVGStyleConfig {
   [key: string]: any; // Allow custom properties
 }
 
+import type { StyleDefinition, KeyframeDefinition } from './lib/style-editor/lib/types';
+
 export interface GlobalConfig {
   lang: string; // Language for NLU processing (e.g., 'es', 'en')
   uiLang?: 'en-GB' | 'es-419'; // UI language (independent from NLU language)
@@ -130,11 +117,19 @@ export interface GlobalConfig {
     lng: string;
     region: string;
   };
+  /** @deprecated Moved to COMPRENDER pipeline step. Do not use in UI. */
+  annotatedContext?: string;
   aspectRatio: string; // '1:1', '3:4', '4:3', '9:16', '16:9'
   imageModel: string; // 'flash' | 'pro'
   author: string;
+  credits?: string; // Autores/institución para atribución de la librería
   license: string;
   visualStylePrompt: string;
+  /** Structured style definitions — single source of truth for CSS classes embedded in SVGs */
+  svgStyleDefs?: StyleDefinition[];
+  /** Structured keyframe definitions */
+  svgKeyframes?: KeyframeDefinition[];
+  /** @deprecated Use svgStyleDefs instead */
   svgStyles?: {
     [className: string]: SVGStyleConfig;
   };

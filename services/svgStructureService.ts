@@ -2,81 +2,31 @@
  * SVG Structure Service - Gemini-powered SVG Restructuring
  *
  * Takes a raw SVG from vtracer and structures it according to
- * the mf-svg-schema specification, adding semantic roles,
- * accessibility metadata, and ICAP validation data.
+ * the mf-svg-schema specification, adding semantic roles and
+ * accessibility metadata.
  *
  * @module services/svgStructureService
  */
 
 import { GoogleGenAI } from "@google/genai";
-import type { NLUData, VisualElement, EvaluationMetrics, GlobalConfig } from "../types";
+import type { NLUData, VisualElement, GlobalConfig } from "../types";
+import { SVG_STYLESHEET } from "./svgStyles";
+import { generateCssString } from "../lib/style-editor/lib/utils/cssGenerator";
 
 // Reuse the AI client pattern from geminiService
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Embedded CSS stylesheet following mf-svg-schema specification
- * This is inserted into the <defs> section of structured SVGs
- */
-/**
- * Generate CSS stylesheet dynamically based on GlobalConfig
- * Following mf-svg-schema specification with user-defined overrides
+ * Returns the CSS stylesheet to embed in SVGs.
+ * When the user has edited styles (config.svgStyleDefs), generates CSS from those
+ * structured definitions so edits propagate to Gemini's system instruction.
+ * Otherwise falls back to the canonical SVG_STYLESHEET.
  */
 export const generateStylesheet = (config: GlobalConfig): string => {
-    const styles = config.svgStyles || {
-        f: { fill: '#000', stroke: 'none', strokeWidth: 0 },
-        k: { fill: '#fff', stroke: 'none', strokeWidth: 0 }
-    };
-
-    // Generate CSS for each defined class
-    const classStyles = Object.entries(styles).map(([className, style]) => `
-.${className} {
-  fill: ${style.fill};
-  fill-opacity: ${style.opacity ?? 1};
-  stroke: ${style.stroke};
-  stroke-width: ${style.strokeWidth};
-  stroke-opacity: ${style.opacity ?? 1};
-  stroke-linecap: ${style.strokeLinecap || 'round'};
-  stroke-linejoin: ${style.strokeLinejoin || 'round'};
-}`).join('\n');
-
-    return `
-/* MediaFranca SVG Schema - Dynamic Class Styling System */
-${classStyles}
-
-/* --- Mini Utility Classes (Tailwind-like) --- */
-/* Colors */
-.fill-none { fill: none; }
-.stroke-none { stroke: none; }
-.fill-red { fill: #ef4444; }
-.fill-blue { fill: #3b82f6; }
-.fill-green { fill: #22c55e; }
-.fill-yellow { fill: #eab308; }
-
-/* Strokes */
-.stroke-sm { stroke-width: 1px; }
-.stroke-md { stroke-width: 2px; }
-.stroke-lg { stroke-width: 4px; }
-
-/* Animations */
-.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-.animate-spin { animation: spin 1s linear infinite; }
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Focus states for keyboard navigation */
-g[role="group"]:focus {
-  outline: 2px solid #0066cc;
-  outline-offset: 2px;
-}
-`;
+    if (config.svgStyleDefs && config.svgStyleDefs.length > 0) {
+        return generateCssString(config.svgStyleDefs, config.svgKeyframes ?? []);
+    }
+    return SVG_STYLESHEET;
 };
 
 /**
@@ -109,8 +59,6 @@ export interface SVGStructureInput {
     nlu: NLUData;
     /** Hierarchical visual elements */
     elements: VisualElement[];
-    /** ICAP evaluation metrics */
-    evaluation: EvaluationMetrics;
     /** Original utterance */
     utterance: string;
     /** Global configuration */
@@ -245,20 +193,11 @@ function flattenElements(elements: VisualElement[]): VisualElement[] {
 }
 
 /**
- * Calculate ICAP average score
- */
-function calculateICAPAverage(eval_: EvaluationMetrics): number {
-    const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = eval_;
-    return (clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility) / 6;
-}
-
-/**
  * Build the metadata JSON block
  */
 function buildMetadataJSON(input: SVGStructureInput): object {
     const primes = extractNSMPrimes(input.nlu);
     const concepts = buildConceptsArray(input.elements, input.nlu);
-    const icapAvg = calculateICAPAverage(input.evaluation);
 
     return {
         version: "1.0.0",
@@ -279,13 +218,6 @@ function buildMetadataJSON(input: SVGStructureInput): object {
             generatedAt: new Date().toISOString(),
             sourceDataset: "MediaFranca-PictoNet",
             licence: input.config.license || "CC BY 4.0"
-        },
-        icap: {
-            validated: true,
-            validatedAt: new Date().toISOString(),
-            validator: input.config.author || "PictoNet",
-            clarityScore: Math.round(input.evaluation.clarity),
-            comments: input.evaluation.reasoning || `ICAP average: ${icapAvg.toFixed(2)}`
         }
     };
 }
@@ -304,7 +236,7 @@ Convert a raw vectorized SVG into a semantically structured SVG following the mf
 1. **Visual Reference (IMAGE)**: The original bitmap pictogram - USE THIS to understand what each part represents
 2. **Geometric Base (TEXT)**: Raw SVG with unstructured <path> elements from vtracer vectorization
 3. **Semantic Context (TEXT)**: Hierarchical visual elements that MUST correspond to visual parts in the image
-4. **Metadata (TEXT)**: NLU analysis, concepts, ICAP scores
+4. **Metadata (TEXT)**: NLU analysis and concepts
 
 **CRITICAL VISUAL CORRELATION:**
 Look at the IMAGE and the HIERARCHICAL ELEMENTS together:
@@ -354,18 +286,43 @@ ${css}
 ${JSON.stringify(elements, null, 2)}
 \`\`\`
 
-**GROUPING STRATEGY (USE THE IMAGE!):**
-1. Look at the PROVIDED IMAGE to see what the pictogram shows
-2. Look at the HIERARCHICAL ELEMENTS to know what elements should exist (e.g., "persona", "vaso")
-3. For each element in the hierarchy:
-   - Identify which part of the IMAGE it represents
-   - Find the SVG paths that draw that same part
-   - Group those paths together in a <g> element with the correct concept ID
-4. Visual cues in the IMAGE:
-   - Agents (usually "persona", "niño", etc.) = human/animal figures
-   - Patients/Objects (usually nouns) = things being acted upon
-   - Context elements = background or secondary objects
-5. If an element is in the hierarchy but not clearly visible, mark it as implicit
+**GROUPING STRATEGY — THE ELEMENT HIERARCHY IS YOUR STRUCTURE:**
+
+The HIERARCHICAL ELEMENTS provided define the exact group structure the SVG must have.
+This is not a suggestion — it is the required DOM outline.
+
+Process:
+1. The root level of the SVG body contains one <g> per top-level element in the hierarchy.
+2. If a hierarchy element has children, its <g> contains nested <g> elements for each child.
+3. The id of each <g> must match the element id in the hierarchy (e.g., id="persona", id="vaso_agua").
+4. Look at the IMAGE to identify which SVG paths visually belong to each element.
+5. Place those paths inside the corresponding <g>.
+6. Paths that don't clearly belong to any named element go into a <g id="context" class="f"> group.
+7. NEVER leave paths outside of a named group.
+
+Example: if the hierarchy is:
+  - persona
+    - cabeza
+    - cuerpo
+  - vaso_agua
+
+The SVG body must be:
+<g id="persona" class="k" role="group" ...>
+  <g id="cabeza" role="group" ...> ... paths ... </g>
+  <g id="cuerpo" role="group" ...> ... paths ... </g>
+</g>
+<g id="vaso_agua" class="f" role="group" ...> ... paths ... </g>
+
+**OPTIONAL VISUAL IMPROVEMENT:**
+If the raw SVG has obvious artifacts from the vectorization process (e.g., excessive
+micro-paths smaller than 5px, redundant overlapping paths, fragmented contours that
+should be a single shape), you may:
+- Omit micro-paths (paths with very small bounding boxes that represent noise)
+- Merge visually fragmented contours of the same color into a single <path>
+  by combining their 'd' attributes using SVG subpath notation (M ... Z M ... Z)
+
+Do NOT simplify or alter paths that are clearly meaningful visual elements.
+When in doubt, preserve the original path data exactly.
 
 **CRITICAL RULES:**
 1. Output ONLY the complete SVG, no explanation
@@ -373,7 +330,14 @@ ${JSON.stringify(elements, null, 2)}
 3. Every path must be inside a semantic <g> group
 4. The metadata JSON must be exactly as provided (inside <metadata> tags)
 5. Remove any path fill/stroke attributes and rely on CSS classes
-6. Maintain proper SVG structure and valid XML`;
+6. Maintain proper SVG structure and valid XML
+7. NEVER use fill, stroke, stroke-width, or style attributes on <path>, <rect>,
+   <circle>, or <ellipse> elements. These MUST be removed entirely.
+8. Apply visual classes ONLY on <g> group elements, not on individual paths.
+   Use class="k" for Agents (key/foreground) and class="f" for secondary elements.
+   This ensures CSS from <defs><style> controls all visual appearance.
+9. A single <g> may combine multiple semantic sub-elements. The class should
+   reflect the semantic role of the entire group, not individual paths.`;
 }
 
 /**
@@ -415,7 +379,6 @@ function cleanSVGResponse(text: string): string {
  *   rawSvg: svgFromVtracer,
  *   nlu: row.NLU,
  *   elements: row.elements,
- *   evaluation: row.evaluation,
  *   utterance: row.UTTERANCE,
  *   config: globalConfig
  * });
@@ -465,18 +428,19 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
                         }
                     },
                     {
-                        text: `**ORIGINAL PICTOGRAM IMAGE ABOVE** - This is your PRIMARY visual reference.
+                        text: `**ORIGINAL PICTOGRAM IMAGE ABOVE** — Primary visual reference.
 
-**HIERARCHICAL ELEMENTS YOU MUST FIND IN THE IMAGE:**
+**REQUIRED GROUP STRUCTURE (from hierarchy — this defines the SVG DOM outline):**
 ${formatElements(input.elements)}
 
-**RAW SVG GEOMETRY (paths you need to group):**
+**CSS STYLESHEET (classes to apply at group level, NEVER on individual paths):**
+The stylesheet is in the system instruction. Valid classes: "k" (key/agent), "f" (secondary).
+
+**RAW SVG GEOMETRY (paths to distribute into the groups above):**
 ${input.rawSvg}
 
-**INSTRUCTIONS:**
-Look at the IMAGE carefully and identify where each element appears visually.
-Then, group the corresponding SVG paths into semantic <g> groups according to the mf-svg-schema specification.
-Output ONLY the complete, restructured SVG file - no explanation.`
+Distribute each path into its correct semantic group. Output ONLY the complete
+restructured SVG — no explanation, no markdown, no code fences.`
                     }
                 ]
             },
@@ -541,13 +505,12 @@ Output ONLY the complete, restructured SVG file - no explanation.`
 
 /**
  * Check if a row has sufficient data for SVG generation
- * Requires: bitmap (for vectorization), NLU, elements, evaluation with ICAP >= 4.0
+ * Requires: bitmap (for vectorization), NLU, and visual elements
  */
 export function canGenerateSVG(row: {
     bitmap?: string;
     NLU?: NLUData | string;
     elements?: VisualElement[];
-    evaluation?: EvaluationMetrics;
 }): { eligible: boolean; reason?: string } {
 
     if (!row.bitmap) {
@@ -560,20 +523,6 @@ export function canGenerateSVG(row: {
 
     if (!row.elements || row.elements.length === 0) {
         return { eligible: false, reason: 'Visual elements required' };
-    }
-
-    if (!row.evaluation) {
-        return { eligible: false, reason: 'ICAP evaluation required' };
-    }
-
-    const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = row.evaluation;
-    const average = (clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility) / 6;
-
-    if (average < 4.0) {
-        return {
-            eligible: false,
-            reason: `ICAP average (${average.toFixed(2)}) must be >= 4.0`
-        };
     }
 
     return { eligible: true };

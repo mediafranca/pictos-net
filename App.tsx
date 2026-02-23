@@ -1,32 +1,36 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom';
+import JSZip from 'jszip';
 import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
   Play, BookOpen, Search, FileDown, Square, Sliders,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
-  Library, ScreenShare, Globe, Hexagon, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp
+  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, EvaluationMetrics, NLUFrameRole } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole } from './types';
 import * as Gemini from './services/geminiService';
-import { ICAP_MODULE_FALLBACK, fetchICAPModule } from './data/canonicalData';
 import { useTranslation } from './hooks/useTranslation';
 import type { Locale } from './locales';
 import { SVGGenerator } from './components/SVGGenerator';
-import { SVGThumbnail } from './components/SVGThumbnail';
 import useSVGLibrary from './hooks/useSVGLibrary';
 import { StyleEditor } from './components/PictoForge/StyleEditor';
-import { structureSVG } from './services/svgStructureService';
-import { vectorizeBitmap } from './services/vtracerService';
 import { GeoAutocomplete } from './components/GeoAutocomplete';
 import * as IndexedDBService from './services/indexedDBService';
+import { INITIAL_STYLES } from './lib/style-editor/lib/constants';
+import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
+import packageJson from './package.json';
+import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
+import { VectorizerModal } from './components/VectorizerModal';
+import type { VectorizerResult } from './services/vtracerService';
+
 
 const STORAGE_KEY = 'pictonet_v19_storage';
 const CONFIG_KEY = 'pictonet_v19_config';
-const APP_VERSION = '1.0.1';
+const APP_VERSION = packageJson.version;
 
 interface LibraryMetadata {
   filename: string;
@@ -63,379 +67,11 @@ const LogoIcon = ({ size = 32 }: { size?: number }) => (
     <defs>
       <style>{`.st0 { fill: #40069e; }`}</style>
     </defs>
-    <circle className="st0" cx="23.9" cy="17.8" r="3.1"/>
-    <path className="st0" d="M23.6,4c-9.4,0-17.1,6.3-17.1,14.1s0,0,0,0c0,0,0,0,0,0v19.7c0,2.1,1.7,3.9,3.9,3.9h1.6c2.1,0,3.9-1.7,3.9-3.9v-7.3c2.3,1,4.9,1.5,7.7,1.5,9.4,0,17.1-6.3,17.1-14.1S33,4,23.6,4ZM23.9,24.5c-6.4,0-9.2-6.4-9.2-6.4,0,0,2.8-6.4,9.2-6.4s9.2,6.4,9.2,6.4c0,0-2.8,6.4-9.2,6.4Z"/>
+    <circle className="st0" cx="23.9" cy="17.8" r="3.1" />
+    <path className="st0" d="M23.6,4c-9.4,0-17.1,6.3-17.1,14.1s0,0,0,0c0,0,0,0,0,0v19.7c0,2.1,1.7,3.9,3.9,3.9h1.6c2.1,0,3.9-1.7,3.9-3.9v-7.3c2.3,1,4.9,1.5,7.7,1.5,9.4,0,17.1-6.3,17.1-14.1S33,4,23.6,4ZM23.9,24.5c-6.4,0-9.2-6.4-9.2-6.4,0,0,2.8-6.4,9.2-6.4s9.2,6.4,9.2,6.4c0,0-2.8,6.4-9.2,6.4Z" />
   </svg>
 );
 
-// Helper function to get evaluation score total and color
-const getEvaluationScore = (metrics: EvaluationMetrics | undefined): { total: number; average: number; color: string } => {
-  if (!metrics) return { total: 0, average: 0, color: '#64748b' };
-  const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = metrics;
-  const total = clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility;
-  const average = total / 6;
-
-  // Color mapping based on average score (1-5 scale)
-  let color = '#64748b'; // default gray
-  if (average >= 4.5) color = '#22c55e'; // verde oscuro (5)
-  else if (average >= 3.5) color = '#84cc16'; // verde limón (4)
-  else if (average >= 2.5) color = '#eab308'; // amarillo (3)
-  else if (average >= 1.5) color = '#f97316'; // naranjo (2)
-  else color = '#ef4444'; // rojo (1)
-
-  return { total, average, color };
-};
-
-// --- Hexagon Visualization Component (1-5 Scale) ---
-const HexagonChart: React.FC<{ metrics: EvaluationMetrics; size?: number }> = ({ metrics, size = 180 }) => {
-  const center = size / 2;
-  const radius = size * 0.40;
-
-  // Aligned with official ICAP schema (mediafranca/ICAP)
-  // Order: Clarity, Recognizability, Semantic Transparency, Pragmatic Fit, Cultural Adequacy, Cognitive Accessibility
-  const axes = ['clarity', 'recognizability', 'semantic_transparency', 'pragmatic_fit', 'cultural_adequacy', 'cognitive_accessibility'];
-  const labels = ['CLA', 'REC', 'SEM', 'PRA', 'CUL', 'COG'];
-
-  const getPoint = (value: number, index: number) => {
-    // Value is 1-5. 
-    // 0 would be center. 5 is radius.
-    const normalized = value / 5;
-    const angle = (Math.PI / 3) * index - Math.PI / 2;
-    const r = normalized * radius;
-    const x = center + r * Math.cos(angle);
-    const y = center + r * Math.sin(angle);
-    return { x, y };
-  };
-
-  const points = axes.map((axis, i) => {
-    // @ts-ignore
-    const val = metrics[axis] || 0;
-    const { x, y } = getPoint(val, i);
-    return `${x},${y}`;
-  }).join(' ');
-
-  // Generate grid rings for 1, 2, 3, 4, 5
-  const rings = [1, 2, 3, 4, 5].map(level => {
-    return axes.map((_, i) => {
-      const { x, y } = getPoint(level, i);
-      return `${x},${y}`;
-    }).join(' ');
-  });
-
-  const average = useMemo(() => {
-    let sum = 0;
-    axes.forEach(a => sum += ((metrics as any)[a] || 0));
-    return (sum / 6).toFixed(1);
-  }, [metrics]);
-
-  return (
-    <div className="relative flex flex-col items-center justify-center">
-      <svg width={size} height={size} className="overflow-visible">
-        {/* Grid Rings */}
-        {rings.map((ringPoints, i) => (
-          <polygon
-            key={i}
-            points={ringPoints}
-            fill={i === 4 ? "#f8fafc" : "none"}
-            stroke={i === 4 ? "#cbd5e1" : "#e2e8f0"}
-            strokeWidth="1"
-            strokeDasharray={i === 4 ? "0" : "2 2"}
-          />
-        ))}
-
-        {/* Data Hexagon */}
-        <polygon points={points} fill="rgba(76, 29, 149, 0.2)" stroke="#4c1d95" strokeWidth="2" />
-
-        {/* Labels */}
-        {axes.map((_, i) => {
-          const labelAngle = (Math.PI / 3) * i - Math.PI / 2;
-          const lx = center + (radius + 15) * Math.cos(labelAngle);
-          const ly = center + (radius + 15) * Math.sin(labelAngle);
-          return (
-            <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fontSize={size * 0.05} fontWeight="bold" fill="#64748b">
-              {labels[i]}
-            </text>
-          );
-        })}
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="text-center">
-          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">ICAP</div>
-          <div className="text-2xl font-bold text-violet-950 leading-none">{average}</div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- Evaluation Editor Component (Likert 1-5) ---
-// ICAP Help Modal Component
-const ICAPHelpModal: React.FC<{
-  dimension: string;
-  onClose: () => void;
-}> = ({ dimension, onClose }) => {
-  const { t, lang } = useTranslation();
-  const [rubricData, setRubricData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    // Load from remote ICAP repository (GitHub Pages)
-    fetch('https://mediafranca.github.io/ICAP/data/rubric-scale-descriptions.json')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch');
-        return res.json();
-      })
-      .then(data => {
-        setRubricData(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Error loading ICAP rubric:', err);
-        setError(true);
-        setLoading(false);
-      });
-  }, []);
-
-  const langSuffix = lang === 'en-GB' ? '_en' : '_es';
-  const dimensionData = rubricData?.dimensions?.[dimension];
-  const scale = rubricData?.scale;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="bg-violet-950 text-white p-6 flex items-center justify-between">
-          <div>
-            <h3 className="text-xl font-bold">{t('evaluation.helpTitle', { dimension: dimensionData?.[`name${langSuffix}`] || dimension })}</h3>
-            <p className="text-sm text-violet-200 mt-1">{dimensionData?.[`description${langSuffix}`]}</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-violet-900 rounded-full transition-colors">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(80vh-120px)]">
-          {loading && (
-            <div className="text-center py-12 text-slate-400">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600 mx-auto mb-4"></div>
-              {t('evaluation.loading')}
-            </div>
-          )}
-
-          {error && (
-            <div className="text-center py-12 text-rose-600">
-              <HelpCircle size={48} className="mx-auto mb-4 opacity-50" />
-              {t('evaluation.errorLoading')}
-            </div>
-          )}
-
-          {!loading && !error && dimensionData && scale && (
-            <div className="space-y-6">
-              {[5, 4, 3, 2, 1].map((level) => {
-                const levelData = dimensionData.levels?.[level];
-                const scaleData = scale[level];
-                if (!levelData) return null;
-
-                return (
-                  <div key={level} className="border-l-4 pl-4 py-2" style={{ borderColor: scaleData.color }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-2xl font-black text-slate-800">{level}</span>
-                      <div>
-                        <div className="text-sm font-bold uppercase tracking-wider" style={{ color: scaleData.color }}>
-                          {scaleData[`label${langSuffix}`]}
-                        </div>
-                        <div className="text-xs text-slate-500">{scaleData[`general${langSuffix}`]}</div>
-                      </div>
-                    </div>
-                    <p className="text-sm text-slate-700 leading-relaxed">
-                      {levelData[`text${langSuffix}`]}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="bg-slate-50 px-6 py-4 border-t flex justify-between items-center">
-          <a
-            href="https://mediafranca.github.io/ICAP/examples/hexagonal-rating-with-descriptions.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-violet-600 hover:text-violet-800 transition-colors flex items-center gap-1"
-          >
-            <ExternalLink size={12} />
-            Ver guía completa ICAP
-          </a>
-          <button onClick={onClose} className="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-colors text-sm font-medium">
-            {t('actions.cancel')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const EvaluationEditor: React.FC<{
-  metrics: EvaluationMetrics | undefined;
-  onUpdate: (m: EvaluationMetrics) => void;
-  compact?: boolean; // New prop for modal view
-}> = ({ metrics, onUpdate, compact = false }) => {
-  const { t } = useTranslation();
-  const [helpDimension, setHelpDimension] = useState<string | null>(null);
-
-  // Default state: 3 (Neutral)
-  const current = metrics || {
-    clarity: 3,
-    recognizability: 3,
-    semantic_transparency: 3,
-    pragmatic_fit: 3,
-    cultural_adequacy: 3,
-    cognitive_accessibility: 3,
-    reasoning: ''
-  };
-
-  const handleChange = (key: keyof EvaluationMetrics, value: any) => {
-    onUpdate({ ...current, [key]: value });
-  };
-
-  // Aligned with official ICAP schema (mediafranca/ICAP)
-  const axes = [
-    { key: 'clarity', label: t('evaluation.clarity'), desc: t('icap.descriptions.clarity'), icapKey: 'clarity' },
-    { key: 'recognizability', label: t('evaluation.recognizability'), desc: t('icap.descriptions.recognizability'), icapKey: 'recognizability' },
-    { key: 'semantic_transparency', label: t('evaluation.semantic_transparency'), desc: t('icap.descriptions.semantic_transparency'), icapKey: 'semantic_transparency' },
-    { key: 'pragmatic_fit', label: t('evaluation.pragmatic_fit'), desc: t('icap.descriptions.pragmatic_fit'), icapKey: 'pragmatic_fit' },
-    { key: 'cultural_adequacy', label: t('evaluation.cultural_adequacy'), desc: t('icap.descriptions.cultural_adequacy'), icapKey: 'cultural_adequacy' },
-    { key: 'cognitive_accessibility', label: t('evaluation.cognitive_accessibility'), desc: t('icap.descriptions.cognitive_accessibility'), icapKey: 'cognitive_accessibility' }
-  ];
-
-  if (compact) {
-    // Compact version for modal - no scroll needed
-    return (
-      <div className="flex flex-col h-full">
-        {/* Top: Chart - smaller to save space */}
-        <div className="flex justify-center py-3 mb-2 shrink-0">
-          <HexagonChart metrics={current} size={180} />
-        </div>
-
-        {/* Bottom: Sliders - very compact spacing */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-8">
-          {axes.map(axis => (
-            <div key={axis.key} className="space-y-1">
-              <div className="flex justify-between items-end">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold uppercase text-slate-600 tracking-wider">{axis.label}</span>
-                  <button
-                    onClick={() => setHelpDimension(axis.icapKey)}
-                    className="text-violet-400 hover:text-violet-600 transition-colors"
-                    title={t('evaluation.helpTitle', { dimension: axis.label })}
-                  >
-                    <HelpCircle size={14} />
-                  </button>
-                </div>
-                
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(v => (
-                    <div key={v} className={`w-2 h-2 rounded-full transition-colors duration-300 ${(current as any)[axis.key] >= v ? 'bg-violet-300' : 'bg-slate-200'}`}></div>
-                  ))}
-                </div> 
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-mono text-slate-400 w-3">1</span>
-                <input
-                  type="range" min="1" max="5" step="1"
-                  value={(current as any)[axis.key]}
-                  onChange={(e) => handleChange(axis.key as keyof EvaluationMetrics, parseInt(e.target.value))}
-                  className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                />
-                <span className="text-[10px] font-mono text-slate-400 w-3 text-right">5</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Reasoning textarea - more space */}
-        <div className="border-t border-slate-100 pt-3 mt-3 flex-1 min-h-0 flex flex-col">
-          <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">{t('evaluation.reasoning')}</label>
-          <textarea
-            value={current.reasoning}
-            onChange={(e) => handleChange('reasoning', e.target.value)}
-            placeholder={t('placeholders.optionalRationale')}
-            className="w-full text-xs p-2 border bg-slate-50 focus:bg-white flex-1 resize-none rounded-sm outline-none focus:border-violet-300 transition-colors"
-          />
-        </div>
-
-        {/* Help Modal */}
-        {helpDimension && <ICAPHelpModal dimension={helpDimension} onClose={() => setHelpDimension(null)} />}
-      </div>
-    );
-  }
-
-  // Full version for StepBox - with scroll
-  return (
-    <div className="flex flex-col h-full relative">
-      <div className="flex-1 overflow-y-auto pr-2 pb-4 scrollbar-thin scrollbar-thumb-slate-200">
-        {/* Top: Chart */}
-        <div className="flex justify-center py-6 mb-2">
-          <HexagonChart metrics={current} size={160} />
-        </div>
-
-        {/* Bottom: Sliders */}
-        <div className="space-y-5 px-1">
-          {axes.map(axis => (
-            <div key={axis.key} className="space-y-2">
-              <div className="flex justify-between items-end">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-bold uppercase text-slate-600 tracking-wider">{axis.label}</span>
-                  <button
-                    onClick={() => setHelpDimension(axis.icapKey)}
-                    className="text-violet-400 hover:text-violet-600 transition-colors"
-                    title={t('evaluation.helpTitle', { dimension: axis.label })}
-                  >
-                    <HelpCircle size={14} />
-                  </button>
-                </div>
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(v => (
-                    <div key={v} className={`w-2 h-2 rounded-full transition-colors duration-300 ${(current as any)[axis.key] >= v ? 'bg-violet-600' : 'bg-slate-200'}`}></div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-mono text-slate-400 w-3">1</span>
-                <input
-                  type="range" min="1" max="5" step="1"
-                  value={(current as any)[axis.key]}
-                  onChange={(e) => handleChange(axis.key as keyof EvaluationMetrics, parseInt(e.target.value))}
-                  className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-violet-600 focus:outline-none focus:ring-2 focus:ring-violet-200"
-                />
-                <span className="text-[10px] font-mono text-slate-400 w-3 text-right">5</span>
-              </div>
-              <p className="text-[9px] text-slate-400 italic leading-none">{axis.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="border-t border-slate-100 pt-3 mt-1 bg-white shrink-0">
-        <label className="text-[10px] font-medium uppercase text-slate-400 block mb-1">{t('evaluation.humanReasoning')}</label>
-        <textarea
-          value={current.reasoning}
-          onChange={(e) => handleChange('reasoning', e.target.value)}
-          placeholder={t('placeholders.rationale')}
-          className="w-full text-xs p-2 border bg-slate-50 focus:bg-white h-24 resize-none rounded-sm outline-none focus:border-violet-300 transition-colors"
-        />
-      </div>
-
-      {/* Help Modal */}
-      {helpDimension && <ICAPHelpModal dimension={helpDimension} onClose={() => setHelpDimension(null)} />}
-    </div>
-  );
-};
 
 const SearchComponent: React.FC<{
   rows: RowData[];
@@ -502,31 +138,45 @@ const SearchComponent: React.FC<{
 };
 
 
+const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
+  <label className="text-[10px] font-medium uppercase text-slate-400 mb-2 flex items-center gap-1">
+    {label}
+    <div className="group/tooltip relative">
+      <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
+      <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-[56] leading-relaxed">
+        {tooltip}
+      </div>
+    </div>
+  </label>
+);
+
 const App: React.FC = () => {
   const { t, lang, setLang } = useTranslation();
-  const { svgs, exportSVGs, importSVGs } = useSVGLibrary();
+  const { svgs, exportSVGs, importSVGs, clearLibrary, addSVG } = useSVGLibrary();
   const [rows, setRows] = useState<RowData[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showConsole, setShowConsole] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showLibraryMenu, setShowLibraryMenu] = useState(false);
+  const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, left: 0 });
+  const libraryBtnRef = useRef<HTMLDivElement>(null);
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
-  const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness' | 'evaluation'>('alphabetical');
+  const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
     lang: 'es',
     aspectRatio: '1:1',
     imageModel: 'flash',
     author: 'PICTOS.NET',
+    credits: '',
     license: 'CC BY 4.0',
     visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados, sin sombras, sin texturas y sin contornos. Geometría: Usa trazos gruesos y consistentes y simplificación geométrica. Todas las extremidades y terminales deben tener puntas redondeadas y vértices suavizados. Composición: Representación plana 2D centrada. Usa el espacio negativo (blanco) para definir la separación interna entre formas negras superpuestas (por ejemplo, el espacio entre una cabeza y un torso). Claridad: Maximiza la legibilidad y el reconocimiento semántico a escalas pequeñas. Evita cualquier rasgo facial o detalles intrincados. Usa color solo en el elemento distintivo, si es necesario.",
     geoContext: { lat: '40.4168', lng: '-3.7038', region: 'Madrid, ES' },
-    svgStyles: {
-      f: { fill: '#000000', stroke: 'none', strokeWidth: 0 },
-      k: { fill: '#ffffff', stroke: 'none', strokeWidth: 0 }
-    }
+    annotatedContext: '',
+    svgStyleDefs: INITIAL_STYLES,
+    svgKeyframes: INITIAL_KEYFRAMES,
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'eval', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
@@ -541,13 +191,29 @@ const App: React.FC = () => {
     isOpen: false,
     title: '',
     message: '',
-    onConfirm: () => {}
+    onConfirm: () => { }
   });
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [loadingLibraryName, setLoadingLibraryName] = useState('');
+  const [svgEditorState, setSvgEditorState] = useState<{
+    isOpen: boolean;
+    rowIndex: number | null;
+    svg: string | null;
+  }>({
+    isOpen: false,
+    rowIndex: null,
+    svg: null
+  });
+
+  const [vectorizerState, setVectorizerState] = useState<{
+    isOpen: boolean;
+    rowIndex: number | null;
+  }>({ isOpen: false, rowIndex: null });
+
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const appendPhrasesInputRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
 
   // Sanitize row data to prevent corrupted JSON from breaking the app
@@ -561,113 +227,108 @@ const App: React.FC = () => {
       bitmap: typeof row.bitmap === 'string' ? row.bitmap : undefined,
       rawSvg: typeof row.rawSvg === 'string' ? row.rawSvg : undefined,
       structuredSvg: typeof row.structuredSvg === 'string' ? row.structuredSvg : undefined,
-      evaluation: row.evaluation && typeof row.evaluation === 'object' ? row.evaluation : undefined,
       status: ['idle', 'processing', 'completed', 'error'].includes(row.status) ? row.status : 'idle',
       nluStatus: ['idle', 'processing', 'completed', 'error', 'outdated'].includes(row.nluStatus) ? row.nluStatus : 'idle',
       visualStatus: ['idle', 'processing', 'completed', 'error', 'outdated'].includes(row.visualStatus) ? row.visualStatus : 'idle',
       bitmapStatus: ['idle', 'processing', 'completed', 'error', 'outdated'].includes(row.bitmapStatus) ? row.bitmapStatus : 'idle',
-      evalStatus: ['idle', 'processing', 'completed', 'error', 'outdated'].includes(row.evalStatus) ? row.evalStatus : 'idle',
       nluDuration: typeof row.nluDuration === 'number' ? row.nluDuration : undefined,
       visualDuration: typeof row.visualDuration === 'number' ? row.visualDuration : undefined,
       bitmapDuration: typeof row.bitmapDuration === 'number' ? row.bitmapDuration : undefined,
-      evalDuration: typeof row.evalDuration === 'number' ? row.evalDuration : undefined,
     };
   };
 
   useEffect(() => {
     const loadData = async () => {
-      // Load rows from localStorage
-      const saved = localStorage.getItem(STORAGE_KEY);
+      // ── Step 1: config (localStorage, synchronous) ──────────────────────────
       const savedConfig = localStorage.getItem(CONFIG_KEY);
+      if (savedConfig) {
+        try { setConfig(JSON.parse(savedConfig)); } catch (e) { console.error('Failed to load config', e); }
+      }
 
+      // ── Step 2: row metadata (localStorage, synchronous → instant render) ───
+      // localStorage holds row metadata WITHOUT binary fields.
+      // This is always fast and reliable regardless of IDB state.
+      const saved = localStorage.getItem(STORAGE_KEY);
       let loadedRows: RowData[] = [];
-
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            loadedRows = parsed.map(sanitizeRow);
-          }
-        } catch (e) {
-          console.error("Failed to load rows", e);
-        }
+          if (Array.isArray(parsed)) loadedRows = parsed.map(sanitizeRow);
+        } catch (e) { console.error('Failed to load rows from localStorage', e); }
       }
 
-      // Load bitmaps from IndexedDB and merge with rows
       if (loadedRows.length > 0) {
-        try {
-          const bitmapsMap = await IndexedDBService.getAllBitmaps();
-          loadedRows = loadedRows.map(row => ({
-            ...row,
-            bitmap: bitmapsMap.get(row.id) || row.bitmap
-          }));
-        } catch (err) {
-          console.error('Failed to load bitmaps from IndexedDB:', err);
-        }
-
         setRows(loadedRows);
         setViewMode('list');
       }
+      setIsInitialized(true);
 
-      if (savedConfig) {
+      // ── Step 3: binary data (IndexedDB, async → merge when ready) ────────────
+      // Bitmaps and SVGs are stored separately in IDB; merge them in after load.
+      if (loadedRows.length > 0) {
         try {
-          setConfig(JSON.parse(savedConfig));
-        } catch (e) {
-          console.error("Failed to load config", e);
+          const [bitmapsMap, svgsMap] = await Promise.all([
+            IndexedDBService.getAllBitmaps(),
+            IndexedDBService.getAllSvgs(),
+          ]);
+          const hasBinaryData = bitmapsMap.size > 0 || svgsMap.size > 0;
+          if (hasBinaryData) {
+            setRows((prev: RowData[]) => prev.map((row: RowData) => ({
+              ...row,
+              bitmap: bitmapsMap.get(row.id) || row.bitmap,
+              rawSvg: svgsMap.get(row.id)?.rawSvg || row.rawSvg,
+              structuredSvg: svgsMap.get(row.id)?.structuredSvg || row.structuredSvg,
+            })));
+          }
+        } catch (err) {
+          console.error('Failed to load binary data from IndexedDB:', err);
         }
       }
-
-      setIsInitialized(true);
     };
 
     loadData();
   }, []);
 
-  // Auto-save to localStorage with error handling
+  // Auto-save strategy:
+  //   1. FIRST: metadata → localStorage synchronously (never blocked by IDB)
+  //      Always strip binary fields to stay well under the 5MB quota.
+  //   2. THEN: bitmaps + SVGs → IDB fire-and-forget (non-blocking)
+  //      Race condition with refresh is acceptable — IDB is a best-effort cache.
   useEffect(() => {
     if (!isInitialized) return;
 
-    const saveData = async () => {
-      try {
-        // Save bitmaps to IndexedDB first (they're too large for localStorage)
-        const bitmapSavePromises = rows
-          .filter((row: RowData) => row.bitmap)
-          .map((row: RowData) => IndexedDBService.saveBitmap(row.id, row.bitmap!));
+    // 1. Metadata → localStorage immediately (synchronous, always runs first)
+    const rowsMeta = rows.map((row: RowData) => {
+      const { bitmap, rawSvg, structuredSvg, ...meta } = row;
+      return meta;
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsMeta));
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    } catch (error) {
+      console.error('[save] localStorage quota exceeded:', error);
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) { /* */ }
+    }
 
-        await Promise.all(bitmapSavePromises).catch(err => {
-          console.error('Failed to save bitmaps to IndexedDB:', err);
-        });
+    // 2. Bitmaps → IDB (fire-and-forget, non-blocking)
+    const bitmapEntries = rows
+      .filter((row: RowData) => row.bitmap)
+      .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap! }));
+    if (bitmapEntries.length > 0) {
+      IndexedDBService.saveBitmapsBatch(bitmapEntries)
+        .catch(err => console.error('[save] IDB bitmap write failed:', err));
+    }
 
-        // Strip bitmaps from rows before saving to localStorage
-        const rowsWithoutBitmaps = rows.map((row: RowData) => ({
-          ...row,
-          bitmap: undefined, // Remove bitmap to save space (stored in IndexedDB)
-          rawSvg: undefined, // Also remove SVGs to save space
-          structuredSvg: undefined
-        }));
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsWithoutBitmaps));
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-          console.error('localStorage quota exceeded');
-          addLog('error', t('messages.storageQuotaExceeded'));
-
-          // Try to save at least the config
-          try {
-            localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-          } catch (e) {
-            console.error('Failed to save even config:', e);
-          }
-        } else {
-          console.error('Failed to save to localStorage:', error);
-          addLog('error', t('messages.storageSaveFailed'));
-        }
-      }
-    };
-
-    saveData();
-  }, [rows, config, isInitialized]);
+    // 3. SVGs → IDB (fire-and-forget, non-blocking)
+    rows
+      .filter((row: RowData) => row.rawSvg || row.structuredSvg)
+      .forEach((row: RowData) => {
+        IndexedDBService.saveSvgs(row.id, {
+          rawSvg: row.rawSvg,
+          structuredSvg: row.structuredSvg,
+        }).catch(err => console.error('[save] SVG write failed:', err));
+      });
+  }, [rows, isInitialized, config]);
 
   // Load available libraries from index.json
   useEffect(() => {
@@ -707,8 +368,7 @@ const App: React.FC = () => {
         status: 'idle',
         nluStatus: 'idle',
         visualStatus: 'idle',
-        bitmapStatus: 'idle',
-        evalStatus: 'idle'
+        bitmapStatus: 'idle'
       }));
       setRows(prev => [...prev, ...newRows]);
       setViewMode('list');
@@ -729,9 +389,8 @@ const App: React.FC = () => {
       const hasNLU = row.NLU && (typeof row.NLU === 'string' ? row.NLU.trim() !== '' : Object.keys(row.NLU).length > 0);
       const hasVisual = (row.elements && row.elements.length > 0) || (row.prompt && row.prompt.trim() !== '');
       const hasBitmap = row.bitmap && row.bitmap.trim() !== '';
-      const hasEvaluation = row.evaluation && Object.keys(row.evaluation).length > 0;
 
-      const hasAnyData = hasNLU || hasVisual || hasBitmap || hasEvaluation;
+      const hasAnyData = hasNLU || hasVisual || hasBitmap;
 
       return {
         ...row,
@@ -762,6 +421,12 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Warn user about replacement
+    if (!window.confirm("Advertencia: Al cargar una librería, se REEMPLAZARÁN todos los pictogramas actuales y la configuración (nombre, prompt, geolocalización, etc.). ¿Deseas continuar?")) {
+      e.target.value = ''; // Reset input
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -779,6 +444,8 @@ const App: React.FC = () => {
             const newConfig = { ...parsed.config };
             if (!newConfig.aspectRatio) newConfig.aspectRatio = '1:1';
             if (!newConfig.imageModel) newConfig.imageModel = 'flash';
+            if (!newConfig.credits) newConfig.credits = '';
+            if (!newConfig.license) newConfig.license = 'cc-by';
             setConfig(newConfig);
             addLog('info', 'Configuración global restaurada.');
           }
@@ -804,13 +471,25 @@ const App: React.FC = () => {
     const newEntry: RowData = {
       id: newId,
       UTTERANCE: textValue.trim() || 'Nueva Unidad Semántica',
-      status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle', evalStatus: 'idle'
+      status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle'
     };
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
     setOpenRowId(newId);
     setSearchValue('');
     setIsSearching(false);
+  };
+
+  const handleLibraryMenuToggle = () => {
+    if (!showLibraryMenu && libraryBtnRef.current) {
+      const rect = libraryBtnRef.current.getBoundingClientRect();
+      const DROPDOWN_WIDTH = 224; // w-56 = 14rem = 224px
+      setLibraryMenuPos({
+        top: rect.bottom + 4,
+        left: Math.max(8, rect.right - DROPDOWN_WIDTH),
+      });
+    }
+    setShowLibraryMenu(!showLibraryMenu);
   };
 
   const clearAll = () => {
@@ -821,11 +500,12 @@ const App: React.FC = () => {
       onConfirm: async () => {
         setRows([]);
         setLogs([]);
+        clearLibrary();
         localStorage.removeItem(STORAGE_KEY);
 
-        // Clear IndexedDB bitmaps
+        // Clear all IndexedDB data (rows, bitmaps, svgs)
         try {
-          await IndexedDBService.clearAllBitmaps();
+          await IndexedDBService.clearAllData();
         } catch (err) {
           console.error('Failed to clear IndexedDB:', err);
         }
@@ -836,41 +516,6 @@ const App: React.FC = () => {
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
       }
     });
-  };
-
-  const loadICAPModule = async () => {
-    const executeLoad = async () => {
-      setIsLoadingLibrary(true);
-      setLoadingLibraryName('ICAP-50');
-      try {
-        addLog('info', 'Cargando corpus ICAP-50 desde repositorio oficial...');
-        const module = await fetchICAPModule();
-        addLog('success', `Corpus ICAP-50 v${module.version} cargado: ${module.data.length} frases base`);
-        setRows(module.data as RowData[]);
-        setViewMode('list');
-      } catch (error) {
-        addLog('error', 'Error al cargar corpus ICAP, usando corpus base local');
-        console.error('ICAP fetch error:', error);
-        // Fallback to basic ICAP phrases
-        setRows(ICAP_MODULE_FALLBACK.data as RowData[]);
-        setViewMode('list');
-      } finally {
-        setIsLoadingLibrary(false);
-        setLoadingLibraryName('');
-        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-      }
-    };
-
-    if (rows.length > 0) {
-      setConfirmDialog({
-        isOpen: true,
-        title: 'ICAP-50',
-        message: t('home.loadICAPWarning', { count: rows.length }),
-        onConfirm: executeLoad
-      });
-    } else {
-      await executeLoad();
-    }
   };
 
   // Load library from libraries folder
@@ -912,7 +557,7 @@ const App: React.FC = () => {
       setConfirmDialog({
         isOpen: true,
         title: t('home.loadLibrary'),
-        message: t('home.loadICAPWarning', { count: rows.length }),
+        message: t('home.loadLibraryWarning', { count: rows.length }),
         onConfirm: executeLoad
       });
     } else {
@@ -963,8 +608,6 @@ const App: React.FC = () => {
         visualStatus: 'completed',
         visualDuration: duration,
         bitmapStatus: 'outdated',
-        evalStatus: 'outdated',
-        evaluation: undefined,
         shared: false
       });
       addLog('success', `Prompt regenerado en ${duration.toFixed(1)}s: "${newPrompt.substring(0, 50)}..."`);
@@ -977,17 +620,9 @@ const App: React.FC = () => {
     }
   };
 
-  const processStep = async (index: number, step: 'nlu' | 'visual' | 'bitmap' | 'eval'): Promise<boolean> => {
+  const processStep = async (index: number, step: 'nlu' | 'visual' | 'bitmap'): Promise<boolean> => {
     const row = rows[index];
     if (!row) return false;
-
-    // Manual Evaluation Step Handling
-    if (step === 'eval') {
-      // Just reset status to completed if saving
-      updateRow(index, { evalStatus: 'completed' });
-      addLog('success', `Evaluación guardada para: ${row.UTTERANCE}`);
-      return true;
-    }
 
     stopFlags.current[row.id] = false;
     const statusKey = `${step}Status` as keyof RowData;
@@ -999,7 +634,7 @@ const App: React.FC = () => {
     try {
       let result: any;
       if (step === 'nlu') {
-        result = await Gemini.generateNLU(row.UTTERANCE, addLog);
+        result = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       } else if (step === 'visual') {
         let nluObj;
         try {
@@ -1022,9 +657,9 @@ const App: React.FC = () => {
       updateRow(index, {
         [statusKey]: 'completed',
         [durationKey]: duration,
-        ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated', evalStatus: 'outdated' } : {}),
-        ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated', evalStatus: 'outdated' } : {}),
-        ...(step === 'bitmap' ? { bitmap: result, status: 'completed', evalStatus: 'idle', evaluation: undefined, shared: false } : {}) // Reset eval and clear previous evaluation data
+        ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated' } : {}),
+        ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated' } : {}),
+        ...(step === 'bitmap' ? { bitmap: result, status: 'completed', shared: false } : {})
       });
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
       return true;
@@ -1047,7 +682,7 @@ const App: React.FC = () => {
     try {
       // --- NLU Step ---
       addLog('info', `[CASCADA] Paso 1/3: COMPRENDER - Análisis semántico`);
-      updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle', evalStatus: 'idle' });
+      updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
       const nluStartTime = Date.now();
       const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog);
       if (stopFlags.current[row.id]) {
@@ -1091,20 +726,12 @@ const App: React.FC = () => {
       finalUpdates.bitmapDuration = (Date.now() - bitmapStartTime) / 1000;
       addLog('success', `✓ [CASCADA] Paso 3/3 completado en ${finalUpdates.bitmapDuration.toFixed(1)}s`);
 
-      // --- End of Automation ---
-      // We do NOT auto-run evaluation. It is manual.
-      // We set evalStatus to 'idle' to indicate it is ready for input.
-      // Clear previous evaluation and shared status since bitmap changed
-      finalUpdates.evalStatus = 'idle';
-      finalUpdates.evaluation = undefined;
       finalUpdates.shared = false;
-
       finalUpdates.status = 'completed';
       updateRow(index, finalUpdates);
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
       addLog('success', `✓ [CASCADA] Pipeline completo en ${totalTime.toFixed(1)}s total para "${row.UTTERANCE}"`);
-      addLog('info', `→ Pictograma listo para evaluación ICAP`);
 
     } catch (err: any) {
       let stepFailed: 'nlu' | 'visual' | 'bitmap' = 'nlu';
@@ -1126,35 +753,12 @@ const App: React.FC = () => {
     return count;
   };
 
-  const getRowEvaluationTotal = (row: RowData): number => {
-    if (!row.evaluation) return 0;
-    const { clarity, recognizability, semantic_transparency, pragmatic_fit, cultural_adequacy, cognitive_accessibility } = row.evaluation;
-    return clarity + recognizability + semantic_transparency + pragmatic_fit + cultural_adequacy + cognitive_accessibility;
-  };
-
   const sharePictogram = async (index: number): Promise<boolean> => {
     const row = rows[index];
     console.log('[SHARE] Iniciando proceso de compartir pictograma', { index, utterance: row?.UTTERANCE });
 
-    if (!row || !row.evaluation) {
-      console.log('[SHARE] Error: No hay fila o evaluación', { hasRow: !!row, hasEvaluation: !!row?.evaluation });
-      addLog('error', t('share.requiresEvaluation'));
-      return false;
-    }
-
-    const avgScore = (
-      row.evaluation.clarity +
-      row.evaluation.recognizability +
-      row.evaluation.semantic_transparency +
-      row.evaluation.pragmatic_fit +
-      row.evaluation.cultural_adequacy +
-      row.evaluation.cognitive_accessibility
-    ) / 6;
-    console.log('[SHARE] Evaluación promedio calculada', { avgScore, required: 4.0 });
-
-    if (avgScore < 4.0) {
-      console.log('[SHARE] Error: Evaluación insuficiente', { avgScore });
-      addLog('error', t('share.lowScore'));
+    if (!row) {
+      addLog('error', 'No se encontró la fila');
       return false;
     }
 
@@ -1176,11 +780,9 @@ const App: React.FC = () => {
         elements: row.elements,
         prompt: row.prompt,
         bitmap: row.bitmap, // Bitmap already resized to 800x800 at generation time
-        evaluation: row.evaluation,
         nluStatus: row.nluStatus,
         visualStatus: row.visualStatus,
         bitmapStatus: row.bitmapStatus,
-        evalStatus: row.evalStatus,
         source: 'pictos.net',
         author: config.author,
         timestamp: new Date().toISOString()
@@ -1221,6 +823,65 @@ const App: React.FC = () => {
     }
   };
 
+  const openSVGEditor = (index: number) => {
+    const row = rows[index];
+    const svgToEdit = row.structuredSvg || row.rawSvg;
+
+    if (!svgToEdit) {
+      addLog('error', 'No hay SVG para editar. Primero vectoriza la imagen.');
+      return;
+    }
+
+    setSvgEditorState({
+      isOpen: true,
+      rowIndex: index,
+      svg: svgToEdit
+    });
+    addLog('info', `Abriendo editor SVG para: ${row.UTTERANCE}`);
+  };
+
+  const handleSVGEditorSave = (updatedSvg: string) => {
+    if (svgEditorState.rowIndex === null) return;
+
+    updateRow(svgEditorState.rowIndex, {
+      structuredSvg: updatedSvg,
+    });
+
+    // Also update the SVG Library so SVGGenerator reflects the change immediately
+    const savedRow = rows[svgEditorState.rowIndex];
+    if (savedRow) {
+      addSVG({
+        id: savedRow.id,
+        utterance: savedRow.UTTERANCE,
+        svg: updatedSvg,
+        createdAt: new Date().toISOString(),
+        sourceRowId: savedRow.id,
+        lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
+          ? (savedRow.NLU as any).lang
+          : undefined
+      });
+    }
+
+    addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
+
+    // Close modal
+    setSvgEditorState({
+      isOpen: false,
+      rowIndex: null,
+      svg: null
+    });
+  };
+
+  const handleVectorizerApply = (result: VectorizerResult) => {
+    if (vectorizerState.rowIndex === null) return;
+    updateRow(vectorizerState.rowIndex, { rawSvg: result.svg });
+    addLog('success', `Vectorizado: ${result.layersTraced}/${result.layersTotal} capas (tier ${result.tiersUsed})`);
+    if (result.warnings.length > 0) {
+      result.warnings.forEach(w => addLog('info', w));
+    }
+    setVectorizerState({ isOpen: false, rowIndex: null });
+  };
+
   const filteredRows = useMemo(() => {
     // First filter by search
     let filtered = rows;
@@ -1235,8 +896,6 @@ const App: React.FC = () => {
         return a.UTTERANCE.localeCompare(b.UTTERANCE);
       } else if (sortBy === 'completeness') {
         return getRowCompleteness(b) - getRowCompleteness(a); // descending (more complete first)
-      } else if (sortBy === 'evaluation') {
-        return getRowEvaluationTotal(b) - getRowEvaluationTotal(a); // descending (higher score first)
       }
       return 0;
     });
@@ -1249,18 +908,21 @@ const App: React.FC = () => {
     return rows.find(r => r.id === focusMode.rowId);
   }, [focusMode, rows]);
 
+  const svgCount = svgs?.length ?? 0;
+  const pngCount = rows.filter(r => r.bitmap).length;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
-        <div className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
-            <span id="tagline" className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">v{APP_VERSION}</span>
+            <span id="tagline" className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
           </div>
         </div>
 
-        <div className="flex-1 max-w-xl mx-8">
+        <div id="search-area" className="flex-1 max-w-xl mx-8">
           <SearchComponent
             rows={rows}
             searchValue={searchValue}
@@ -1271,8 +933,9 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div id="header-actions" className="flex gap-2 items-center">
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
+          <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
 
           {/* Language Switcher */}
           <select
@@ -1285,7 +948,7 @@ const App: React.FC = () => {
             <option value="es-419">Español</option>
           </select>
 
-          <div className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
+          <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
               onClick={() => setViewMode('list')}
               className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-100 flex items-center gap-2"
@@ -1295,148 +958,177 @@ const App: React.FC = () => {
               <span className="text-xs font-medium text-slate-500 hidden md:inline">{t('header.library')}</span>
             </button>
             <button
-              onClick={() => setShowLibraryMenu(!showLibraryMenu)}
+              onClick={handleLibraryMenuToggle}
               className={`p-1.5 hover:bg-slate-50 text-slate-400 border-l border-transparent hover:text-violet-950 transition-colors ${showLibraryMenu ? 'bg-slate-50 text-violet-950' : ''}`}
             >
               <ChevronDown size={14} />
             </button>
-
-            {showLibraryMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowLibraryMenu(false)}></div>
-                <div className="absolute top-full right-0 mt-2 w-56 bg-white border border-slate-200 shadow-xl z-50 rounded-sm animate-in fade-in slide-in-from-top-2">
-                  <div className="p-2 border-b border-slate-100 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                    {t('library.graphManagement')}
-                  </div>
-                  <button
-                    onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
-                  >
-                    <Upload size={14} className="text-violet-950" /> {t('actions.import')}
-                  </button>
-                  <button
-                    onClick={() => { exportProject(); setShowLibraryMenu(false); }}
-                    disabled={rows.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
-                  >
-                    <Download size={14} className="text-emerald-600" /> {t('actions.export')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      const allSvgs = exportSVGs();
-                      const blob = new Blob([allSvgs], { type: 'application/json' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${config.author.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_svgs_${new Date().toISOString().split('T')[0]}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      setShowLibraryMenu(false);
-                      addLog('success', 'SVGs exportados correctamente.');
-                    }}
-                    disabled={!svgs || svgs.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-50"
-                  >
-                    <FileDown size={14} className="text-blue-600" /> Exportar SVGs
-                  </button>
-                  <div className="border-t border-slate-100 my-1"></div>
-                  <button
-                    onClick={clearAll}
-                    disabled={rows.length === 0}
-                    className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-50 disabled:text-slate-400"
-                  >
-                    <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
-                  </button>
-                </div>
-              </>
-            )}
           </div>
 
           <div className="w-px h-8 bg-slate-200 mx-2"></div>
 
-          <button onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')}><Sliders size={18} /></button>
-          <button onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')}><Terminal size={18} /></button>
+          <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')}><Sliders size={18} /></button>
+          <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')}><Terminal size={18} /></button>
         </div>
       </header>
 
       {showConfig && (
         <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-8 animate-in slide-in-from-top duration-200">
-          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="md:col-span-4">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Visual Style Prompt (Node Attribute)</label>
-              <textarea value={config.visualStylePrompt} onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-24" />
-            </div>
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
 
-            <div className="md:col-span-1 relative group">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">
-                Geo-Linguistic Context
-              </label>
-              <div className="flex flex-col gap-2">
-                <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Globe size={14} className="text-slate-400" />
-                    <input type="text" placeholder="Language (es, en...)" value={config.lang} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })} className="w-full text-xs bg-transparent border-none outline-none font-medium" />
-                  </div>
-                </div>
-                <GeoAutocomplete
-                  value={{
-                    lat: config.geoContext?.lat || '',
-                    lng: config.geoContext?.lng || '',
-                    region: config.geoContext?.region || ''
-                  }}
-                  onChange={(geoContext: { lat: string; lng: string; region: string }) => setConfig({ ...config, geoContext })}
+            {/* ── Columna izquierda ── */}
+            <div className="flex flex-col gap-6">
+
+              {/* field-author */}
+              <div id="field-author">
+                <FieldLabel label={t('config.spaceName')} tooltip={t('config.spaceNameTooltip')} />
+                <input
+                  type="text"
+                  value={config.author}
+                  onChange={e => setConfig({ ...config, author: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  placeholder="My Pictogram Library"
                 />
+              </div>
+
+              {/* field-credits */}
+              <div id="field-credits">
+                <FieldLabel
+                  label="Créditos"
+                  tooltip="Personas o institución responsables de esta librería. Se incluye en los metadatos al compartir o exportar para garantizar la atribución correcta."
+                />
+                <textarea
+                  value={config.credits || ''}
+                  onChange={e => setConfig({ ...config, credits: e.target.value })}
+                  placeholder="Ej: Herbert Spencer — e[ad] PUCV / Núcleo de Accesibilidad e Inclusión"
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
+                />
+              </div>
+
+              {/* field-license */}
+              <div id="field-license">
+                <FieldLabel
+                  label="Licencia"
+                  tooltip="Licencia que aplica al trabajo derivado de esta librería. Los modelos Gemini no imponen restricciones sobre uso comercial si se respentan las condiciones de uso."
+                />
+                <select
+                  value={config.license}
+                  onChange={e => setConfig({ ...config, license: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="copyright">© Copyright (todos los derechos reservados)</option>
+                  <option value="cc0">CC0 — Dominio Público</option>
+                  <option value="cc-by">CC BY — Atribución</option>
+                  <option value="cc-by-sa">CC BY-SA — Atribución-CompartirIgual</option>
+                  <option value="cc-by-nc">CC BY-NC — Atribución-NoComercial</option>
+                  <option value="cc-by-nc-sa">CC BY-NC-SA — Atribución-NoComercial-CompartirIgual</option>
+                </select>
+              </div>
+
+              {/* field-geo */}
+              <div id="field-geo">
+                <FieldLabel
+                  label="Geo-Linguistic Context"
+                  tooltip="Idioma de procesamiento NLU y región geográfica de referencia. Afecta la interpretación cultural de los pictogramas."
+                />
+                <div className="flex flex-col gap-2">
+                  <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className="text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Language (es, en...)"
+                        value={config.lang}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })}
+                        className="w-full text-xs bg-transparent border-none outline-none font-medium"
+                      />
+                    </div>
+                  </div>
+                  <GeoAutocomplete
+                    value={{
+                      lat: config.geoContext?.lat || '',
+                      lng: config.geoContext?.lng || '',
+                      region: config.geoContext?.region || ''
+                    }}
+                    onChange={(geoContext: { lat: string; lng: string; region: string }) => setConfig({ ...config, geoContext })}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Aspect Ratio</label>
-              <select value={config.aspectRatio} onChange={e => setConfig({ ...config, aspectRatio: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]">
-                <option value="1:1">Square (1:1)</option>
-                <option value="4:3">Standard (4:3)</option>
-                <option value="3:4">Portrait (3:4)</option>
-                <option value="16:9">Widescreen (16:9)</option>
-                <option value="9:16">Mobile (9:16)</option>
-              </select>
+            {/* ── Columna derecha ── */}
+            <div className="flex flex-col gap-6">
+
+              {/* field-visual-style */}
+              <div id="field-visual-style">
+                <FieldLabel
+                  label="Prompt de estilo visual"
+                  tooltip="Descripción del estilo gráfico que Gemini usará para renderizar todos los pictogramas de este espacio."
+                />
+                <textarea
+                  value={config.visualStylePrompt}
+                  onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-32 resize-none"
+                />
+              </div>
+
+              {/* field-aspect-ratio */}
+              <div id="field-aspect-ratio">
+                <FieldLabel
+                  label="Proporción"
+                  tooltip="Relación de aspecto de las imágenes generadas."
+                />
+                <select
+                  value={config.aspectRatio}
+                  onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="1:1">Square (1:1)</option>
+                  <option value="4:3">Standard (4:3)</option>
+                  <option value="3:4">Portrait (3:4)</option>
+                  <option value="16:9">Widescreen (16:9)</option>
+                  <option value="9:16">Mobile (9:16)</option>
+                </select>
+              </div>
+
+              {/* field-image-model */}
+              <div id="field-image-model">
+                <FieldLabel
+                  label="Modelo"
+                  tooltip="NanoBanana Flash es más rápido; NanoBanana Pro produce mayor calidad pero tarda más."
+                />
+                <select
+                  value={config.imageModel || 'flash'}
+                  onChange={e => setConfig({ ...config, imageModel: e.target.value })}
+                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                >
+                  <option value="flash">NanoBanana (Flash 2.5)</option>
+                  <option value="pro">NanoBanana Pro (Gemini 3 Pro)</option>
+                </select>
+              </div>
+
+              {/* field-style-editor */}
+              <div id="field-style-editor">
+                <FieldLabel
+                  label="Estilos"
+                  tooltip="Editor visual de estilos CSS para los SVGs generados. Define clases reutilizables para animaciones y apariencia."
+                />
+                <button
+                  onClick={() => setShowStyleEditor(true)}
+                  className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors flex items-center justify-center gap-2"
+                >
+                  <Palette size={14} /> Abrir editor
+                </button>
+              </div>
             </div>
 
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Image Model</label>
-              <select value={config.imageModel || 'flash'} onChange={e => setConfig({ ...config, imageModel: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]">
-                <option value="flash">NanoBanana (Flash 2.5)</option>
-                <option value="pro">NanoBanana Pro (Gemini 3 Pro)</option>
-              </select>
-            </div>
-
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Graphic Style</label>
-              <button
-                onClick={() => setShowStyleEditor(true)}
-                className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors h-[42px] flex items-center justify-center gap-2"
-              >
-                <Palette size={14} /> Open Style Editor
-              </button>
-            </div>
-
-            <div className="md:col-span-1">
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 flex items-center gap-1">
-                {t('config.spaceName')}
-                <div className="group/tooltip relative">
-                  <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
-                  <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-50 leading-relaxed">
-                    {t('config.spaceNameTooltip')}
-                  </div>
-                </div>
-              </label>
-              <input type="text" value={config.author} onChange={e => setConfig({ ...config, author: e.target.value })} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-[42px]" placeholder="My Pictogram Library" />
-            </div>
           </div>
         </div>
       )}
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
-          <div className="mb-6 flex justify-end gap-2">
+          <div id="sort-controls" className="mb-6 flex justify-end gap-2">
             <span className="text-[10px] font-medium uppercase text-slate-400 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
             <button
               onClick={() => setSortBy('alphabetical')}
@@ -1450,18 +1142,12 @@ const App: React.FC = () => {
             >
               {t('library.completeness')}
             </button>
-            <button
-              onClick={() => setSortBy('evaluation')}
-              className={`px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider border transition-all ${sortBy === 'evaluation' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-            >
-              {t('library.evaluation')}
-            </button>
           </div>
         )}
         {viewMode === 'home' ? (
-          <div className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
-            <div className="space-y-4">
-              <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.4em] shadow-lg">
+          <div id="home-view" className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
+            <div id="hero-area" className="space-y-4">
+              <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
                 <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
               </div>
               <h2 className="text-8xl font-black tracking-tighter text-slate-900 leading-none">{config.author}</h2>
@@ -1470,28 +1156,8 @@ const App: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
-              <div onClick={loadICAPModule} className="bg-white p-12 border border-slate-200 text-left space-y-6 shadow-xl hover:border-violet-950 transition-all cursor-pointer group hover:-translate-y-1 relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-1 uppercase tracking-widest">ICAP-50</div>
-                <div className="text-emerald-600 group-hover:scale-110 transition-transform"><BookOpen size={40} /></div>
-                <div>
-                  <h3 className="font-bold text-xl uppercase tracking-wider text-slate-900">{t('home.icapModule')}</h3>
-                  <div className="text-[10px] text-slate-400 font-mono mt-1">{t('home.icapNamespace')}</div>
-                </div>
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">{t('home.icapDescription')}</p>
-                <a
-                  href="https://github.com/mediafranca/ICAP"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1 text-[10px] text-emerald-600 hover:text-emerald-800 font-medium uppercase tracking-wider transition-colors"
-                >
-                  <ExternalLink size={12} />
-                  {t('home.icapRepository')}
-                </a>
-              </div>
-
-              <div onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1">
+            <div className="flex justify-center max-w-2xl mx-auto">
+              <div id="import-card" onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md">
                 <div className="text-white group-hover:scale-110 transition-transform"><FileText size={40} /></div>
                 <div>
                   <h3 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h3>
@@ -1510,44 +1176,44 @@ const App: React.FC = () => {
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="example-libraries" className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {availableLibraries.map((library: LibraryMetadata) => (
                     <div
                       key={library.filename}
-                    onClick={() => loadLibrary(library.filename)}
-                    className="bg-slate-50 border border-slate-200 p-6 text-left space-y-3 hover:border-violet-600 hover:bg-white transition-all cursor-pointer group"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="text-violet-600 group-hover:scale-110 transition-transform">
-                        <Library size={24} />
+                      onClick={() => loadLibrary(library.filename)}
+                      className="bg-slate-50 border border-slate-200 p-6 text-left space-y-3 hover:border-violet-600 hover:bg-white transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-violet-600 group-hover:scale-110 transition-transform">
+                          <Library size={24} />
+                        </div>
+                        <div className="flex gap-1">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5">
+                            {library.language}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5">
-                          {library.language}
-                        </span>
+
+                      <div>
+                        <h4 className="font-bold text-sm uppercase tracking-wide text-slate-900">{library.name}</h4>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{library.location}</div>
                       </div>
-                    </div>
 
-                    <div>
-                      <h4 className="font-bold text-sm uppercase tracking-wide text-slate-900">{library.name}</h4>
-                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{library.location}</div>
-                    </div>
-
-                    {/* {library.description && (
+                      {/* {library.description && (
                       <p className="text-xs text-slate-500 leading-relaxed">{library.description}</p>
                     )} */}
 
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                      <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
-                        {t('home.loadLibrary')}
-                      </span>
-                      {library.items && (
-                        <span className="text-[10px] text-violet-600 font-bold">
-                          {library.items} {t('home.items')}
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                        <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
+                          {t('home.loadLibrary')}
                         </span>
-                      )}
+                        {library.items && (
+                          <span className="text-[10px] text-violet-600 font-bold">
+                            {library.items} {t('home.items')}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
                   ))}
                 </div>
               </div>
@@ -1566,7 +1232,7 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+          <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
               const globalIndex = rows.findIndex(r => r.id === row.id);
               return (
@@ -1580,17 +1246,26 @@ const App: React.FC = () => {
                   }}
                   onCascade={() => processCascade(globalIndex)}
                   onDelete={() => {
-                    // Delete bitmap from IndexedDB
+                    // Delete bitmap and SVG from IndexedDB
                     IndexedDBService.deleteBitmap(row.id).catch(err => {
                       console.error('Failed to delete bitmap from IndexedDB:', err);
                     });
+                    IndexedDBService.deleteSvgs(row.id).catch(err => {
+                      console.error('Failed to delete SVG from IndexedDB:', err);
+                    });
                     // Remove row from state
                     setRows(prev => prev.filter(r => r.id !== row.id));
+                    // If the deleted row was in focus mode, clear focus mode
+                    if (focusMode?.rowId === row.id) {
+                      setFocusMode(null);
+                    }
                   }}
                   onFocus={step => setFocusMode({ step, rowId: row.id })}
                   onShare={() => sharePictogram(globalIndex)}
                   onLog={addLog}
                   config={config}
+                  onOpenEditor={() => openSVGEditor(globalIndex)}
+                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: globalIndex })}
                 />
               );
             })}
@@ -1601,7 +1276,7 @@ const App: React.FC = () => {
       {showConsole && (
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-400 mono text-[10px] p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
-            <span className="flex items-center gap-3"><Terminal size={14} /> Semantic Trace Monitor</span>
+            <span className="flex items-center gap-3"><Terminal size={14} /> PICTOS Console</span>
             <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush</button>
           </div>
           {logs.slice().reverse().map(l => (
@@ -1635,6 +1310,29 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* SVG Editor Modal */}
+      {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowIndex !== null && (
+        <SVGEditorModal
+          isOpen={svgEditorState.isOpen}
+          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null })}
+          initialSvg={svgEditorState.svg}
+          utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
+          onSave={handleSVGEditorSave}
+          styleDefs={config.svgStyleDefs ?? []}
+        />
+      )}
+
+      {/* Vectorizer Modal */}
+      {vectorizerState.isOpen && vectorizerState.rowIndex !== null && (
+        <VectorizerModal
+          isOpen={vectorizerState.isOpen}
+          bitmap={rows[vectorizerState.rowIndex]?.bitmap || ''}
+          utterance={rows[vectorizerState.rowIndex]?.UTTERANCE || ''}
+          onClose={() => setVectorizerState({ isOpen: false, rowIndex: null })}
+          onApply={handleVectorizerApply}
+        />
+      )}
+
       {/* Confirmation Dialog Modal */}
       {confirmDialog.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] animate-in fade-in duration-200" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}>
@@ -1665,6 +1363,107 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Library Dropdown Portal */}
+      {showLibraryMenu && ReactDOM.createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[55]"
+            onClick={() => setShowLibraryMenu(false)}
+          />
+          <div
+            id="library-dropdown"
+            className="fixed w-56 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
+            style={{ top: libraryMenuPos.top, left: libraryMenuPos.left }}
+          >
+            <div className="px-4 py-2 border-b border-slate-100 text-[10px] font-bold text-slate-400 tracking-wider tabular-nums">
+              {rows.length} {rows.length === 1 ? 'elemento' : 'elementos'}
+            </div>
+            <button
+              onClick={() => { appendPhrasesInputRef.current?.click(); setShowLibraryMenu(false); }}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+            >
+              <Upload size={14} className="text-violet-950" /> Importar frases (.txt)
+            </button>
+            <button
+              onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+            >
+              <Upload size={14} className="text-emerald-600" /> Importar librería (.json)
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={() => { exportProject(); setShowLibraryMenu(false); }}
+              disabled={rows.length === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} className="text-slate-500" /> Exportar librería (.json)
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={async () => {
+                const rowsWithBitmaps = rows.filter(r => r.bitmap);
+                if (rowsWithBitmaps.length === 0) return;
+                const zip = new JSZip();
+                const folder = zip.folder('pictogramas');
+                rowsWithBitmaps.forEach(row => {
+                  const base64Data = row.bitmap!.split(',')[1];
+                  const filename = sanitizeFilename(row.UTTERANCE) || row.id;
+                  folder!.file(`${filename}.png`, base64Data, { base64: true });
+                });
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
+                a.download = `${safeAuthor}_pngs_${new Date().toISOString().split('T')[0]}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setShowLibraryMenu(false);
+                addLog('success', `${rowsWithBitmaps.length} PNGs exportados como ZIP.`);
+              }}
+              disabled={pngCount === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ImageIcon size={14} className="text-orange-500" /> Descargar PNGs ({pngCount})
+            </button>
+            <button
+              onClick={async () => {
+                if (svgs.length === 0) return;
+                const zip = new JSZip();
+                const folder = zip.folder('svgs');
+                svgs.forEach(picto => {
+                  const filename = sanitizeFilename(picto.utterance) || picto.id;
+                  folder!.file(`${filename}.svg`, picto.svg);
+                });
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
+                a.download = `${safeAuthor}_svgs_${new Date().toISOString().split('T')[0]}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setShowLibraryMenu(false);
+                addLog('success', `${svgs.length} SVGs exportados como ZIP.`);
+              }}
+              disabled={svgCount === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <FileDown size={14} className="text-blue-600" /> Exportar SVGs ({svgCount})
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={clearAll}
+              disabled={rows.length === 0}
+              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
+            </button>
+          </div>
+        </>,
+        document.body
+      )}
+
       {/* Loading Library Overlay */}
       {isLoadingLibrary && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] animate-in fade-in duration-200">
@@ -1690,155 +1489,45 @@ const RowComponent: React.FC<{
   onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config }) => {
+  onOpenEditor: () => void;
+  onOpenVectorizer: () => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
-  const { addSVG } = useSVGLibrary();
-  const [svgProcessingStatus, setSvgProcessingStatus] = React.useState<string>('');
-  const [isProcessingSvg, setIsProcessingSvg] = React.useState(false);
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
   const [isPromptEditing, setIsPromptEditing] = React.useState(false);
   const [isRegeneratingPrompt, setIsRegeneratingPrompt] = React.useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
-  const handleRetraceSVG = async () => {
-    if (!row.bitmap) return;
-
-    setIsProcessingSvg(true);
-    setSvgProcessingStatus('Vectorizando bitmap...');
-
-    try {
-      onLog('info', `Re-trazando SVG desde bitmap para: ${row.UTTERANCE}`);
-
-      const tracedSvg = await vectorizeBitmap(
-        row.bitmap.replace(/^data:image\/\w+;base64,/, ""),
-        {},
-        (progress) => {
-          setSvgProcessingStatus(`Vectorizando: ${progress}%`);
-        }
-      );
-
-      // Update raw SVG
-      onUpdate({ rawSvg: tracedSvg });
-
-      onLog('success', `SVG re-trazado correctamente`);
-      setSvgProcessingStatus('');
-      setIsProcessingSvg(false);
-
-    } catch (err) {
-      console.error(err);
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      onLog('error', `Error al re-trazar SVG: ${msg}`);
-      setSvgProcessingStatus('');
-      setIsProcessingSvg(false);
-    }
-  };
-
-  const handleProcessRawSVG = async () => {
-    if (!row.rawSvg || !row.NLU || !row.bitmap) return;
-
-    setIsProcessingSvg(true);
-    setSvgProcessingStatus('Preparando prompt semántico...');
-
-    try {
-      await new Promise(r => setTimeout(r, 600)); // UX delay
-
-      const nluData = typeof row.NLU === 'object' ? row.NLU as NLUData : undefined;
-      if (!nluData) throw new Error("Invalid NLU data");
-
-      onLog('info', `Estructurando SVG para: ${row.UTTERANCE}`);
-      setSvgProcessingStatus('Enviando a Gemini Pro...');
-
-      const result = await structureSVG({
-        rawSvg: row.rawSvg,
-        bitmap: row.bitmap,
-        nlu: nluData,
-        elements: row.elements || [],
-        evaluation: row.evaluation || {} as EvaluationMetrics,
-        utterance: row.UTTERANCE,
-        config,
-        onProgress: (msg) => onLog('info', msg),
-        onStatus: (s) => {
-          switch (s) {
-            case 'sending': setSvgProcessingStatus('Enviando imagen + SVG...'); break;
-            case 'receiving': setSvgProcessingStatus('Recibiendo estructura...'); break;
-            case 'sanitizing': setSvgProcessingStatus('Aplicando estilos...'); break;
-            default: setSvgProcessingStatus(s);
-          }
-        }
-      });
-
-      if (!result.success || !result.svg) {
-        throw new Error(result.error || "Failed to structure SVG");
-      }
-
-      // Save to library
-      addSVG({
-        id: row.id,
-        utterance: row.UTTERANCE,
-        svg: result.svg,
-        createdAt: new Date().toISOString(),
-        sourceRowId: row.id,
-        icapScore: row.evaluation ?
-          (row.evaluation.clarity + row.evaluation.recognizability + row.evaluation.semantic_transparency +
-            row.evaluation.pragmatic_fit + row.evaluation.cultural_adequacy + row.evaluation.cognitive_accessibility) / 6
-          : 0,
-        lang: nluData.lang
-      });
-
-      // Persist to row
-      onUpdate({ structuredSvg: result.svg });
-
-      onLog('success', `SVG estructurado correctamente`);
-      setSvgProcessingStatus('');
-      setIsProcessingSvg(false);
-
-    } catch (err) {
-      console.error(err);
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      onLog('error', `Error al procesar SVG: ${msg}`);
-      setSvgProcessingStatus('');
-      setIsProcessingSvg(false);
-    }
-  };
-
   return (
-    <div id={`pictogramRow-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
-      <div className="p-6 flex items-center gap-8 group">
+    <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
+      <div id={`row-header-${row.id}`} className="p-6 flex items-center gap-8 group">
         <input
-          type="text" value={row.UTTERANCE} onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated', evalStatus: 'outdated' })}
+          type="text" value={row.UTTERANCE} onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
           className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light truncate"
         />
-        <div className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
+        <div id={`pipeline-badges-${row.id}`} className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
           <Badge label={t('pipeline.understand').toUpperCase()} status={row.nluStatus} />
           <Badge label={t('pipeline.compose').toUpperCase()} status={row.visualStatus} />
           <Badge label={t('pipeline.produce').toUpperCase()} status={row.bitmapStatus} />
         </div>
-        {(() => {
-          const evalScore = getEvaluationScore(row.evaluation);
-          const hasBorder = row.evaluation && row.bitmap;
-          return (
+        <div
+          id={`picto-thumbnail-${row.id}`}
+          className="w-14 h-14 border border-slate-200 bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          {(row.structuredSvg || row.rawSvg) ? (
             <div
-              style={{
-                borderColor: hasBorder ? evalScore.color : '#e2e8f0',
-                borderWidth: hasBorder ? '3px' : '1px'
-              }}
-              className="w-14 h-14 border bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-all cursor-pointer overflow-hidden relative"
-              onClick={() => setIsOpen(!isOpen)}
-            >
-              {row.bitmap ? <img src={row.bitmap} alt="Miniature" className="w-full h-full object-contain" /> : <div className="text-slate-200"><ImageIcon size={20} /></div>}
-              {hasBorder && (
-                <div
-                  className="absolute -top-1 -right-1 px-1 py-0.5 rounded-sm text-white font-bold text-[9px] shadow-md"
-                  style={{ backgroundColor: evalScore.color }}
-                >
-                  {evalScore.average.toFixed(1)}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-        <div className="flex gap-2 transition-all">
+              dangerouslySetInnerHTML={{ __html: row.structuredSvg || row.rawSvg! }}
+              className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+            />
+          ) : row.bitmap ? (
+            <img src={row.bitmap} alt="Miniature" className="w-full h-full object-contain" />
+          ) : (
+            <div className="text-slate-200"><ImageIcon size={20} /></div>
+          )}
+        </div>
+        <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
           {row.status === 'processing' ? (
             <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title="Detener proceso">
               <Square size={18} />
@@ -1854,286 +1543,174 @@ const RowComponent: React.FC<{
 
       {isOpen && (
         <>
-          <div className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
-          <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
-            <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated', evalStatus: 'outdated' })} />
-          </StepBox>
-          <StepBox
-            id="block-compose"
-            label={t('pipeline.compose')}
-            status={row.visualStatus}
-            onRegen={() => {
-              onProcess('visual');
-              setElementsManuallyEdited(false);
-              setPromptManuallyEdited(false);
-            }}
-            onStop={onStop}
-            onFocus={() => onFocus('visual')}
-            duration={row.visualDuration}
-          >
-            <div className="flex flex-col h-full">
-              <div className="flex-1 flex flex-col gap-6 overflow-y-auto">
-                <div id="hierarchical-elements">
-                  <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
-                  <ElementsEditor elements={row.elements || []} onUpdate={val => {
-                    onUpdate({ elements: val, bitmapStatus: 'outdated', evalStatus: 'outdated', evaluation: undefined, shared: false });
-                    setElementsManuallyEdited(true);
-                  }} />
-                  {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        setIsRegeneratingPrompt(true);
-                        await onRegeneratePrompt();
-                        setIsRegeneratingPrompt(false);
-                        setElementsManuallyEdited(false);
-                        setPromptManuallyEdited(false);
-                      }}
-                      disabled={isRegeneratingPrompt}
-                      className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-[10px] font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
-                      title={t('actions.regeneratePrompt')}
-                    >
-                      {isRegeneratingPrompt ? (
-                        <>
-                          <RefreshCw size={12} className="animate-spin" />
-                          {t('actions.regenerate')}...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw size={12} />
-                          {t('actions.regeneratePrompt')}
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-                <div id="spatial-prompt" className="flex-1 mt-6 border-t pt-6 border-slate-200 flex flex-col gap-3">
-                  <label className="text-[10px] font-medium uppercase text-slate-400 block tracking-widest">{t('editor.spatialLogic')}</label>
-                  {isPromptEditing ? (
-                    <textarea
-                      value={row.prompt || ""}
-                      onChange={e => {
-                        onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', evalStatus: 'outdated', evaluation: undefined, shared: false });
-                        setPromptManuallyEdited(true);
-                      }}
-                      onBlur={() => setIsPromptEditing(false)}
-                      autoFocus
-                      className="w-full min-h-[100px] border-none p-0 text-sm font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
-                    />
-                  ) : (
-                    <div
-                      onClick={() => setIsPromptEditing(true)}
-                      className="w-full min-h-[100px] cursor-text text-sm font-light text-slate-700 leading-relaxed"
-                    >
-                      {row.prompt && row.elements && row.elements.length > 0 ? (
-                        <PromptRenderer prompt={row.prompt} elements={row.elements} />
-                      ) : (
-                        <div className="text-slate-400">{row.prompt || ""}</div>
-                      )}
-                    </div>
-                  )}
-                  {promptManuallyEdited && row.prompt && row.elements && row.elements.length > 0 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onProcess('bitmap');
-                        setPromptManuallyEdited(false);
-                      }}
-                      className="mt-3 w-full py-2 px-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-widest shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
-                      title={t('pipeline.produce')}
-                    >
-                      <Play size={12} />
-                      {t('pipeline.produce')}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </StepBox>
-          <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
-            actionNode={row.bitmap && <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center bg-white shadow-sm" title="Download Image"><FileDown size={14} /></button>}
-          >
-            <div className="flex flex-col h-full gap-4">
-              {(() => {
-                const evalScore = getEvaluationScore(row.evaluation);
-                const hasBorder = row.evaluation && row.bitmap;
-                return (
-                  <div
-                    style={{
-                      backgroundColor: '#eeeeee',
-                      borderColor: hasBorder ? evalScore.color : '#e2e8f0',
-                      borderWidth: hasBorder ? '4px' : '2px'
-                    }}
-                    className="flex-1 border flex items-center justify-center p-4 shadow-inner relative overflow-hidden group/preview min-h-[250px] transition-all"
-                  >
-                    {row.bitmap ? (
-                      <img src={row.bitmap} alt="Generated Pictogram" className="w-full h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
-                    ) : (
-                      <div className="text-[10px] text-slate-400 uppercase font-medium">{t('editor.noBitmapRender')}</div>
-                    )}
-                    {hasBorder && (
-                      <div
-                        className="absolute top-2 right-2 px-2 py-1 rounded-sm text-white font-bold text-sm shadow-lg"
-                        style={{ backgroundColor: evalScore.color }}
+          <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
+            <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
+              <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />
+            </StepBox>
+            <StepBox
+              id="block-compose"
+              label={t('pipeline.compose')}
+              status={row.visualStatus}
+              onRegen={() => {
+                onProcess('visual');
+                setElementsManuallyEdited(false);
+                setPromptManuallyEdited(false);
+              }}
+              onStop={onStop}
+              onFocus={() => onFocus('visual')}
+              duration={row.visualDuration}
+            >
+              <div className="flex flex-col h-full">
+                <div className="flex-1 flex flex-col gap-6 overflow-y-auto">
+                  <div id="hierarchical-elements">
+                    <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
+                    <ElementsEditor elements={row.elements || []} onUpdate={val => {
+                      onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
+                      setElementsManuallyEdited(true);
+                    }} />
+                    {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setIsRegeneratingPrompt(true);
+                          await onRegeneratePrompt();
+                          setIsRegeneratingPrompt(false);
+                          setElementsManuallyEdited(false);
+                          setPromptManuallyEdited(false);
+                        }}
+                        disabled={isRegeneratingPrompt}
+                        className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-[10px] font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
+                        title={t('actions.regeneratePrompt')}
                       >
-                        {evalScore.average.toFixed(1)}
+                        {isRegeneratingPrompt ? (
+                          <>
+                            <RefreshCw size={12} className="animate-spin" />
+                            {t('actions.regenerate')}...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw size={12} />
+                            {t('actions.regeneratePrompt')}
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div id="spatial-prompt" className="flex-1 mt-6 border-t pt-6 border-slate-200 flex flex-col gap-3">
+                    <label className="text-[10px] font-medium uppercase text-slate-400 block tracking-widest">{t('editor.spatialLogic')}</label>
+                    {isPromptEditing ? (
+                      <textarea
+                        value={row.prompt || ""}
+                        onChange={e => {
+                          onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', shared: false });
+                          setPromptManuallyEdited(true);
+                        }}
+                        onBlur={() => setIsPromptEditing(false)}
+                        autoFocus
+                        className="w-full min-h-[100px] border-none p-0 text-sm font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => setIsPromptEditing(true)}
+                        className="w-full min-h-[100px] cursor-text text-sm font-light text-slate-700 leading-relaxed"
+                      >
+                        {row.prompt && row.elements && row.elements.length > 0 ? (
+                          <PromptRenderer prompt={row.prompt} elements={row.elements} />
+                        ) : (
+                          <div className="text-slate-400">{row.prompt || ""}</div>
+                        )}
                       </div>
                     )}
-                  </div>
-                );
-              })()}
-
-              {/* SVG Thumbnails Section */}
-              {(row.rawSvg || row.structuredSvg) && (
-                <div className="flex gap-4 items-center justify-center pt-4 border-t border-slate-200">
-                  <label className="text-[10px] font-medium uppercase text-slate-400 tracking-widest mr-2">SVG:</label>
-
-                  {row.rawSvg && (
-                    <SVGThumbnail
-                      svg={row.rawSvg}
-                      type="raw"
-                      utterance={row.UTTERANCE}
-                      isProcessing={isProcessingSvg}
-                      processingStatus={svgProcessingStatus}
-                      aspectRatio={config.aspectRatio}
-                      onDownload={() => {
-                        const blob = new Blob([row.rawSvg!], { type: 'image/svg+xml' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `${sanitizeFilename(row.UTTERANCE)}_raw.svg`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }}
-                      onRetrace={handleRetraceSVG}
-                      onProcess={handleProcessRawSVG}
-                    />
-                  )}
-
-                  {row.structuredSvg && (
-                    <SVGThumbnail
-                      svg={row.structuredSvg}
-                      type="structured"
-                      utterance={row.UTTERANCE}
-                      onDownload={() => {
-                        const blob = new Blob([row.structuredSvg!], { type: 'image/svg+xml' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `${sanitizeFilename(row.UTTERANCE)}.svg`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }}
-                      onRetrace={handleRetraceSVG}
-                    />
-                  )}
-                </div>
-              )}
-
-              {/* Evaluation Section - Integrated within Producir */}
-              {row.bitmap && (
-                <div className="mt-4 pt-4 border-t border-slate-200">
-                  <div className="flex justify-between items-center mb-3">
-                    <label className="text-[10px] font-medium uppercase text-slate-400 tracking-widest">Evaluación ICAP</label>
-                    <div className="flex gap-2 items-center">
-                      {(() => {
-                        if (!row.evaluation) return null;
-                        const avgScore = (
-                          row.evaluation.clarity +
-                          row.evaluation.recognizability +
-                          row.evaluation.semantic_transparency +
-                          row.evaluation.pragmatic_fit +
-                          row.evaluation.cultural_adequacy +
-                          row.evaluation.cognitive_accessibility
-                        ) / 6;
-
-                        const canShare = avgScore >= 4.0 && !row.shared;
-                        const isShared = row.shared;
-
-                        // Solo mostrar botón si puede compartir o ya está compartido
-                        if (!canShare && !isShared) return null;
-
-                        return (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!isShared) onShare();
-                            }}
-                            disabled={isShared}
-                            className={`p-1.5 border transition-all rounded-full flex items-center justify-center ${
-                              isShared
-                                ? 'border-emerald-500 text-emerald-600 bg-emerald-50 cursor-default'
-                                : 'border-emerald-500 text-emerald-600 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-600'
-                            }`}
-                            title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
-                          >
-                            {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
-                          </button>
-                        );
-                      })()}
+                    {promptManuallyEdited && row.prompt && row.elements && row.elements.length > 0 && (
                       <button
-                        onClick={() => onFocus('eval')}
-                        className="p-1.5 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center"
-                        title="Abrir Editor de Evaluación"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onProcess('bitmap');
+                          setPromptManuallyEdited(false);
+                        }}
+                        className="mt-3 w-full py-2 px-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-widest shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
+                        title={t('pipeline.produce')}
                       >
-                        <Hexagon size={14} />
+                        <Play size={12} />
+                        {t('pipeline.produce')}
                       </button>
-                    </div>
+                    )}
                   </div>
-                  {row.evaluation ? (
-                    <div className="flex items-center justify-center">
-                      <HexagonChart metrics={row.evaluation} size={120} />
-                    </div>
+                </div>
+              </div>
+            </StepBox>
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
+            >
+              <div className="flex flex-col h-full gap-4">
+                <div
+                  id="bitmap-preview"
+                  className="relative flex-1 border border-slate-200 flex items-center justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px] bg-neutral-200"
+                >
+                  {row.bitmap ? (
+                    <>
+                      <img src={row.bitmap} alt="Generated Pictogram" className="w-full h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
+                        className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                        title="Download PNG"
+                      >
+                        <FileDown size={14} />
+                      </button>
+                    </>
                   ) : (
-                    <div className="text-center py-4">
-                      <button
-                        onClick={() => onFocus('eval')}
-                        className="flex items-center gap-2 mx-auto bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 hover:border-violet-300 px-4 py-2 text-[10px] font-bold uppercase tracking-widest transition-all rounded-sm"
-                      >
-                        <Hexagon size={14} /> Evaluar Pictograma
-                      </button>
-                    </div>
+                    <div className="text-[10px] text-slate-400 uppercase font-medium">{t('editor.noBitmapRender')}</div>
                   )}
                 </div>
-              )}
-            </div>
-          </StepBox>
-        </div>
 
-        {/* Row Actions: Copy and Delete */}
-        <div className="px-8 pb-6 bg-slate-50/30 flex justify-end gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(JSON.stringify(row, null, 2))
-                .then(() => {
-                  onLog('success', t('actions.copyRowSuccess', { utterance: row.UTTERANCE }));
-                })
-                .catch((err) => {
-                  onLog('error', t('actions.copyRowError', { error: err.message }));
-                });
-            }}
-            className="p-2 border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all bg-white shadow-sm"
-            title={t('actions.copyRow')}
-          >
-            <Copy size={14} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowDeleteConfirm(true);
-            }}
-            className="p-2 border border-slate-200 hover:border-rose-600 text-slate-400 hover:text-rose-600 transition-all bg-white shadow-sm"
-            title={t('actions.deleteRow')}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      </>
+                {/* SVG Generation - same height as bitmap */}
+                {row.bitmap && (
+                  <div className="border-t border-slate-200 min-h-[250px] flex flex-col">
+                    <SVGGenerator
+                      row={row}
+                      config={config}
+                      onLog={onLog}
+                      onUpdate={onUpdate}
+                      onOpenEditor={onOpenEditor}
+                      onOpenVectorizer={onOpenVectorizer}
+                    />
+                  </div>
+                )}
+
+
+              </div>
+            </StepBox>
+          </div>
+
+          {/* Row Actions: Copy and Delete */}
+          <div className="px-8 pb-6 bg-slate-50/30 flex justify-end gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(JSON.stringify(row, null, 2))
+                  .then(() => {
+                    onLog('success', t('actions.copyRowSuccess', { utterance: row.UTTERANCE }));
+                  })
+                  .catch((err) => {
+                    onLog('error', t('actions.copyRowError', { error: err.message }));
+                  });
+              }}
+              className="p-2 border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all bg-white shadow-sm"
+              title={t('actions.copyRow')}
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteConfirm(true);
+              }}
+              className="p-2 border border-slate-200 hover:border-rose-600 text-slate-400 hover:text-rose-600 transition-all bg-white shadow-sm"
+              title={t('actions.deleteRow')}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </>
       )}
 
       {/* Delete Confirmation Modal */}
@@ -2564,8 +2141,6 @@ const FocusViewModal: React.FC<{
       contentToCopy = JSON.stringify({ "elements": row.elements, "prompt": row.prompt }, null, 2);
     } else if (mode === 'bitmap') {
       contentToCopy = row.prompt || '';
-    } else if (mode === 'eval') {
-      contentToCopy = JSON.stringify(row.evaluation, null, 2);
     }
 
     if (contentToCopy) {
@@ -2576,22 +2151,21 @@ const FocusViewModal: React.FC<{
     }
   };
 
-  const titleMap = {
+  const titleMap: Record<string, string> = {
     nlu: t('pipeline.understand'),
     visual: t('pipeline.compose'),
-    bitmap: t('pipeline.produce'),
-    eval: t('evaluation.icap')
+    bitmap: t('pipeline.produce')
   };
 
   const renderContent = () => {
     switch (mode) {
-      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated', evalStatus: 'outdated' })} />;
+      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />;
       case 'visual': return (
         <div className="flex flex-col h-full gap-6">
           <div>
             <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
             <ElementsEditor elements={row.elements || []} onUpdate={val => {
-              onUpdate({ elements: val, bitmapStatus: 'outdated', evalStatus: 'outdated', evaluation: undefined, shared: false });
+              onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
               setElementsManuallyEdited(true);
             }} />
             {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
@@ -2626,7 +2200,7 @@ const FocusViewModal: React.FC<{
             {isPromptEditing ? (
               <textarea
                 value={row.prompt || ""}
-                onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', evalStatus: 'outdated', evaluation: undefined, shared: false })}
+                onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', shared: false })}
                 onBlur={() => setIsPromptEditing(false)}
                 autoFocus
                 className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
@@ -2676,30 +2250,15 @@ const FocusViewModal: React.FC<{
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">SVG Output (SSoT)</h3>
                   {(() => {
-                    if (!row.evaluation) return null;
-                    const avgScore = (
-                      row.evaluation.clarity +
-                      row.evaluation.recognizability +
-                      row.evaluation.semantic_transparency +
-                      row.evaluation.pragmatic_fit +
-                      row.evaluation.cultural_adequacy +
-                      row.evaluation.cognitive_accessibility
-                    ) / 6;
-
-                    const canShare = avgScore >= 4.0 && !row.shared;
                     const isShared = row.shared;
-
-                    if (!canShare && !isShared) return null;
-
                     return (
                       <button
                         onClick={onShare}
                         disabled={isShared}
-                        className={`p-2 transition-all shadow-sm ${
-                          isShared
-                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                            : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
-                        }`}
+                        className={`p-2 transition-all shadow-sm ${isShared
+                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                          : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
+                          }`}
                         title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
                       >
                         {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
@@ -2710,17 +2269,6 @@ const FocusViewModal: React.FC<{
                 <div className="flex-1 overflow-hidden">
                   <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} />
                 </div>
-              </div>
-            </div>
-
-            {/* Right Column: Editor Section */}
-            <div className="w-7/12 p-8 flex flex-col overflow-hidden">
-              <div className="flex-1 flex flex-col min-h-0">
-                <EvaluationEditor
-                  metrics={row.evaluation}
-                  onUpdate={(m) => onUpdate({ evaluation: m })}
-                  compact={true}
-                />
               </div>
             </div>
           </div>
@@ -2749,17 +2297,6 @@ const FocusViewModal: React.FC<{
           <button onClick={handleCopy} className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-[10px] tracking-widest hover:bg-black transition-all shadow-lg">
             <Copy size={14} /> {copyStatus}
           </button>
-          {mode === 'eval' && (
-            <button
-              onClick={() => {
-                onUpdate({ evalStatus: 'completed' });
-                onClose();
-              }}
-              className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 px-6 py-3 text-[10px] font-bold uppercase tracking-widest transition-all rounded-sm shadow-sm"
-            >
-              <CheckCircle size={14} className="text-emerald-600" /> Confirmar Evaluación
-            </button>
-          )}
         </footer>
       </div>
     </div>
