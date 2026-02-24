@@ -125,7 +125,7 @@ MediaFranca. https://pictos.net
 
 ---
 
-*Licencia: MIT (código) · CC-BY-4.0 (pictogramas generados)*
+*Licencia: Apache 2.0 (código) · CC-BY-4.0 (pictogramas generados, según elección del usuario)*
 
 ---
 
