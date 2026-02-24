@@ -70,7 +70,7 @@ pictos-net/
 │   ├── SVGGenerator.tsx             # SVG generation UI component
 │   └── PictoForge/                  # SVG editing components
 ├── data/
-│   └── canonicalData.ts             # Módulo de datos canónicos
+│   └── canonicalData.ts             # ICAP core semantic module
 └── .git/                            # Version control
 ```
 
@@ -113,17 +113,16 @@ pictos-net/
 
 ## 4. Core Features
 
-### 4.1 Three-Stage Semantic Pipeline + SVG Extension
+### 4.1 Four-Stage Semantic Pipeline + SVG Extension
 
-```mermaid
-graph LR
-    A[Utterance] --> B[NLU]
-    B --> C[Visual Topology]
-    C --> D[Bitmap]
-    D --> E[Trace vtracer]
-    E --> F[Raw SVG]
-    F --> G[Format Gemini]
-    G --> H[Structured SVG mf-svg-schema]
+```
+Utterance → NLU → Visual Topology → Bitmap → Evaluation
+                                        ↓
+                                [ICAP ≥ 4.0]
+                                        ↓
+                        Trace (vtracer) → Raw SVG
+                                        ↓
+                        Format (Gemini) → Structured SVG (mf-svg-schema)
 ```
 
 #### Stage 1: NLU (Natural Language Understanding)
@@ -154,15 +153,28 @@ graph LR
 - **Output**: Base64 PNG image (data URL)
 - **Aspect Ratios**: 1:1, 3:4, 4:3, 9:16, 16:9
 
-#### Stage 4: SVG Generation (Optional)
+#### Stage 4: Evaluation (Manual)
+
+- **Input**: Generated bitmap
+- **Method**: ICAP metrics (Vocabulary of Core Semantic Communicative Intentions)
+- **Output**: Hexagonal evaluation across 6 dimensions (Likert 1-5 scale)
+  - **Semantics**: Accuracy of meaning
+  - **Syntactics**: Visual composition quality
+  - **Pragmatics**: Context fitness
+  - **Clarity**: Legibility and recognition
+  - **Universality**: Cultural independence
+  - **Aesthetics**: Visual appeal
+
+#### Stage 5: SVG Generation (Optional - Quality Gated)
 
 ##### Eligibility Requirements
 
 - Bitmap must exist
 - NLU data must be complete
 - Visual elements must be defined
+- ICAP average score ≥ 4.0
 
-##### Step 4a: Trace (Vectorization)
+##### Step 5a: Trace (Vectorization)
 
 - **Input**: Bitmap PNG (Base64)
 - **Engine**: VTracer WASM (`vectortracer` package)
@@ -173,13 +185,13 @@ graph LR
   - Path optimization
 - **Output**: Raw SVG with unstructured paths
 
-##### Step 4b: Format (Semantic Structuring)
+##### Step 5b: Format (Semantic Structuring)
 
-- **Input**: Raw SVG + NLU + Elements + Config
+- **Input**: Raw SVG + NLU + Elements + Evaluation + Config
 - **Model**: Gemini 3 Pro
 - **Process**: Transform raw SVG to mf-svg-schema compliant structure
   - Group paths by semantic roles (Agent, Patient, Theme, Action)
-  - Embed metadata: NSM primes, concepts, semantic roles
+  - Embed metadata: NSM primes, concepts, ICAP scores
   - Add accessibility attributes (ARIA labels, descriptions)
   - Generate CSS classes and styling system
   - Include provenance data (generator, timestamp, license)
@@ -231,14 +243,16 @@ graph LR
 
 ### 5.2 Data Flow
 
-```mermaid
-graph TD
-    A[User Input: Utterance] --> B[generateNLU]
-    B --> C[NLU Data JSON]
-    C --> D[generateVisualBlueprint]
-    D --> E[Visual Elements + Spatial Prompt]
-    E --> F[generateImage]
-    F --> G[Base64 Bitmap]
+```
+User Input (Utterance)
+    ↓
+generateNLU() → NLU Data (JSON)
+    ↓
+generateVisualBlueprint() → Visual Elements + Spatial Prompt
+    ↓
+generateImage() → Base64 Bitmap
+    ↓
+Manual Evaluation → Metrics Data
 ```
 
 
@@ -578,7 +592,7 @@ App (Main Container)
 │
 ├── Main Content
 │   ├── Home View
-│   │   ├── Example Libraries (batch loading)
+│   │   ├── Module Loading (ICAP core)
 │   │   └── Text Import (batch processing)
 │   │
 │   └── List View
@@ -587,7 +601,10 @@ App (Main Container)
 │           │   └── SmartNLUEditor
 │           ├── StepBox (Visual)
 │           │   └── ElementsEditor
-│           └── StepBox (Bitmap)
+│           ├── StepBox (Bitmap)
+│           └── StepBox (Eval)
+│               └── EvaluationEditor
+│                   └── HexagonChart
 │
 ├── FocusViewModal (full-screen detail views)
 ├── ConsolePanel (Semantic Trace Monitor)
@@ -613,7 +630,7 @@ App (Main Container)
 - Event delegation
 
 **Key Methods:**
-- `processCascade(index)`: Full pipeline execution
+- `processCascade(index)`: Full 4-stage pipeline
 - `processStep(index, step)`: Single-step processing
 - `addNewRow(text)`: Create semantic node
 - `exportProject()`: Generate JSON dump
@@ -652,8 +669,14 @@ App (Main Container)
 - Parent-child relationships
 - Hierarchical rendering with indentation
 
+#### EvaluationEditor + HexagonChart
+- Likert scale sliders (1-5) for 6 dimensions
+- Hexagon radar chart visualization
+- Average score calculation
+- Reasoning text input
+- Real-time chart updates
 
-
+---
 
 ## 7. Data Models
 
@@ -669,13 +692,16 @@ App (Main Container)
   elements?: VisualElement[];    // Visual hierarchy
   prompt?: string;               // Spatial articulation
   bitmap?: string;               // Base64 PNG data URL
+  evaluation?: EvaluationMetrics;// Manual evaluation
   status: 'idle' | 'processing' | 'completed' | 'error';
   nluStatus: StepStatus;         // Per-step status
   visualStatus: StepStatus;
   bitmapStatus: StepStatus;
+  evalStatus: StepStatus;
   nluDuration?: number;          // Processing time (seconds)
   visualDuration?: number;
   bitmapDuration?: number;
+  evalDuration?: number;
 }
 ```
 
@@ -742,6 +768,22 @@ App (Main Container)
 }
 ```
 
+#### EvaluationMetrics (ICAP evaluation)
+
+Aligned with official ICAP schema (mediafranca/ICAP)
+
+```typescript
+{
+  clarity: number;                      // 1-5 Likert scale
+  recognizability: number;              // 1-5 Likert scale
+  semantic_transparency: number;        // 1-5 Likert scale
+  pragmatic_fit: number;                // 1-5 Likert scale
+  cultural_adequacy: number;            // 1-5 Likert scale
+  cognitive_accessibility: number;      // 1-5 Likert scale
+  reasoning: string;                    // Human explanation
+}
+```
+
 #### SVGPictogram (Structured SVG artifact)
 
 ```typescript
@@ -751,6 +793,7 @@ App (Main Container)
   svg: string;                   // Complete mf-svg-schema compliant SVG
   createdAt: string;             // ISO timestamp
   sourceRowId: string;           // Reference to original RowData
+  icapScore: number;            // ICAP average at generation time
   lang?: string;                 // Language of utterance
 }
 ```
@@ -799,6 +842,29 @@ Based on Wierzbicka/Goddard Natural Semantic Metalanguage:
 - **Intensifier**: VERY, MORE
 - **Similarity**: LIKE
 
+### 7.3 ICAP-50 Corpus Module
+
+The ICAP-50 corpus contains 50 communicative intent phrases loaded dynamically from the external ICAP repository:
+
+**Source**: `https://mediafranca.github.io/ICAP/frases.json`
+
+**8 Communication Categories** (canonicalData.ts):
+
+1. **Solicitar (Request)**: 6 phrases - Basic needs and requests
+2. **Rechazar (Reject)**: 5 phrases - Refusal and rejection
+3. **Dirigir (Direct)**: 6 phrases - Commands and directions
+4. **Aceptar (Accept)**: 6 phrases - Agreement and acceptance
+5. **Interacción Social (Social)**: 6 phrases - Greetings and social protocols
+6. **Emoción (Emotion)**: 5 phrases - Emotional states
+7. **Comentar (Comment)**: 6 phrases - Observations and commentary
+8. **Preguntar (Question)**: 7 phrases - Information seeking
+
+**Implementation Details**:
+- Primary: Fetched from external endpoint on module load
+- Fallback: Static 20-phrase module for offline usage
+- Format: Each phrase includes ID, category, Spanish text, NSM primitives, semantic roles, and domain classification
+
+---
 
 ## 8. API Services
 
@@ -858,12 +924,13 @@ Based on Wierzbicka/Goddard Natural Semantic Metalanguage:
 - `rawSvg`: Vectorized SVG from vtracer
 - `nlu`: NLU semantic analysis
 - `elements`: Visual element hierarchy
+- `evaluation`: ICAP metrics
 - `utterance`: Original text
 - `config`: Global configuration with styling
 
 **Processing**:
 
-- Build metadata JSON (NSM, concepts, accessibility, provenance)
+- Build metadata JSON (NSM, concepts, accessibility, provenance, ICAP)
 - Generate dynamic CSS stylesheet from config
 - Create system instruction for Gemini with mf-svg-schema spec
 - Stream response from Gemini 3 Pro
@@ -887,6 +954,7 @@ Based on Wierzbicka/Goddard Natural Semantic Metalanguage:
 - Bitmap must exist
 - NLU must be complete (not string)
 - Visual elements must exist
+- ICAP average score ≥ 4.0
 
 ### 8.4 Service Functions
 
@@ -1089,6 +1157,7 @@ PICTOS v2.8 implements a **dual storage pattern** that separates bitmap and vect
 #### SVG Library Storage (Quality-Gated Artifacts)
 
 - Contains: Structured SVGs following mf-svg-schema
+- Eligibility: ICAP ≥ 4.0 only (quality threshold)
 - Principle: Single Source of Truth (SSoT) - each SVG is self-contained
 - Format: JSON array in localStorage (`pictos_svg_library`)
 - Export: Individual SVG files with embedded metadata
@@ -1098,7 +1167,7 @@ PICTOS v2.8 implements a **dual storage pattern** that separates bitmap and vect
 
 1. **Performance**: Bitmaps for quick iteration; SVGs only for production-ready pictograms
 2. **Independence**: SVGs are portable artifacts that work outside PICTOS
-3. **Semantics**: Full metadata embedded in SVG (NSM, semantic roles, accessibility)
+3. **Semantics**: Full metadata embedded in SVG (NSM, ICAP, accessibility)
 4. **Interoperability**: mf-svg-schema compliance enables external tool integration
 5. **Storage Efficiency**: Generate SVGs selectively rather than storing both formats for all items
 
@@ -1122,6 +1191,7 @@ Recent commits:
 
 - `ae3a740`: Visual style prompt improvement
 - `de75c2d`: NLUFrameRole type additions
+- `9b29e08`: ICAP evaluation metrics and UI
 - `f6ceb92`: NLU primitives refinement
 - `30c4574`: Initial project structure
 
@@ -1134,7 +1204,8 @@ Recent commits:
 1. **NLP**: Gemini-powered NLU analysis using NSM primitives
 2. **Visual Design**: Hierarchical element composition with spatial articulation
 3. **Image Generation**: Multi-model synthesis (flash/pro)
-4. **Accessibility Focus**: Designed for AAC and cognitive accessibility
+4. **User Evaluation**: Manual ICAP metrics for quality assessment
+5. **Accessibility Focus**: Designed for AAC and cognitive accessibility
 
 The architecture emphasizes **semantic consistency** across a 4-stage pipeline, **user control** through an editable workbench, and **research capability** through detailed logging and metrics.
 
