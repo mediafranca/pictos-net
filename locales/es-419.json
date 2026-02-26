@@ -24,6 +24,8 @@
     "codeView": "Vista de código",
     "animations": "Animaciones",
     "deleteConfirm": "¿Eliminar este estilo?",
+    "restoreDefaults": "Restaurar defaults",
+    "restoreConfirm": "Esto reemplazará todos los estilos y keyframes con los valores por defecto. ¿Continuar?",
     "sectionForeground": "Primer Plano (.f)",
     "sectionKey": "Referencia / Fondo (.k)",
     "fill": "Relleno",

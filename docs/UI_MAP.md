@@ -2,8 +2,8 @@
 > Mapa estructural de la interfaz. Fuente de verdad para todos los IDs semánticos.
 > Actualizar este archivo siempre que se cree, renombre o elimine una región de la UI.
 
-> Última actualización: 2026-02-23
-> Cobertura: ~85% (estimado post-tarea)
+> Última actualización: 2026-02-26
+> Cobertura: ~88% (estimado post-tarea)
 
 ## Estado de los IDs
 - ✅ Implementado
@@ -102,19 +102,23 @@ APP-SHELL (#app-shell) ✅[via div.min-h-screen]
     │   ├── modo: visual → ElementsEditor + PromptRenderer
     │   ├── modo: bitmap → imagen full
     │   └── modo: eval → layout 2-col (imagen + SVGGenerator)
-    ├── StyleEditor [#style-editor-root] ✅   [modal: Editor de Estilos CSS]
-    │   ├── #style-editor-toolbar ✅          [selector de forma + vista + export]
-    │   ├── #style-editor-content ✅          [área principal overflow-y-auto]
-    │   ├── #style-editor-gallery ✅          [auto-fill grid, StylePreviewCard × N]
-    │   ├── #style-editor-code-view ✅        [vista CSS raw, condicional]
-    │   ├── #style-editor-animations-view ✅  [vista de animaciones, condicional]
-    │   └── EditModal [#style-edit-modal] ✅  [sub-modal de edición/creación]
-    │       ├── #style-edit-modal-backdrop ✅  [overlay con blur]
-    │       ├── #style-edit-modal-header ✅    [título + botón cerrar]
-    │       ├── #style-edit-modal-selectors ✅ [input de selectores CSS]
-    │       ├── #style-edit-modal-properties ✅ [lista de propiedades fill/stroke/etc]
-    │       ├── #style-edit-modal-preview ✅   [previsualización de formas]
-    │       └── #style-edit-modal-footer ✅    [Cancelar + Guardar]
+    ├── StyleEditor
+    │   ├── #style-editor-backdrop ✅        [fixed inset-0 z-[60], overlay blur]
+    │   ├── #style-editor-modal ✅           [fixed inset-0 z-[61], centrado]
+    │   │   └── #style-editor-panel ✅       [bg-white rounded-xl, flex-col]
+    │   │       ├── #style-editor-modal-header ✅  [h-14, título + shape selector + export + close]
+    │   │       └── #style-editor-root ✅          [lib interna, flex-col h-full]
+    │   │           ├── #style-editor-content ✅   [área principal overflow-y-auto]
+    │   │           ├── #style-editor-gallery ✅   [grid auto-fill 7.5em, StylePreviewCard × N]
+    │   │           ├── #style-editor-code-view ✅ [vista CSS raw, condicional]
+    │   │           └── #style-editor-animations-view ✅ [vista animaciones, condicional]
+    │   └── EditModal [#style-edit-modal] ✅
+    │       ├── #style-edit-modal-backdrop ✅
+    │       ├── #style-edit-modal-header ✅
+    │       ├── #style-edit-modal-selectors ✅
+    │       ├── #style-edit-modal-properties ✅
+    │       ├── #style-edit-modal-preview ✅
+    │       └── #style-edit-modal-footer ✅
     │
     ├── SVGEditorModal [#svg-editor-modal] ✅ [fullscreen modal editor SVG]
     │   ├── #svg-editor-container ✅          [bg-slate-900, w-full h-full]

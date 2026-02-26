@@ -41,20 +41,26 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
 
-    // Only returns the structured (Gemini-processed) SVG — never the raw trace
+    // row.structuredSvg is the authoritative source (updated by parent via updateRow).
+    // The local SVG library may be stale because each useSVGLibrary() instance has
+    // independent state loaded only on mount. We use the library only to inherit
+    // metadata (lang, createdAt) if available, but the SVG content always comes from the prop.
     const structuredSvgEntry = React.useMemo(() => {
         const libSvg = getSVGByRowId(row.id);
-        if (libSvg) return libSvg;
 
         if (row.structuredSvg) {
             return {
-                id: `svg-${row.id}`,
+                id: libSvg?.id ?? `svg-${row.id}`,
                 utterance: row.UTTERANCE,
                 svg: row.structuredSvg,
                 sourceRowId: row.id,
-                createdAt: new Date().toISOString(),
+                createdAt: libSvg?.createdAt ?? new Date().toISOString(),
+                lang: libSvg?.lang,
             };
         }
+
+        if (libSvg) return libSvg;
+
         return undefined;
     }, [row.id, row.structuredSvg, row.UTTERANCE, getSVGByRowId]);
 
@@ -190,6 +196,8 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     ...structuredSvgEntry,
                     svg: newSvgContent
                 });
+                // Keep row.structuredSvg in sync as the SSoT
+                onUpdate({ structuredSvg: newSvgContent });
             }
         }
     };

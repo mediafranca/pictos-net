@@ -35,6 +35,10 @@ export interface StyleEditorProps {
   onExport?: (css: string) => void;
   /** Custom className for the container */
   className?: string;
+  /** Shape controlled externally (used when hideHeader=true) */
+  externalShape?: ShapeType;
+  /** Callback when the internal shape selector changes */
+  onShapeChange?: (shape: ShapeType) => void;
 }
 
 export const StyleEditor: React.FC<StyleEditorProps> = ({
@@ -51,11 +55,20 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
   onDelete,
   onExport,
   className = '',
+  externalShape,
+  onShapeChange,
 }) => {
   const [styles, setStyles] = useState<StyleDefinition[]>(initialStyles);
   const [keyframes, setKeyframes] = useState<KeyframeDefinition[]>(initialKeyframes);
   const [viewMode, setViewMode] = useState<ViewMode>(defaultView);
   const [currentShape, setCurrentShape] = useState<ShapeType>(availableShapes[0] || 'square');
+
+  const effectiveShape: ShapeType = externalShape ?? currentShape;
+
+  const handleShapeChange = (shape: ShapeType) => {
+    setCurrentShape(shape);
+    onShapeChange?.(shape);
+  };
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -155,13 +168,13 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
             {viewMode === ViewMode.GRID && (
               <>
                 <div className="flex bg-gray-100 p-1 rounded-lg items-center">
-                  {availableShapes.map((shapeType) => {
+                  {availableShapes.map((shapeType: ShapeType) => {
                     const Icon = shapeIcons[shapeType];
                     return (
                       <button
                         key={shapeType}
-                        onClick={() => setCurrentShape(shapeType)}
-                        className={`p-2 rounded-md transition-all ${currentShape === shapeType ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                        onClick={() => handleShapeChange(shapeType)}
+                        className={`p-2 rounded-md transition-all ${effectiveShape === shapeType ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                         title={`View as ${shapeType}`}
                       >
                         <Icon size={18} />
@@ -224,12 +237,12 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
       <main id="style-editor-content" className="flex-1 overflow-y-auto p-4">
 
         {viewMode === ViewMode.GRID && (
-          <div id="style-editor-gallery" className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(15em, 1fr))' }}>
+          <div id="style-editor-gallery" className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(7.5em, 1fr))' }}>
             {styles.map(style => (
               <div key={style.id} className="bg-slate-100 rounded-lg p-1.5">
                 <StylePreviewCard
                   styleDef={style}
-                  shape={currentShape}
+                  shape={effectiveShape}
                   onClick={() => handleEditClick(style)}
                 />
               </div>
@@ -283,7 +296,8 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
         styleDef={currentEditingStyle}
         onSave={handleSaveStyle}
         onDelete={handleDeleteStyle}
-        currentShape={currentShape}
+        currentShape={effectiveShape}
+        keyframes={keyframes}
       />
     </div>
   );

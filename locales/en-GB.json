@@ -24,6 +24,8 @@
     "codeView": "Code View",
     "animations": "Animations",
     "deleteConfirm": "Delete this style?",
+    "restoreDefaults": "Restore defaults",
+    "restoreConfirm": "This will replace all styles and keyframes with the built-in defaults. Continue?",
     "sectionForeground": "Foreground (.f)",
     "sectionKey": "Key / Reference (.k)",
     "fill": "Fill",

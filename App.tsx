@@ -1303,6 +1303,8 @@ const App: React.FC = () => {
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
           onLog={addLog}
+          onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
+          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
         />
       )}
 
@@ -1643,7 +1645,7 @@ const RowComponent: React.FC<{
                 </div>
               </div>
             </StepBox>
-            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('eval')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
                 <div
@@ -2130,7 +2132,9 @@ const FocusViewModal: React.FC<{
   onRegeneratePrompt: () => void;
   config: GlobalConfig;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog }) => {
+  onOpenEditor?: () => void;
+  onOpenVectorizer?: () => void;
+}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
@@ -2271,7 +2275,7 @@ const FocusViewModal: React.FC<{
                   })()}
                 </div>
                 <div className="flex-1 overflow-hidden">
-                  <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} />
+                  <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
                 </div>
               </div>
             </div>

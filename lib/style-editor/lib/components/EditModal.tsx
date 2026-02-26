@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Square, Circle, Triangle, Slash, Activity, Heart } from 'lucide-react';
-import { StyleDefinition, CssRule, ShapeType } from '../types';
+import { StyleDefinition, CssRule, ShapeType, KeyframeDefinition } from '../types';
 import { SVG_CSS_PROPERTIES } from '../utils/svgProperties';
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
   onSave: (updated: StyleDefinition) => void;
   onDelete: (id: string) => void;
   currentShape?: ShapeType;
+  keyframes?: KeyframeDefinition[];
 }
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -29,7 +30,7 @@ const shapeIcons: Record<ShapeType, React.ComponentType<{ size?: number }>> = {
   heart: Heart,
 };
 
-const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelete, currentShape = 'square' }) => {
+const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelete, currentShape = 'square', keyframes }) => {
   const [selectors, setSelectors] = useState('');
   const [rules, setRules] = useState<CssRule[]>([]);
   const [description, setDescription] = useState('');
@@ -77,6 +78,30 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
     onClose();
   };
 
+  // --- Keyframe parameter detection ---
+
+  const animRule = rules.find(r => r.property === 'animation' || r.property === 'animation-name');
+  const animName = animRule ? animRule.value.trim().split(/\s+/)[0] : null;
+  const detectedKeyframe = animName && keyframes
+    ? keyframes.find(kf => kf.name === animName && kf.parameters?.length)
+    : null;
+  const keyframeParams = detectedKeyframe?.parameters ?? [];
+
+  const getParamValue = (variable: string, defaultVal: number): number => {
+    const rule = rules.find(r => r.property === variable);
+    return rule ? (parseFloat(rule.value) || defaultVal) : defaultVal;
+  };
+
+  const handleParamChange = (variable: string, value: number) => {
+    setRules(prev => {
+      const exists = prev.find(r => r.property === variable);
+      if (exists) {
+        return prev.map(r => r.property === variable ? { ...r, value: String(value) } : r);
+      }
+      return [...prev, { id: generateId(), property: variable, value: String(value) }];
+    });
+  };
+
   // --- Preview Logic ---
 
   const toCamelCase = (s: string) => s.replace(/-./g, x => x[1].toUpperCase());
@@ -84,8 +109,13 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
   const previewStyle: React.CSSProperties = {};
   rules.forEach(r => {
     if (r.property && r.value) {
-      // @ts-ignore - Dynamic style assignment
-      previewStyle[toCamelCase(r.property)] = r.value;
+      if (r.property.startsWith('--')) {
+        // CSS custom properties must be assigned directly (camelCase would mangle them)
+        (previewStyle as any)[r.property] = r.value;
+      } else {
+        // @ts-ignore - Dynamic style assignment
+        previewStyle[toCamelCase(r.property)] = r.value;
+      }
     }
   });
 
@@ -322,8 +352,36 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
           </div>
 
           {/* RIGHT: Preview */}
-          <div id="style-edit-modal-preview" className="w-56 flex-none bg-gray-100 border-l border-gray-200 p-4 flex flex-col items-center gap-4">
+          <div id="style-edit-modal-preview" className="w-56 flex-none bg-gray-100 border-l border-gray-200 p-4 flex flex-col items-center gap-4 overflow-y-auto">
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider self-start">Vista previa</h3>
+
+            {/* Keyframe parameter sliders */}
+            {keyframeParams.length > 0 && (
+              <div className="w-full space-y-3">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Parámetros</span>
+                {keyframeParams.map(param => {
+                  const val = getParamValue(param.variable, param.default);
+                  const stepVal = param.step ?? (param.unit === '' ? 0.05 : 1);
+                  return (
+                    <div key={param.variable} className="space-y-1">
+                      <div className="flex justify-between items-baseline">
+                        <label className="text-[10px] text-gray-500 font-medium">{param.label}</label>
+                        <span className="text-[10px] font-mono text-gray-400">{val}{param.unit}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={param.min}
+                        max={param.max}
+                        step={stepVal}
+                        value={val}
+                        onChange={e => handleParamChange(param.variable, parseFloat(e.target.value))}
+                        className="w-full h-1 accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Shape selector */}
             <div className="flex flex-wrap gap-1 justify-center">

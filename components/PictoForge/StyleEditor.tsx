@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleEditor as NewStyleEditor } from '../../lib/style-editor/lib/StyleEditor';
-import type { StyleDefinition, KeyframeDefinition } from '../../lib/style-editor/lib/types';
+import type { StyleDefinition, KeyframeDefinition, ShapeType } from '../../lib/style-editor/lib/types';
 import { INITIAL_STYLES } from '../../lib/style-editor/lib/constants';
 import { INITIAL_KEYFRAMES } from '../../lib/style-editor/lib/keyframeConstants';
 import { GlobalConfig } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
-import { X, Download } from 'lucide-react';
+import { X, Download, RotateCcw, Square, Circle, Triangle, Slash, Activity, Heart } from 'lucide-react';
 import { generateCssString } from '../../lib/style-editor/lib/utils/cssGenerator';
 
 interface StyleEditorProps {
@@ -14,8 +14,22 @@ interface StyleEditorProps {
     onClose: () => void;
 }
 
+const ALL_SHAPES: ShapeType[] = ['square', 'circle', 'triangle', 'line', 'path', 'heart'];
+const shapeIcons: Record<ShapeType, React.ComponentType<{ size?: number }>> = {
+    square: Square, circle: Circle, triangle: Triangle,
+    line: Slash, path: Activity, heart: Heart,
+};
+
 export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig, onClose }) => {
     const { t } = useTranslation();
+    const [previewShape, setPreviewShape] = useState<ShapeType>('square');
+
+    // Use new keyframes immediately — if stored keyframes lack var() syntax (old format),
+    const effectiveKeyframes: KeyframeDefinition[] = (() => {
+        const stored = config.svgKeyframes;
+        if (!stored || stored.length === 0) return INITIAL_KEYFRAMES;
+        return stored.some(kf => kf.keyframes.includes('var(')) ? stored : INITIAL_KEYFRAMES;
+    })();
 
     const handleStylesChange = (styles: StyleDefinition[]) => {
         onUpdateConfig({ ...config, svgStyleDefs: styles });
@@ -23,6 +37,12 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig
 
     const handleKeyframesChange = (keyframes: KeyframeDefinition[]) => {
         onUpdateConfig({ ...config, svgKeyframes: keyframes });
+    };
+
+    const handleRestoreDefaults = () => {
+        if (confirm(t('styleEditor.restoreConfirm'))) {
+            onUpdateConfig({ ...config, svgStyleDefs: INITIAL_STYLES, svgKeyframes: INITIAL_KEYFRAMES });
+        }
     };
 
     const handleExportCss = () => {
@@ -44,23 +64,50 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig
         <>
             {/* Backdrop */}
             <div
+                id="style-editor-backdrop"
                 className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
                 onClick={onClose}
             />
 
             {/* Panel centrado — 80% ancho, 85vh alto */}
-            <div className="fixed inset-0 z-[61] flex items-center justify-center p-[7vh_10vw] pointer-events-none">
+            <div id="style-editor-modal" className="fixed inset-0 z-[61] flex items-center justify-center p-[7vh_10vw] pointer-events-none">
                 <div
+                    id="style-editor-panel"
                     className="w-full h-full bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto animate-in fade-in zoom-in-95 duration-200"
                     onClick={e => e.stopPropagation()}
                 >
                     {/* Modal header */}
-                    <header className="flex-none h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-20">
+                    <header id="style-editor-modal-header" className="flex-none h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-20">
                         <div>
                             <h2 className="text-base font-bold text-gray-900 leading-none">{t('styleEditor.title')}</h2>
                             <span className="text-[10px] text-gray-400">{t('styleEditor.subtitle')}</span>
                         </div>
+
+                        {/* Shape selector */}
+                        <div className="flex bg-gray-100 p-1 rounded-lg items-center">
+                            {ALL_SHAPES.map((shape) => {
+                                const Icon = shapeIcons[shape];
+                                return (
+                                    <button
+                                        key={shape}
+                                        onClick={() => setPreviewShape(shape)}
+                                        className={`p-1.5 rounded-md transition-all ${previewShape === shape ? 'bg-white shadow text-blue-600' : 'text-gray-400 hover:text-gray-700'}`}
+                                        title={shape}
+                                    >
+                                        <Icon size={16} />
+                                    </button>
+                                );
+                            })}
+                        </div>
+
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleRestoreDefaults}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded border border-gray-200 transition-colors"
+                                title={t('styleEditor.restoreDefaults')}
+                            >
+                                <RotateCcw size={13} /> {t('styleEditor.restoreDefaults')}
+                            </button>
                             <button
                                 onClick={handleExportCss}
                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded border border-gray-200 transition-colors"
@@ -82,11 +129,13 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig
                     <div className="flex-1 overflow-hidden relative">
                         <NewStyleEditor
                             initialStyles={config.svgStyleDefs ?? INITIAL_STYLES}
-                            initialKeyframes={config.svgKeyframes ?? INITIAL_KEYFRAMES}
+                            initialKeyframes={effectiveKeyframes}
                             onStylesChange={handleStylesChange}
                             onKeyframesChange={handleKeyframesChange}
                             hideHeader={true}
                             hideExport={true}
+                            externalShape={previewShape}
+                            onShapeChange={setPreviewShape}
                         />
                     </div>
                 </div>
