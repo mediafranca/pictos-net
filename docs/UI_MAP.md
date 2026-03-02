@@ -81,9 +81,10 @@ APP-SHELL (#app-shell) ✅[via div.min-h-screen]
 │               │
 │               ├── StepBox [#block-nlu] ✅
 │               │   └── SmartNLUEditor
+│               │       ├── #nlu-context ✅          [lang dropdown, domain dropdown, geoContext]
 │               │       ├── details (metadata/speech_act/intent)
-│               │       ├── details (frames)
-│               │       └── details (nsm/logical_form/pragmatics)
+│               │       ├── details (frames) — shows frame_label + frame_name
+│               │       └── details (nsm/logical_form/pragmatics) — expanded by default
 │               │
 │               ├── StepBox [#block-compose] ✅
 │               │   ├── #hierarchical-elements ✅  → ElementsEditor

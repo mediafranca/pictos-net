@@ -167,7 +167,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
-    lang: 'es',
+    lang: 'es-419',
     aspectRatio: '1:1',
     imageModel: 'flash',
     author: 'PICTOS.NET',
@@ -954,7 +954,11 @@ const App: React.FC = () => {
           {/* Language Switcher */}
           <select
             value={lang}
-            onChange={(e) => setLang(e.target.value as Locale)}
+            onChange={(e) => {
+              const newLang = e.target.value as Locale;
+              setLang(newLang);
+              setConfig(prev => ({ ...prev, lang: newLang, uiLang: newLang }));
+            }}
             className="p-2.5 text-xs border border-slate-200 bg-white hover:border-violet-200 rounded-md transition-all text-slate-600 font-medium cursor-pointer shadow-sm"
             title="UI Language"
           >
@@ -1051,13 +1055,18 @@ const App: React.FC = () => {
                   <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
                     <div className="flex items-center gap-2">
                       <Globe size={14} className="text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Language (es, en...)"
+                      <select
                         value={config.lang}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })}
-                        className="w-full text-xs bg-transparent border-none outline-none font-medium"
-                      />
+                        onChange={(e) => {
+                          const newLang = e.target.value as Locale;
+                          setConfig({ ...config, lang: newLang, uiLang: newLang });
+                          setLang(newLang);
+                        }}
+                        className="w-full text-xs bg-transparent border-none outline-none font-medium cursor-pointer"
+                      >
+                        <option value="es-419">Español</option>
+                        <option value="en-GB">English</option>
+                      </select>
                     </div>
                   </div>
                   <GeoAutocomplete
@@ -1281,6 +1290,7 @@ const App: React.FC = () => {
                   onShare={() => sharePictogram(globalIndex)}
                   onLog={addLog}
                   config={config}
+                  onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
                   onOpenEditor={() => openSVGEditor(globalIndex)}
                   onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: globalIndex })}
                 />
@@ -1315,6 +1325,7 @@ const App: React.FC = () => {
           onShare={() => sharePictogram(rows.findIndex(r => r.id === focusMode.rowId))}
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
+          onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
           onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
@@ -1508,9 +1519,10 @@ const RowComponent: React.FC<{
   onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
+  onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: () => void;
   onOpenVectorizer: () => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor, onOpenVectorizer }) => {
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -1564,7 +1576,12 @@ const RowComponent: React.FC<{
         <>
           <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
             <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
-              <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />
+              <SmartNLUEditor
+                data={row.NLU}
+                onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })}
+                config={config}
+                onConfigChange={onConfigChange}
+              />
             </StepBox>
             <StepBox
               id="block-compose"
@@ -1812,8 +1829,13 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
   );
 };
 
-const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ data, onUpdate }) => {
-  const { t } = useTranslation();
+const SmartNLUEditor: React.FC<{
+  data: any;
+  onUpdate: (v: any) => void;
+  config: GlobalConfig;
+  onConfigChange: (c: Partial<GlobalConfig>) => void;
+}> = ({ data, onUpdate, config, onConfigChange }) => {
+  const { t, lang: uiLang, setLang } = useTranslation();
   const nlu = useMemo<Partial<NLUData>>(() => {
     if (typeof data === 'string') {
       try { return JSON.parse(data); } catch (e) { return {}; }
@@ -1852,8 +1874,81 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
     );
   };
 
+  const domainLabels: Record<string, Record<string, string>> = {
+    'es-419': {
+      transporte: 'Transporte', salud: 'Salud', alimentación: 'Alimentación',
+      educación: 'Educación', vida_cotidiana: 'Vida Cotidiana', trabajo: 'Trabajo',
+      emociones: 'Emociones', tiempo_libre: 'Tiempo Libre', dinero: 'Dinero',
+      seguridad: 'Seguridad', comunicación: 'Comunicación', lugar: 'Lugar',
+      trámites: 'Trámites',
+    },
+    'en-GB': {
+      transporte: 'Transport', salud: 'Health', alimentación: 'Food',
+      educación: 'Education', vida_cotidiana: 'Daily Life', trabajo: 'Work',
+      emociones: 'Emotions', tiempo_libre: 'Leisure', dinero: 'Money',
+      seguridad: 'Safety', comunicación: 'Communication', lugar: 'Place',
+      trámites: 'Paperwork',
+    },
+  };
+
+  const getDomainLabel = (key: string) => {
+    return domainLabels[uiLang]?.[key] || domainLabels['es-419']?.[key] || key;
+  };
+
   return (
     <div className="space-y-4">
+      {/* CONTEXTO section */}
+      <div id="nlu-context" className="border bg-white p-3 shadow-sm text-[10px] space-y-2">
+        <span className="nlu-key uppercase">{t('editor.context')}</span>
+        <div className="mt-2 space-y-2 pt-2 border-t">
+          {/* Language selector */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.language')}</label>
+            <select
+              value={config.lang}
+              onChange={e => {
+                const newLang = e.target.value;
+                onConfigChange({ lang: newLang, uiLang: newLang as 'es-419' | 'en-GB' });
+                setLang(newLang as Locale);
+              }}
+              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+            >
+              <option value="es-419">Español</option>
+              <option value="en-GB">English</option>
+            </select>
+          </div>
+          {/* Domain selector */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.domain')}</label>
+            <select
+              value={nlu.domain || ''}
+              onChange={e => {
+                updateField(['domain'], e.target.value);
+                // Mark NLU as outdated so user can regenerate
+                onUpdate({ ...nlu, domain: e.target.value });
+              }}
+              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+            >
+              <option value="" disabled>{t('placeholders.selectOption')}</option>
+              {VOCAB.domain.map(d => <option key={d} value={d}>{getDomainLabel(d)}</option>)}
+            </select>
+          </div>
+          {/* Geo region (read-only) */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.region')}</label>
+            <div className="col-span-2 flex items-center gap-1 text-xs">
+              <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-400 italic'}>
+                {config.geoContext?.region || t('editor.regionNotConfigured')}
+              </span>
+              <span className="text-slate-300 cursor-help" title={t('editor.regionTooltip')}>
+                <HelpCircle size={12} />
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* METADATA CLASSIFICATION */}
       <details className="border bg-white p-3 shadow-sm text-[10px]" open>
         <summary className="nlu-key cursor-pointer uppercase">{t('editor.metadataClassification')}</summary>
         <div className="mt-3 space-y-2 pt-3 border-t">
@@ -1882,10 +1977,17 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
         </div>
       </details>
 
+      {/* FRAMES */}
       {nlu.frames?.map((frame, fIdx) => (
         <details key={fIdx} className="border bg-white p-3 shadow-sm text-[10px]" open>
-          <summary className="nlu-key cursor-pointer uppercase">{frame.frame_name} <span className="font-mono lowercase text-violet-500">({frame.lexical_unit})</span></summary>
+          <summary className="nlu-key cursor-pointer uppercase">
+            {frame.frame_label || frame.frame_name}
+            {' '}<span className="font-mono lowercase text-violet-500" title={frame.frame_name}>({frame.lexical_unit})</span>
+          </summary>
           <div className="mt-3 space-y-2 pt-3 border-t">
+            {frame.frame_label && frame.frame_name !== frame.frame_label && (
+              <div className="text-[9px] text-slate-400 font-mono mb-1">FrameNet: {frame.frame_name}</div>
+            )}
             {Object.entries(frame.roles || {}).map(([role, rawData]) => {
               const data = rawData as NLUFrameRole;
               return (
@@ -1899,7 +2001,8 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
         </details>
       ))}
 
-      <details className="border bg-white p-3 shadow-sm text-[10px]">
+      {/* DETAILED LINGUISTIC ANALYSIS — expanded by default */}
+      <details className="border bg-white p-3 shadow-sm text-[10px]" open>
         <summary className="nlu-key cursor-pointer">{t('editor.detailedAnalysis').toUpperCase()}</summary>
         <div className="mt-3 space-y-4 pt-3 border-t">
           <div>
@@ -1911,7 +2014,7 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
             {renderEditableDict(nlu.logical_form as unknown as Record<string, string>, 'logical_form')}
           </div>
           <div>
-            <h4 className="nlu-key mb-1">PRAGMATICS</h4>
+            <h4 className="nlu-key mb-1">{t('editor.pragmatics').toUpperCase()}</h4>
             {renderEditableDict(nlu.pragmatics as unknown as Record<string, string>, 'pragmatics')}
           </div>
         </div>
@@ -2151,10 +2254,11 @@ const FocusViewModal: React.FC<{
   onShare: () => void;
   onRegeneratePrompt: () => void;
   config: GlobalConfig;
+  onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   onOpenEditor?: () => void;
   onOpenVectorizer?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog, onOpenEditor, onOpenVectorizer }) => {
+}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
@@ -2187,7 +2291,7 @@ const FocusViewModal: React.FC<{
 
   const renderContent = () => {
     switch (mode) {
-      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />;
+      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} />;
       case 'visual': return (
         <div className="flex flex-col h-full gap-6">
           <div>
