@@ -163,6 +163,7 @@ const App: React.FC = () => {
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
+  const scrollToRowRef = useRef<string | null>(null);
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
@@ -199,10 +200,12 @@ const App: React.FC = () => {
     isOpen: boolean;
     rowIndex: number | null;
     svg: string | null;
+    svgSource: 'raw' | 'structured' | null;
   }>({
     isOpen: false,
     rowIndex: null,
-    svg: null
+    svg: null,
+    svgSource: null,
   });
 
   const [vectorizerState, setVectorizerState] = useState<{
@@ -355,6 +358,13 @@ const App: React.FC = () => {
     loadLibraries();
   }, []);
 
+  useEffect(() => {
+    if (!openRowId || scrollToRowRef.current !== openRowId) return;
+    scrollToRowRef.current = null;
+    const el = document.getElementById(`picto-row-${openRowId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [openRowId]);
+
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
@@ -473,9 +483,11 @@ const App: React.FC = () => {
       UTTERANCE: textValue.trim() || 'Nueva Unidad Semántica',
       status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle'
     };
+    scrollToRowRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
     setOpenRowId(newId);
+    setShowConfig(false);
     setSearchValue('');
     setIsSearching(false);
   };
@@ -826,6 +838,7 @@ const App: React.FC = () => {
   const openSVGEditor = (index: number) => {
     const row = rows[index];
     const svgToEdit = row.structuredSvg || row.rawSvg;
+    const source = row.structuredSvg ? 'structured' : 'raw';
 
     if (!svgToEdit) {
       addLog('error', 'No hay SVG para editar. Primero vectoriza la imagen.');
@@ -835,41 +848,42 @@ const App: React.FC = () => {
     setSvgEditorState({
       isOpen: true,
       rowIndex: index,
-      svg: svgToEdit
+      svg: svgToEdit,
+      svgSource: source,
     });
     addLog('info', `Abriendo editor SVG para: ${row.UTTERANCE}`);
   };
 
   const handleSVGEditorSave = (updatedSvg: string) => {
     if (svgEditorState.rowIndex === null) return;
+    const source = svgEditorState.svgSource;
 
-    updateRow(svgEditorState.rowIndex, {
-      structuredSvg: updatedSvg,
-    });
+    // Write only to the origin field — do not promote rawSvg to structuredSvg
+    const update: Partial<RowData> = source === 'structured'
+      ? { structuredSvg: updatedSvg }
+      : { rawSvg: updatedSvg };
 
-    // Also update the SVG Library so SVGGenerator reflects the change immediately
-    const savedRow = rows[svgEditorState.rowIndex];
-    if (savedRow) {
-      addSVG({
-        id: savedRow.id,
-        utterance: savedRow.UTTERANCE,
-        svg: updatedSvg,
-        createdAt: new Date().toISOString(),
-        sourceRowId: savedRow.id,
-        lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
-          ? (savedRow.NLU as any).lang
-          : undefined
-      });
+    updateRow(svgEditorState.rowIndex, update);
+
+    // Only update the SVG Library for structured SVGs (the "official" pictogram)
+    if (source === 'structured') {
+      const savedRow = rows[svgEditorState.rowIndex];
+      if (savedRow) {
+        addSVG({
+          id: savedRow.id,
+          utterance: savedRow.UTTERANCE,
+          svg: updatedSvg,
+          createdAt: new Date().toISOString(),
+          sourceRowId: savedRow.id,
+          lang: (typeof savedRow.NLU === 'object' && savedRow.NLU !== null)
+            ? (savedRow.NLU as any).lang
+            : undefined
+        });
+      }
     }
 
     addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
-
-    // Close modal
-    setSvgEditorState({
-      isOpen: false,
-      rowIndex: null,
-      svg: null
-    });
+    setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null });
   };
 
   const handleVectorizerApply = (result: VectorizerResult) => {
@@ -914,7 +928,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
-        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewMode('home'); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
@@ -973,6 +987,8 @@ const App: React.FC = () => {
       </header>
 
       {showConfig && (
+        <>
+        <div className="fixed inset-0 z-[39]" onClick={() => setShowConfig(false)} />
         <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-8 animate-in slide-in-from-top duration-200">
           <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
 
@@ -1124,6 +1140,7 @@ const App: React.FC = () => {
 
           </div>
         </div>
+        </>
       )}
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
@@ -1237,7 +1254,7 @@ const App: React.FC = () => {
               const globalIndex = rows.findIndex(r => r.id === row.id);
               return (
                 <RowComponent
-                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => setOpenRowId(v ? row.id : null)}
+                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { setOpenRowId(v ? row.id : null); if (v) setShowConfig(false); }}
                   onUpdate={u => updateRow(globalIndex, u)} onProcess={s => processStep(globalIndex, s)}
                   onRegeneratePrompt={() => regeneratePrompt(globalIndex)}
                   onStop={() => {
@@ -1299,6 +1316,8 @@ const App: React.FC = () => {
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
           onLog={addLog}
+          onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
+          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
         />
       )}
 
@@ -1314,7 +1333,7 @@ const App: React.FC = () => {
       {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowIndex !== null && (
         <SVGEditorModal
           isOpen={svgEditorState.isOpen}
-          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null })}
+          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null })}
           initialSvg={svgEditorState.svg}
           utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
@@ -1639,7 +1658,7 @@ const RowComponent: React.FC<{
                 </div>
               </div>
             </StepBox>
-            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('eval')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
                 <div
@@ -2126,7 +2145,9 @@ const FocusViewModal: React.FC<{
   onRegeneratePrompt: () => void;
   config: GlobalConfig;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog }) => {
+  onOpenEditor?: () => void;
+  onOpenVectorizer?: () => void;
+}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
@@ -2267,7 +2288,7 @@ const FocusViewModal: React.FC<{
                   })()}
                 </div>
                 <div className="flex-1 overflow-hidden">
-                  <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} />
+                  <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
                 </div>
               </div>
             </div>

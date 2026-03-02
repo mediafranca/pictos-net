@@ -63,9 +63,29 @@ export const SVG_CSS_PROPERTIES = [
   
   // Color
   "color",
-  "stop-color", 
+  "stop-color",
   "stop-opacity",
-  "flood-color", 
+  "flood-color",
   "flood-opacity",
-  "lighting-color"
+  "lighting-color",
+
+  // Animation custom properties (parametrized keyframes)
+  "--kf-blink-min",
+  "--kf-beat-scale",
+  "--kf-swing-angle",
+  "--kf-slide-r-dist",
+  "--kf-slide-u-dist",
+  "--kf-rock-angle",
+  "--kf-gesture-r-dist",
+  "--kf-gesture-l-dist",
+  "--kf-gesture-d-dist",
+  "--kf-inflate-scale",
+  "--kf-inflate-rise",
+  "--kf-pulse-min",
+  "--kf-shake-amp",
+  "--kf-tremble-amp",
+  "--kf-bounce-h",
+  "--kf-float-h",
+  "--kf-nod-yes-d",
+  "--kf-nod-no-d",
 ].sort();

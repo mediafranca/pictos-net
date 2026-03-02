@@ -6,13 +6,16 @@
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useMemo, useState, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Edit2, Check, X, Trash2 } from 'lucide-react';
-import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import type { SVGElement } from '../../stores/svgEditorStore';
+import type { StyleDefinition } from '../../lib/style-editor/lib/types';
+import { useTranslation } from '../../hooks/useTranslation';
+import { StylePickerModal } from './StylePickerModal';
 
 interface TreeNodeProps {
     node: SVGElement;
     level: number;
+    styleDefs: StyleDefinition[];
     getStyleInfo: (node: SVGElement) => {
         classes: { name: string; fill: string | null; stroke: string | null }[];
     };
@@ -42,6 +45,7 @@ const buildVisualGroupTree = (node: SVGElement): SVGElement[] => {
 function TreeNode({
     node,
     level,
+    styleDefs,
     getStyleInfo,
     onDragStart,
     onDragEnd,
@@ -50,11 +54,13 @@ function TreeNode({
     dragOverId,
     dragMode,
 }: TreeNodeProps) {
+    const { t } = useTranslation();
     const { selectedElementId, selectElement, updateElementId, deleteElement } = useSVGEditorStore();
     const [isExpanded, setIsExpanded] = useState(true);
     const [isEditingId, setIsEditingId] = useState(false);
     const [editedId, setEditedId] = useState(node.id);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
     const styleInfo = getStyleInfo(node);
     const classLabels = styleInfo.classes.map((cls) => `.${cls.name}`);
     const classText = classLabels.join(' ');
@@ -69,24 +75,26 @@ function TreeNode({
                 ? 'ring-1 ring-blue-600/40'
                 : '';
 
-    const handleSaveId = () => {
-        if (editedId && editedId !== node.id) {
-            updateElementId(node.id, editedId);
-        }
+    const handleSaveId = useCallback(() => {
+        const trimmed = editedId.trim();
         setIsEditingId(false);
-    };
+        if (trimmed && trimmed !== node.id) {
+            updateElementId(node.id, trimmed);
+        } else {
+            setEditedId(node.id);
+        }
+    }, [editedId, node.id, updateElementId]);
 
-    const handleCancelEdit = () => {
+    const handleCancelEdit = useCallback(() => {
         setEditedId(node.id);
         setIsEditingId(false);
-    };
+    }, [node.id]);
 
     return (
         <div id={`tree-node-${node.id}`} className="select-none">
             <div
-                className={`group flex items-center gap-2 px-3 py-2 hover:bg-slate-100 cursor-grab active:cursor-grabbing transition-colors ${dragIndicator} ${isSelected ? 'bg-slate-100' : ''
-                    }`}
-                style={{ paddingLeft: `${level * 16 + 12}px` }}
+                className={`group flex items-center gap-1 px-2 py-1.5 hover:bg-slate-100 cursor-grab active:cursor-grabbing transition-colors text-slate-700 ${dragIndicator} ${isSelected ? 'bg-slate-100' : ''}`}
+                style={{ paddingLeft: `${level * 14 + 8}px` }}
                 onClick={() => selectElement(node.id)}
                 draggable={!isEditingId}
                 onDragStart={(event) => {
@@ -107,185 +115,157 @@ function TreeNode({
                     onDropNode(node);
                 }}
             >
-                {hasChildren && (
+                {/* Expand/collapse toggle */}
+                {hasChildren ? (
                     <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setIsExpanded(!isExpanded);
-                        }}
-                        className="p-0.5 hover:bg-slate-200 rounded"
+                        onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+                        className="p-0.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-200 shrink-0"
                     >
-                        {isExpanded ? (
-                            <ChevronDown className="w-4 h-4" />
-                        ) : (
-                            <ChevronRight className="w-4 h-4" />
-                        )}
+                        {isExpanded
+                            ? <ChevronDown className="w-3.5 h-3.5" />
+                            : <ChevronRight className="w-3.5 h-3.5" />}
                     </button>
+                ) : (
+                    <div className="w-5 shrink-0" />
                 )}
 
-                {!hasChildren && <div className="w-5" />}
-
+                {/* ID / edit field */}
                 {isEditingId ? (
-                    <div
-                        className="flex items-center gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                    >
+                    <div className="flex items-center gap-1 flex-1" onClick={(e) => e.stopPropagation()}>
                         <Input
                             value={editedId}
                             onChange={(e) => setEditedId(e.target.value)}
-                            className="h-6 w-32 text-xs font-mono"
+                            className="h-6 w-28 text-xs font-mono"
                             autoFocus
+                            onBlur={handleSaveId}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveId();
-                                if (e.key === 'Escape') handleCancelEdit();
+                                if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+                                if (e.key === 'Escape') { e.preventDefault(); handleCancelEdit(); }
                             }}
                         />
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
+                        <button
+                            className="p-1 rounded text-emerald-600 hover:bg-emerald-50 shrink-0"
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={handleSaveId}
+                            title={t('actions.confirm')}
                         >
                             <Check className="w-3 h-3" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
+                        </button>
+                        <button
+                            className="p-1 rounded text-slate-500 hover:bg-slate-100 shrink-0"
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={handleCancelEdit}
+                            title={t('actions.cancel')}
                         >
                             <X className="w-3 h-3" />
-                        </Button>
+                        </button>
                     </div>
                 ) : (
                     <>
                         <span
-                            className="text-xs font-semibold text-slate-900 cursor-text"
+                            className="text-xs font-semibold text-slate-800 cursor-text truncate"
                             onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 setIsEditingId(true);
                                 setEditedId(node.id);
                             }}
-                            title="Doble click para renombrar"
+                            title={t('svgEditor.doubleClickRename')}
                         >
                             {node.id}
                         </span>
                         {classText && (
-                            <span className="text-[11px] text-slate-500 truncate">{classText}</span>
+                            <span className="text-[10px] text-violet-500 truncate font-mono ml-1">{classText}</span>
                         )}
                     </>
                 )}
 
-                <div className="ml-auto flex items-center gap-1">
-                    {styleInfo.classes.length === 0 ? (
-                        <div
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-slate-300 bg-white"
-                            title="No style assigned"
-                        >
-                            <svg width="10" height="10" viewBox="0 0 10 10">
-                                <circle
-                                    cx="5"
-                                    cy="5"
-                                    r="4"
-                                    fill="transparent"
-                                    stroke="currentColor"
-                                    className="text-slate-400"
-                                />
-                                <line
-                                    x1="2"
-                                    y1="8"
-                                    x2="8"
-                                    y2="2"
-                                    stroke="#ef4444"
-                                    strokeWidth="1.2"
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                        </div>
-                    ) : (
-                        styleInfo.classes.map((cls) => {
-                            const fill = cls.fill ?? 'transparent';
-                            const stroke = cls.stroke ?? (cls.fill ? 'rgba(0,0,0,0.35)' : 'currentColor');
-                            const strokeClass = cls.stroke || cls.fill ? '' : 'text-slate-400';
+                {/* Style dots — click to open style picker */}
+                {!isEditingId && (
+                    <button
+                        className="ml-auto flex items-center gap-0.5 shrink-0 rounded hover:bg-violet-50 px-0.5 py-0.5 transition-colors"
+                        title={t('svgEditor.selectStyle')}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            selectElement(node.id);
+                            setIsPickerOpen(true);
+                        }}
+                    >
+                        {styleInfo.classes.length === 0 ? (
+                            <div className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300">
+                                <svg width="8" height="8" viewBox="0 0 10 10">
+                                    <circle cx="5" cy="5" r="4" fill="transparent" stroke="#94a3b8" />
+                                    <line x1="2" y1="8" x2="8" y2="2" stroke="#ef4444" strokeWidth="1.4" strokeLinecap="round" />
+                                </svg>
+                            </div>
+                        ) : (
+                            styleInfo.classes.map((cls) => {
+                                const fill = cls.fill ?? 'transparent';
+                                const stroke = cls.stroke ?? (cls.fill ? 'rgba(0,0,0,0.35)' : '#94a3b8');
+                                return (
+                                    <div
+                                        key={cls.name}
+                                        className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300 bg-white"
+                                        title={`.${cls.name}`}
+                                    >
+                                        <svg width="8" height="8" viewBox="0 0 10 10">
+                                            <circle cx="5" cy="5" r="4" fill={fill} stroke={stroke} />
+                                        </svg>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </button>
+                )}
 
-                            return (
-                                <div
-                                    key={cls.name}
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-slate-300 bg-white"
-                                    title={`Style: ${cls.name}`}
-                                >
-                                    <svg width="10" height="10" viewBox="0 0 10 10">
-                                        <circle
-                                            cx="5"
-                                            cy="5"
-                                            r="4"
-                                            fill={fill}
-                                            stroke={stroke}
-                                            className={strokeClass}
-                                        />
-                                    </svg>
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
+                {/* Style picker modal for this tree node */}
+                <StylePickerModal
+                    isOpen={isPickerOpen}
+                    onClose={() => setIsPickerOpen(false)}
+                    elementId={node.id}
+                    styleDefs={styleDefs}
+                    currentClasses={styleInfo.classes.map(c => c.name)}
+                />
 
+                {/* Action buttons (visible on hover) */}
                 {!isEditingId && !isConfirmingDelete && (
                     <>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setIsEditingId(true);
-                            }}
-                            title="Renombrar"
+                        <button
+                            className="p-1 rounded text-slate-400 opacity-0 group-hover:opacity-100 hover:text-slate-700 hover:bg-slate-200 transition-opacity shrink-0"
+                            onClick={(e) => { e.stopPropagation(); setIsEditingId(true); }}
+                            title={t('svgEditor.rename')}
                         >
                             <Edit2 className="w-3 h-3" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 hover:text-rose-600"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setIsConfirmingDelete(true);
-                            }}
-                            title="Eliminar"
+                        </button>
+                        <button
+                            className="p-1 rounded text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50 transition-opacity shrink-0"
+                            onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }}
+                            title={t('svgEditor.delete')}
                         >
                             <Trash2 className="w-3 h-3" />
-                        </Button>
+                        </button>
                     </>
                 )}
 
+                {/* Delete confirmation */}
                 {isConfirmingDelete && (
-                    <div
-                        className="flex items-center gap-1 ml-auto"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <span className="text-[10px] text-rose-600 font-medium">¿Eliminar?</span>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-rose-600 hover:bg-rose-50"
-                            onClick={() => {
-                                deleteElement(node.id);
-                                setIsConfirmingDelete(false);
-                            }}
-                            title="Confirmar"
+                    <div className="flex items-center gap-1 ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-[10px] text-rose-600 font-medium whitespace-nowrap">
+                            {t('svgEditor.deleteConfirm')}
+                        </span>
+                        <button
+                            className="p-1 rounded text-rose-600 hover:bg-rose-50"
+                            onClick={() => { deleteElement(node.id); setIsConfirmingDelete(false); }}
+                            title={t('actions.confirm')}
                         >
                             <Check className="w-3 h-3" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
+                        </button>
+                        <button
+                            className="p-1 rounded text-slate-500 hover:bg-slate-100"
                             onClick={() => setIsConfirmingDelete(false)}
-                            title="Cancelar"
+                            title={t('actions.cancel')}
                         >
                             <X className="w-3 h-3" />
-                        </Button>
+                        </button>
                     </div>
                 )}
             </div>
@@ -297,6 +277,7 @@ function TreeNode({
                             key={child.id}
                             node={child}
                             level={level + 1}
+                            styleDefs={styleDefs}
                             getStyleInfo={getStyleInfo}
                             onDragStart={onDragStart}
                             onDragEnd={onDragEnd}
@@ -313,7 +294,8 @@ function TreeNode({
 }
 
 export default function SemanticTree() {
-    const { svgDOM, styleDefinitions, moveElement } = useSVGEditorStore();
+    const { t } = useTranslation();
+    const { svgDOM, styleDefinitions: styleDefs, moveElement } = useSVGEditorStore();
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
     const [dragMode, setDragMode] = useState<'inside' | 'after' | null>(null);
@@ -335,7 +317,7 @@ export default function SemanticTree() {
             return null;
         };
 
-        styleDefinitions.forEach((style) => {
+        styleDefs.forEach((style) => {
             const fill = getRuleValue(style.rules, 'fill');
             const stroke = getRuleValue(style.rules, 'stroke');
 
@@ -352,7 +334,7 @@ export default function SemanticTree() {
             });
         });
         return map;
-    }, [styleDefinitions]);
+    }, [styleDefs]);
 
     const getStyleInfo = useCallback(
         (node: SVGElement) => {
@@ -381,18 +363,18 @@ export default function SemanticTree() {
     if (!svgDOM) {
         return (
             <div className="p-4 text-center text-sm text-slate-500">
-                <p>No SVG loaded</p>
-                <p className="mt-2 text-xs">The SVG will appear here once loaded</p>
+                <p>{t('svgEditor.noSvgLoaded')}</p>
+                <p className="mt-2 text-xs">{t('svgEditor.noSvgHint')}</p>
             </div>
         );
     }
 
     return (
-        <div id="svg-editor-tree" className="py-2">
+        <div id="svg-editor-tree" className="py-1">
             {visualGroups.length === 0 ? (
                 <div className="p-4 text-center text-sm text-slate-500">
-                    <p>No visual elements found</p>
-                    <p className="mt-2 text-xs">Add SVG elements to enable semantic grouping</p>
+                    <p>{t('svgEditor.noElements')}</p>
+                    <p className="mt-2 text-xs">{t('svgEditor.noElementsHint')}</p>
                 </div>
             ) : (
                 visualGroups.map((node) => (
@@ -400,6 +382,7 @@ export default function SemanticTree() {
                         key={node.id}
                         node={node}
                         level={0}
+                        styleDefs={styleDefs}
                         getStyleInfo={getStyleInfo}
                         onDragStart={(id) => setDraggingId(id)}
                         onDragEnd={() => {

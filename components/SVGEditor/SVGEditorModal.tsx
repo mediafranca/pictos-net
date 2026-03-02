@@ -6,6 +6,7 @@ import SemanticTree from './SemanticTree';
 import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
+import { convertInlineAttrsToCssRules } from '../../utils/styleUtils';
 
 interface SVGEditorModalProps {
     isOpen: boolean;
@@ -27,6 +28,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     const { t } = useTranslation();
     const [currentSvg, setCurrentSvg] = useState(initialSvg);
     const loadSVG = useSVGEditorStore(state => state.loadSVG);
+    const setStyles = useSVGEditorStore(state => state.setStyles);
     const svgDocument = useSVGEditorStore(state => state.svgDocument);
     const undo = useSVGEditorStore(state => state.undo);
     const redo = useSVGEditorStore(state => state.redo);
@@ -36,7 +38,19 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
     useEffect(() => {
         if (isOpen && initialSvg) {
-            loadSVG(initialSvg);
+            // Prime the store with global style definitions BEFORE parsing the SVG,
+            // so resolveStylesForSvg uses them as the base and applyUsedStylesToSvg
+            // can include custom classes (e.g. .yellow) in the embedded <style>.
+            if (styleDefs.length > 0) {
+                setStyles(styleDefs);
+            }
+
+            // Pipeline cleanup: convert any residual inline presentation attributes
+            // (fill=, stroke=, etc.) from VTracer output into #id.from-inline { ... }
+            // rules in the <style> block. Enforces zero-inline-styles model on entry.
+            // @see CSS_STYLING_ARCHITECTURE.md — Pipeline Cleanup
+            const cleanedSvg = convertInlineAttrsToCssRules(initialSvg);
+            loadSVG(cleanedSvg);
         }
 
         // Cleanup on close
@@ -100,7 +114,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                                 onClick={undo}
                                 disabled={!canUndo()}
                                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors border-r border-slate-700"
-                                title="Undo (Ctrl+Z)"
+                                title={t('svgEditor.undo')}
                             >
                                 <Undo size={16} />
                             </button>
@@ -108,7 +122,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                                 onClick={redo}
                                 disabled={!canRedo()}
                                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                title="Redo (Ctrl+Y)"
+                                title={t('svgEditor.redo')}
                             >
                                 <Redo size={16} />
                             </button>
@@ -136,7 +150,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                 {/* Main Content */}
                 <div className="flex-1 flex overflow-hidden">
                     {/* Left Panel: Semantic Tree */}
-                    <aside id="svg-editor-tree-panel" className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-xl">
+                    <aside id="svg-editor-tree-panel" className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-xl text-slate-700">
                         <div id="svg-editor-tree-header" className="p-3 border-b border-slate-100 bg-slate-50">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                                 {t('svg.editorLayers')}
@@ -153,7 +167,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                     </main>
 
                     {/* Right Panel: Style Properties */}
-                    <aside id="svg-editor-properties-panel" className="w-80 border-l border-slate-200 bg-white flex flex-col shrink-0 z-10 shadow-lg">
+                    <aside id="svg-editor-properties-panel" className="w-80 border-l border-slate-200 bg-white flex flex-col shrink-0 z-10 shadow-lg text-slate-700">
                         <StylePanel styleDefs={styleDefs} />
                     </aside>
                 </div>

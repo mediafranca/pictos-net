@@ -24,6 +24,8 @@
     "codeView": "Code View",
     "animations": "Animations",
     "deleteConfirm": "Delete this style?",
+    "restoreDefaults": "Restore defaults",
+    "restoreConfirm": "This will replace all styles and keyframes with the built-in defaults. Continue?",
     "sectionForeground": "Foreground (.f)",
     "sectionKey": "Key / Reference (.k)",
     "fill": "Fill",
@@ -41,25 +43,31 @@
     "graphManagement": "Graph Management",
     "sortBy": "Sort by:",
     "alphabetical": "Alphabetical",
-    "completeness": "Completeness"
+    "completeness": "Completeness",
+    "evaluation": "Evaluation"
   },
   "home": {
     "graphArchitecture": "Graph Architecture",
     "description": "Step-by-step generative system for pictograms from communicative intent to visual representation",
+    "icapModule": "ICAP-50 Phrase List",
+    "icapNamespace": "mediafranca.icap.corpus",
+    "icapDescription": "The ICAP-50 corpus represents a set of 50 phrases organized into 8 pragmatic categories: Request, Reject, Direct, Accept, Social, Emotion, Comment, and Question.",
+    "icapRepository": "View ICAP repository",
     "importTextNode": "Upload Your Own Phrases",
     "importNamespace": "custom_vocabulary",
     "importDescription": "Define your own vocabulary from custom phrases. Upload a .txt file with one phrase per line.",
     "loadLibraryWarning": "You have {count} pictogram(s) in your library. Loading a new library will overwrite your current work. Do you want to continue?",
     "aboutProject": "About this project",
     "exampleLibraries": "Example Libraries",
-    "exampleLibrariesDescription": "Curated collections of pictograms",
+    "exampleLibrariesDescription": "Curated collections of pictograms with complete evaluations",
     "loadLibrary": "Load library",
     "items": "items"
   },
   "pipeline": {
     "understand": "Understand",
     "compose": "Compose",
-    "produce": "Produce"
+    "produce": "Produce",
+    "evaluate": "Evaluate"
   },
   "editor": {
     "hierarchicalElements": "Hierarchical Elements",
@@ -75,6 +83,44 @@
     "noBitmapReference": "No Bitmap Reference",
     "fullSizeRender": "Full size render",
     "evaluationContext": "Evaluation Context"
+  },
+  "evaluation": {
+    "icap": "ICAP Evaluation",
+    "evaluate": "Evaluate Pictogram",
+    "confirm": "Confirm Evaluation",
+    "openEditor": "Open Evaluation Editor",
+    "evaluationSaved": "Evaluation saved for: {utterance}",
+    "clarity": "Clarity",
+    "recognizability": "Recognizability",
+    "semantic_transparency": "Semantic Transparency",
+    "pragmatic_fit": "Pragmatic Fit",
+    "cultural_adequacy": "Cultural Adequacy",
+    "cognitive_accessibility": "Cognitive Accessibility",
+    "reasoning": "Reasoning",
+    "humanReasoning": "Human Reasoning",
+    "icapLabel": "ICAP",
+    "helpTitle": "Evaluation Guide: {dimension}",
+    "scaleLevel": "Level {level}",
+    "loading": "Loading evaluation guide...",
+    "errorLoading": "Could not load evaluation guide. Please check your connection."
+  },
+  "icap": {
+    "descriptions": {
+      "clarity": "The degree to which the pictogram is visually clear, legible and free from visual ambiguity",
+      "recognizability": "The ease with which a viewer can identify what the pictogram represents",
+      "semantic_transparency": "The degree to which the pictogram accurately conveys the specific meaning of the phrase",
+      "pragmatic_fit": "The usefulness and appropriateness of the pictogram in real-world AAC contexts",
+      "cultural_adequacy": "The appropriateness and relevance of the pictogram for the cultural and linguistic context",
+      "cognitive_accessibility": "The accessibility and usability of the pictogram for users with cognitive differences"
+    },
+    "axes": {
+      "cla": "CLA",
+      "rec": "REC",
+      "sem": "SEM",
+      "pra": "PRA",
+      "cul": "CUL",
+      "cog": "COG"
+    }
   },
   "config": {
     "visualStylePrompt": "Visual Style Prompt (Node Attribute)",
@@ -183,7 +229,8 @@
   "steps": {
     "nlu": "NLU",
     "visual": "Visual",
-    "bitmap": "Bitmap"
+    "bitmap": "Bitmap",
+    "eval": "Evaluation"
   },
   "svg": {
     "generate": "Generate SVG",
@@ -195,7 +242,7 @@
     "traceSvg": "Trace",
     "retrace": "Re-trace",
     "rawTrace": "Raw Trace",
-    "formatGemini": "Structure with Gemini",
+    "formatGemini": "Structure",
     "traceDone": "Raw tracing complete. Click Structure to apply semantic grouping.",
     "traceConverts": "Converts bitmap to SVG (trace) then applies semantic structure with Gemini",
     "structureTooltip": "Group paths into semantic layers using Gemini + mf-svg-schema",
@@ -206,7 +253,10 @@
     "editorLayers": "Layers & Structure",
     "editorStylePanel": "Style Panel",
     "editorSave": "Save Changes",
-    "editorExport": "Export"
+    "editorExport": "Export",
+    "reStructure": "Re-structure",
+    "reStructureTooltip": "Re-apply semantic structure from the traced SVG",
+    "clearInlineStyles": "Clear inline styles"
   },
   "vectorizer": {
     "preview": "Vectorizer Preview",
@@ -216,8 +266,53 @@
     "warnings": "Trace warnings",
     "layersTraced": "{traced}/{total} layers traced"
   },
+  "svgEditor": {
+    "localOverride": "Local overrides",
+    "restoreToLibrary": "Restore",
+    "overriddenIndicator": "Modified from library",
+    "fromInlineLabel": "Converted inline styles",
+    "cite": "Assign class",
+    "uncite": "Remove class",
+    "addStyle": "Add style",
+    "noStylesAssigned": "No styles assigned",
+    "selectStyle": "Select style",
+    "noStylesDefined": "No styles defined.",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirm": "Delete?",
+    "deleteWithChildren": "Delete this element and its children?",
+    "deleteElement": "Delete element",
+    "doubleClickRename": "Double-click to rename",
+    "noSvgLoaded": "No SVG loaded",
+    "noSvgHint": "The SVG will appear here once loaded",
+    "noElements": "No visual elements found",
+    "noElementsHint": "Add SVG elements to enable semantic grouping",
+    "cssClass": "CSS Class",
+    "noClass": "no class",
+    "inlineStyles": "Hardcoded styles",
+    "clearAll": "Clear all",
+    "fill": "Fill",
+    "noFill": "No Fill",
+    "black": "Black",
+    "stroke": "Stroke",
+    "noStroke": "No Stroke",
+    "strokeWidth": "Stroke Width",
+    "opacity": "Opacity",
+    "identity": "Identity",
+    "elementId": "Element ID",
+    "properties": "Properties",
+    "selectElement": "Select an element on the canvas or in the tree to edit its properties.",
+    "idEmpty": "ID cannot be empty",
+    "idInvalidChars": "Only alphanumeric characters, hyphens and underscores",
+    "idExists": "ID \"{id}\" already exists",
+    "undo": "Undo (Ctrl+Z)",
+    "redo": "Redo (Ctrl+Y)"
+  },
   "share": {
     "shareWithPictos": "Share with PICTOS",
+    "requiresEvaluation": "Evaluation required to share the pictogram",
+    "lowScore": "The pictogram must have an average evaluation ≥ 4.0 to share",
+    "requiresHighScore": "Requires evaluation ≥ 4.0",
     "alreadyShared": "This pictogram has already been shared with PICTOS",
     "sharing": "Sharing \"{utterance}\" with PICTOS...",
     "noToken": "GitHub token not configured. Define GITHUB_TOKEN in environment variables.",

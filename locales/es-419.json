@@ -24,6 +24,8 @@
     "codeView": "Vista de código",
     "animations": "Animaciones",
     "deleteConfirm": "¿Eliminar este estilo?",
+    "restoreDefaults": "Restaurar defaults",
+    "restoreConfirm": "Esto reemplazará todos los estilos y keyframes con los valores por defecto. ¿Continuar?",
     "sectionForeground": "Primer Plano (.f)",
     "sectionKey": "Referencia / Fondo (.k)",
     "fill": "Relleno",
@@ -41,25 +43,31 @@
     "graphManagement": "Gestión de Grafo",
     "sortBy": "Ordenar por:",
     "alphabetical": "Alfabético",
-    "completeness": "Completitud"
+    "completeness": "Completitud",
+    "evaluation": "Evaluación"
   },
   "home": {
     "graphArchitecture": "Arquitectura de Grafo",
     "description": "Sistema generativo de pictogramas paso-a-paso desde la intención comunicativa a la representación visual",
+    "icapModule": "Listado de 50 frases ICAP",
+    "icapNamespace": "mediafranca.icap.corpus",
+    "icapDescription": "El corpus ICAP-50 es un conjunto de 50 frases organizadas en 8 categorías pragmáticas: Solicitar, Rechazar, Dirigir, Aceptar, Social, Emoción, Comentar y Preguntar.",
+    "icapRepository": "Ver repositorio ICAP",
     "importTextNode": "Sube Tus Propias Frases",
     "importNamespace": "vocabulario_personalizado",
     "importDescription": "Define tu propio vocabulario a partir de frases personalizadas. Sube un archivo .txt con una frase por línea.",
     "loadLibraryWarning": "Tiene {count} pictograma(s) en su biblioteca. Cargar una nueva biblioteca sobreescribirá su trabajo actual. ¿Desea continuar?",
     "aboutProject": "Acerca de este proyecto",
     "exampleLibraries": "Bibliotecas de Ejemplo",
-    "exampleLibrariesDescription": "Colecciones curadas de pictogramas",
+    "exampleLibrariesDescription": "Colecciones curadas de pictogramas con evaluaciones completas",
     "loadLibrary": "Cargar biblioteca",
     "items": "elementos"
   },
   "pipeline": {
     "understand": "Comprender",
     "compose": "Componer",
-    "produce": "Producir"
+    "produce": "Producir",
+    "evaluate": "Evaluar"
   },
   "editor": {
     "hierarchicalElements": "Elementos Jerárquicos",
@@ -75,6 +83,44 @@
     "noBitmapReference": "Sin Referencia de Bitmap",
     "fullSizeRender": "Renderizado tamaño completo",
     "evaluationContext": "Contexto de Evaluación"
+  },
+  "evaluation": {
+    "icap": "Evaluación ICAP",
+    "evaluate": "Evaluar Pictograma",
+    "confirm": "Confirmar Evaluación",
+    "openEditor": "Abrir Editor de Evaluación",
+    "evaluationSaved": "Evaluación guardada para: {utterance}",
+    "clarity": "Claridad",
+    "recognizability": "Reconocibilidad",
+    "semantic_transparency": "Transparencia Semántica",
+    "pragmatic_fit": "Adecuación Pragmática",
+    "cultural_adequacy": "Adecuación Cultural",
+    "cognitive_accessibility": "Accesibilidad Cognitiva",
+    "reasoning": "Razonamiento",
+    "humanReasoning": "Razonamiento Humano",
+    "icapLabel": "ICAP",
+    "helpTitle": "Guía de Evaluación: {dimension}",
+    "scaleLevel": "Nivel {level}",
+    "loading": "Cargando guía de evaluación...",
+    "errorLoading": "No se pudo cargar la guía de evaluación. Por favor verifica tu conexión."
+  },
+  "icap": {
+    "descriptions": {
+      "clarity": "El grado en que el pictograma es visualmente claro, legible y libre de ambigüedad visual",
+      "recognizability": "La facilidad con la que un observador puede identificar lo que representa el pictograma",
+      "semantic_transparency": "El grado en que el pictograma transmite con precisión el significado de la frase",
+      "pragmatic_fit": "La utilidad y adecuación del pictograma en contextos reales de comunicación AAC",
+      "cultural_adequacy": "La adecuación y relevancia del pictograma para el contexto cultural y lingüístico",
+      "cognitive_accessibility": "La accesibilidad y usabilidad del pictograma para usuarios con diferencias cognitivas"
+    },
+    "axes": {
+      "cla": "CLA",
+      "rec": "REC",
+      "sem": "SEM",
+      "pra": "PRA",
+      "cul": "CUL",
+      "cog": "COG"
+    }
   },
   "config": {
     "visualStylePrompt": "Prompt de Estilo Visual (Atributo de Nodo)",
@@ -183,7 +229,8 @@
   "steps": {
     "nlu": "NLU",
     "visual": "Visual",
-    "bitmap": "Bitmap"
+    "bitmap": "Bitmap",
+    "eval": "Evaluación"
   },
   "svg": {
     "generate": "Generar SVG",
@@ -195,7 +242,7 @@
     "traceSvg": "Trazar",
     "retrace": "Re-trazar",
     "rawTrace": "Traza cruda",
-    "formatGemini": "Estructurar con Gemini",
+    "formatGemini": "Estructurar",
     "traceDone": "Trazado listo. Haz clic en Estructurar para aplicar agrupación semántica.",
     "traceConverts": "Convierte el bitmap a SVG (trazar) y luego aplica estructura semántica con Gemini",
     "structureTooltip": "Agrupa los trazos en capas semánticas usando Gemini + mf-svg-schema",
@@ -206,7 +253,10 @@
     "editorLayers": "Capas y Estructura",
     "editorStylePanel": "Panel de Estilos",
     "editorSave": "Guardar Cambios",
-    "editorExport": "Exportar"
+    "editorExport": "Exportar",
+    "reStructure": "Re-estructurar",
+    "reStructureTooltip": "Volver a estructurar semánticamente desde el SVG trazado",
+    "clearInlineStyles": "Limpiar estilos en línea"
   },
   "vectorizer": {
     "preview": "Vista previa de vectorizador",
@@ -216,8 +266,53 @@
     "warnings": "Advertencias de traza",
     "layersTraced": "{traced}/{total} capas trazadas"
   },
+  "svgEditor": {
+    "localOverride": "Estilos locales",
+    "restoreToLibrary": "Restaurar",
+    "overriddenIndicator": "Modificado respecto a biblioteca",
+    "fromInlineLabel": "Estilos inline convertidos",
+    "cite": "Asignar clase",
+    "uncite": "Quitar clase",
+    "addStyle": "Agregar estilo",
+    "noStylesAssigned": "Sin estilos asignados",
+    "selectStyle": "Seleccionar estilo",
+    "noStylesDefined": "No hay estilos definidos.",
+    "rename": "Renombrar",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar?",
+    "deleteWithChildren": "¿Eliminar este elemento y sus hijos?",
+    "deleteElement": "Eliminar elemento",
+    "doubleClickRename": "Doble click para renombrar",
+    "noSvgLoaded": "No hay SVG cargado",
+    "noSvgHint": "El SVG aparecerá aquí una vez cargado",
+    "noElements": "No hay elementos visuales",
+    "noElementsHint": "Agrega elementos SVG para habilitar la agrupación semántica",
+    "cssClass": "Clase CSS",
+    "noClass": "sin clase",
+    "inlineStyles": "Estilos hardcodeados",
+    "clearAll": "Limpiar todos",
+    "fill": "Relleno",
+    "noFill": "Sin Relleno",
+    "black": "Negro",
+    "stroke": "Trazo",
+    "noStroke": "Sin Trazo",
+    "strokeWidth": "Grosor de Trazo",
+    "opacity": "Opacidad",
+    "identity": "Identidad",
+    "elementId": "ID del Elemento",
+    "properties": "Propiedades",
+    "selectElement": "Selecciona un elemento en el lienzo o en el árbol para editar sus propiedades.",
+    "idEmpty": "El ID no puede estar vacío",
+    "idInvalidChars": "Solo alfanuméricos, guiones y guión bajo",
+    "idExists": "El ID \"{id}\" ya existe",
+    "undo": "Deshacer (Ctrl+Z)",
+    "redo": "Rehacer (Ctrl+Y)"
+  },
   "share": {
     "shareWithPictos": "Compartir con PICTOS",
+    "requiresEvaluation": "Se requiere evaluación para compartir el pictograma",
+    "lowScore": "El pictograma debe tener una evaluación promedio ≥ 4.0 para compartir",
+    "requiresHighScore": "Requiere evaluación ≥ 4.0",
     "alreadyShared": "Este pictograma ya fue compartido con PICTOS",
     "sharing": "Compartiendo \"{utterance}\" con PICTOS...",
     "noToken": "Token de GitHub no configurado. Define GITHUB_TOKEN en las variables de entorno.",

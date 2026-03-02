@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2 } from 'lucide-react';
+import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
-import { structureSVG, canGenerateSVG } from '../services/svgStructureService';
+import { structureSVG, canVectorize, canStructureSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
 
@@ -32,49 +32,51 @@ interface SVGGeneratorProps {
 
 export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer }) => {
     const { t } = useTranslation();
-    const { addSVG, getSVGByRowId, downloadSVG } = useSVGLibrary();
+    const { addSVG, getSVGByRowId, downloadSVG, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
     const [error, setError] = useState<string | undefined>();
     const [progress, setProgress] = useState(0);
     const [processStartTime, setProcessStartTime] = useState<number | null>(null);
     const [elapsedTime, setElapsedTime] = useState(0);
     const [subStatus, setSubStatus] = useState<string>('');
-    const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null); // Load from row or null
+    const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
 
-
-    // Check if SVG already exists in library OR in row data (from IndexedDB)
-    const existingSVG = React.useMemo(() => {
+    // row.structuredSvg is the authoritative source (updated by parent via updateRow).
+    // The local SVG library may be stale because each useSVGLibrary() instance has
+    // independent state loaded only on mount. We use the library only to inherit
+    // metadata (lang, createdAt) if available, but the SVG content always comes from the prop.
+    const structuredSvgEntry = React.useMemo(() => {
         const libSvg = getSVGByRowId(row.id);
-        if (libSvg) return libSvg;
 
-        if (row.structuredSvg || row.rawSvg) {
+        if (row.structuredSvg) {
             return {
-                id: `svg-${row.id}`,
+                id: libSvg?.id ?? `svg-${row.id}`,
                 utterance: row.UTTERANCE,
-                svg: row.structuredSvg || row.rawSvg || '',
+                svg: row.structuredSvg,
                 sourceRowId: row.id,
-                createdAt: new Date().toISOString(),
-                // Mock other fields if needed
+                createdAt: libSvg?.createdAt ?? new Date().toISOString(),
+                lang: libSvg?.lang,
             };
         }
-        return undefined;
-    }, [row.id, row.structuredSvg, row.rawSvg, row.UTTERANCE, getSVGByRowId]);
 
-    // Calculate eligibility (re-runs strictly when row updates)
-    const eligibility = canGenerateSVG({
-        bitmap: row.bitmap,
-        NLU: row.NLU,
-        elements: row.elements
-    });
+        if (libSvg) return libSvg;
+
+        return undefined;
+    }, [row.id, row.structuredSvg, row.UTTERANCE, getSVGByRowId]);
+
+    // Vectorization only needs a bitmap (VTracer is independent of NLU/elements)
+    const vectorizeEligibility = canVectorize({ bitmap: row.bitmap });
+    // Structuring requires bitmap + NLU + non-empty elements
+    const structureEligibility = canStructureSVG({ bitmap: row.bitmap, NLU: row.NLU, elements: row.elements });
 
     // Dynamic Style Injection (Visual only)
     const displaySvg = React.useMemo(() => {
-        if (!existingSVG) return '';
+        if (!structuredSvgEntry) return '';
         const currentStyles = generateStylesheet(config);
-        return existingSVG.svg
+        return structuredSvgEntry.svg
             .replace(/<style>[\s\S]*?<\/style>/i, `<style>${currentStyles}</style>`)
             .replace(/<g /g, '<g tabindex="0" style="cursor: pointer;" ');
-    }, [existingSVG, config]);
+    }, [structuredSvgEntry, config]);
 
     // Raw SVG prepared for display.
     // The viewBox from vtracer (or assembled multicolor SVG) is authoritative and
@@ -135,9 +137,27 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         URL.revokeObjectURL(url);
     };
 
+    // Strip hardcoded inline styles from the raw traced SVG so CSS classes take effect
+    const cleanInlineStyles = () => {
+        if (!rawSvg) return;
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
+            const INLINE_ATTRS = ['fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-dasharray', 'opacity', 'style'];
+            doc.querySelectorAll('*').forEach(el => {
+                INLINE_ATTRS.forEach(attr => el.removeAttribute(attr));
+            });
+            const cleaned = new XMLSerializer().serializeToString(doc.documentElement);
+            setRawSvg(cleaned);
+            onUpdate({ rawSvg: cleaned });
+        } catch (err) {
+            console.error('cleanInlineStyles error:', err);
+        }
+    };
+
     // Handle SVG interaction (Block Editing)
     const handleSvgInteraction = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!existingSVG) return;
+        if (!structuredSvgEntry) return;
 
         const target = e.target as Element;
         const group = target.closest('g[role="group"]') || target.closest('[class*=""]');
@@ -171,14 +191,14 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 const newSvgContent = s.serializeToString(svgRoot);
 
                 addSVG({
-                    ...existingSVG,
+                    ...structuredSvgEntry,
                     svg: newSvgContent
                 });
+                // Keep row.structuredSvg in sync as the SSoT
+                onUpdate({ structuredSvg: newSvgContent });
             }
         }
     };
-
-
 
     // Timer Effect
     useEffect(() => {
@@ -195,31 +215,25 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
     // Debugging: Monitor row eligibility changes
     useEffect(() => {
-        if (eligibility.eligible !== undefined) {
-            console.log('[SVGGenerator] Eligibility Updated:', {
-                id: row.id,
-                eligible: eligibility.eligible,
-                reason: eligibility.reason
-            });
-        }
-    }, [eligibility]);
+        console.log('[SVGGenerator] Eligibility Updated:', {
+            id: row.id,
+            vectorize: vectorizeEligibility,
+            structure: structureEligibility,
+        });
+    }, [vectorizeEligibility, structureEligibility]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Determine status based on what SVG data is available for this row.
+    // Priority: structuredSvg > rawSvg > idle
     useEffect(() => {
-        if (existingSVG) {
+        if (structuredSvgEntry) {
             setStatus('completed');
+        } else if (row.rawSvg) {
+            setRawSvg(row.rawSvg);
+            setStatus('traced');
         } else {
-            // Reset status if we switched rows or deleted SVG
             setStatus('idle');
         }
-    }, [existingSVG, row.id]);
-
-    // Sync rawSvg when the row's rawSvg prop changes (e.g. from VectorizerModal applied via App.tsx)
-    useEffect(() => {
-        if (row.rawSvg && row.rawSvg !== rawSvg) {
-            setRawSvg(row.rawSvg);
-            if (status !== 'completed') setStatus('traced');
-        }
-    }, [row.rawSvg]);
+    }, [structuredSvgEntry, row.id, row.rawSvg]);
 
     const handleFormat = async () => {
         if (!rawSvg) return;
@@ -294,19 +308,19 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     };
 
 
-    if (!eligibility.eligible) {
+    if (!vectorizeEligibility.eligible) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-6 bg-slate-50 border border-slate-100 rounded text-center opacity-75">
                 <AlertCircle size={24} className="text-slate-300 mb-2" />
                 <p className="text-xs text-slate-400 font-medium mb-1">SVG Generation Unavailable</p>
                 <p className="text-[10px] text-slate-400 font-mono">
-                    {eligibility.reason || "Requirements not met"}
+                    {vectorizeEligibility.reason || "Requirements not met"}
                 </p>
             </div>
         );
     }
 
-    if (status === 'completed' && existingSVG) {
+    if (status === 'completed' && structuredSvgEntry) {
         return (
             <div className="flex flex-col h-full">
                 <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/svg-preview">
@@ -329,7 +343,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             </button>
                         )}
                         <button
-                            onClick={() => downloadSVG(existingSVG.id)}
+                            onClick={() => downloadSVG(structuredSvgEntry.id)}
                             className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
                             title="Descargar SVG"
                         >
@@ -344,9 +358,29 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 </div>
 
                 <div className="flex gap-2">
+                    {/* Re-structure: go back to traced if a raw SVG is available */}
+                    {row.rawSvg && (
+                        <button
+                            onClick={() => {
+                                removeSVGByRowId(row.id);
+                                onUpdate({ structuredSvg: undefined });
+                                setRawSvg(row.rawSvg!);
+                                setStatus('traced');
+                            }}
+                            className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
+                            title={t('svg.reStructureTooltip')}
+                        >
+                            <Layers size={14} /> {t('svg.reStructure')}
+                        </button>
+                    )}
+
+                    {/* Re-trace: open vectorizer and clear local raw SVG state */}
                     <button
-                        onClick={() => onOpenVectorizer?.()}
-                        title="Re-trace bitmap"
+                        onClick={() => {
+                            setRawSvg(null);
+                            onOpenVectorizer?.();
+                        }}
+                        title={t('svg.retrace')}
                         className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
                     >
                         <RefreshCw size={14} /> {t('svg.retrace')}
@@ -394,9 +428,19 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <div className="flex gap-2">
                     <button
                         onClick={handleFormat}
-                        className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
+                        disabled={!structureEligibility.eligible}
+                        title={structureEligibility.eligible ? undefined : structureEligibility.reason}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'}`}
                     >
-                        <FileCode size={16} /> {t('svg.formatGemini')}
+                        <Layers size={16} /> {t('svg.formatGemini')}
+                    </button>
+
+                    <button
+                        onClick={cleanInlineStyles}
+                        title={t('svg.clearInlineStyles')}
+                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px]"
+                    >
+                        <Eraser size={13} />
                     </button>
 
                     <button
