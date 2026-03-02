@@ -10,7 +10,9 @@ export const generateCssString = (styles: StyleDefinition[], keyframes: Keyframe
   );
 
   const classesCSS = styles.map(style => {
-    const selectorString = style.selectors.join(', ');
+    const selectorString = style.selectors
+      .map(sel => `svg ${sel}`)
+      .join(', ');
     const rulesString = style.rules
       .map(rule => `  ${rule.property}: ${rule.value};`)
       .join('\n');
