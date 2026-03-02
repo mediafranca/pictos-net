@@ -18,23 +18,19 @@ La rama de desarrollo `lab` contiene la siguiente versión:
 
 ## Cómo funciona
 
-El sistema implementa un pipeline de tres fases, cada una visible y editable:
+El sistema implementa un pipeline de tres fases automáticas más dos de post-procesamiento opcional. Cada fase es visible, editable y regenerable de forma independiente:
 
-```
-Utterance → NLU (NSM) → Composición visual → Bitmap (Gemini)
-                                                     ↓
-                                          Vectorización (vtracer)
-                                                     ↓
-                                       SVG semántico (mf-svg-schema)
-```
+**① Comprender** (Gemini 2.5 Flash) — Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM): 65 primitivos semánticos universales. Produce un esquema estructurado con intención comunicativa, dominio, roles semánticos (FrameNet) e instrucciones visuales.
 
-**1. Comprender (NLU)** — Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM), un conjunto de 65 primitivos semánticos universales presentes en todas las lenguas humanas. El resultado es un esquema estructurado que captura la intención comunicativa, los roles semánticos y las instrucciones visuales.
+**② Componer** (Gemini 2.5 Flash) — Traduce el análisis NLU a una jerarquía de elementos visuales (`elements`) y una descripción de articulación espacial (`prompt`). Si el usuario edita los elementos, puede regenerar solo el prompt sin repetir toda la composición.
 
-**2. Componer** — A partir del análisis NLU, el sistema genera una jerarquía de elementos visuales (`elements`) y una descripción de su articulación espacial (`prompt`). Estos dos artefactos son el blueprint del pictograma.
+**③ Producir** (Gemini Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. Resultado: bitmap JPEG 800×800.
 
-**3. Producir** — Gemini renderiza la imagen a partir del blueprint. El resultado es un bitmap PNG que puede vectorizarse para obtener un SVG semántico estructurado según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema), con metadatos de accesibilidad embebidos.
+**④ Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante trazado binario por capas de color. Proceso local, sin API. Resultado: SVG crudo sin semántica.
 
-Cada fase se puede regenerar de forma independiente y editar manualmente antes de continuar al siguiente paso. Los pictogramas generados pueden evaluarse con el marco [ICAP](https://github.com/mediafranca/ICAP).
+**⑤ Estructurar** (Gemini 3 Pro, multimodal) — Reorganiza los paths del SVG crudo en grupos semánticos según la jerarquía de elementos, embebiendo metadatos de accesibilidad según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema).
+
+Las fases ④ y ⑤ son opcionales y las inicia el usuario manualmente. La cascada automática (①→②→③) se ejecuta al crear una nueva frase o presionar Play en una fila. Los pictogramas generados pueden evaluarse con el marco [ICAP](https://github.com/mediafranca/ICAP).
 
 ## Esquema detallado
 
@@ -45,64 +41,64 @@ Cada fase se puede regenerar de forma independiente y editar manualmente antes d
     'primaryColor': '#e8f0fe',
     'primaryTextColor': '#1a1a2e',
     'primaryBorderColor': '#4a6fa5',
-    'secondaryColor': '#f0f0f0',
     'lineColor': '#888',
     'fontSize': '13px',
-    'fontFamily': 'Lexend, system-ui, sans-serif',
-    'edgeLabelBackground': '#ffffffcc'
+    'fontFamily': 'Lexend, system-ui, sans-serif'
   },
   'flowchart': {
     'padding': 20,
     'nodeSpacing': 35,
     'rankSpacing': 45,
-    'curve': 'basis',
-    'htmlLabels': true
+    'curve': 'basis'
   }
 }}%%
 flowchart TD
-    UTT["<b>utterance</b><br><i>intencion comunicativa</i>"]
+    UTT["<b>utterance</b><br><i>intención comunicativa</i>"]
 
-    subgraph CFG["<b>GlobalConfig</b> (Settings)"]
+    subgraph CFG["<b>GlobalConfig</b>"]
         direction TB
-        cfg_lang["<b>lang</b><br>geoContext<br>annotatedContext"]
-        cfg_visual["<b>visualStylePrompt</b><br>estilo grafico global"]
-        cfg_css["<b>svgStyleDefs</b><br>svgKeyframes"]
-        cfg_img["<b>imageModel</b> flash|pro<br><b>aspectRatio</b> 1:1, 3:4..."]
+        cfg_lang["lang · geoContext<br>annotatedContext"]
+        cfg_visual["visualStylePrompt"]
+        cfg_css["svgStyleDefs · svgKeyframes"]
+        cfg_img["imageModel flash|pro<br>aspectRatio"]
     end
 
-    subgraph F1["<b>COMPRENDER</b> — Gemini 3 Pro"]
+    subgraph F1["<b>① COMPRENDER</b> — Gemini 2.5 Flash"]
         direction TB
-        f1_in["NSM Schema Engine<br>65 primos universales<br>nlu-schema v1.0"]
-        f1_out["<b>NLUData</b><br>frames, nsm_explications<br>visual_guidelines, pragmatics"]
+        f1_proc["NSM Schema Engine<br>65 primos universales<br>nlu-schema v1.0"]
+        f1_out["<b>NLUData</b><br>domain · frames · frame_label<br>nsm_explications<br>visual_guidelines · pragmatics"]
     end
 
-    subgraph F2["<b>COMPONER</b> — Gemini 3 Pro"]
+    subgraph F2["<b>② COMPONER</b> — Gemini 2.5 Flash"]
         direction TB
-        f2a["Visual Topology Node<br>NLU &#8594; jerarquia visual"]
-        f2b["Spatial Articulation Node<br><i>(refinamiento opcional)</i>"]
+        f2a["Visual Topology Node<br><i>genera elements + prompt<br>en una sola llamada</i>"]
+        f2b["Spatial Articulation Node<br><i>solo en regeneración manual<br>cuando usuario edita elements</i>"]
         f2_elem["<b>elements</b><br>VisualElement tree"]
-        f2_prompt["<b>prompt</b><br>composicion espacial"]
+        f2_prompt["<b>prompt</b><br>composición espacial"]
     end
 
-    subgraph F3["<b>PRODUCIR</b> — Gemini Image"]
+    subgraph F3["<b>③ PRODUCIR</b> — Gemini Image"]
         direction TB
-        f3_merge["<b>fullPrompt</b> combina:<br>utterance + NLU context<br>+ elements + prompt<br>+ visualStylePrompt"]
-        f3_gen["Gemini flash | pro<br>sin texto, flat design<br>fondo blanco"]
-        f3_post["resize 800x800<br>JPEG q=0.70"]
+        f3_merge["<b>fullPrompt</b> combina:<br>utterance + NLU context<br>+ domain + elements + prompt<br>+ visualStylePrompt"]
+        f3_gen["flash-image | pro-image<br>sin texto · flat design<br>fondo blanco"]
+        f3_post["resize 800×800 · JPEG q=0.70"]
         f3_out["<b>bitmap</b><br>base64 data URL"]
     end
 
-    subgraph F4["<b>VECTORIZAR</b> — WASM local"]
+    subgraph POST["Post-procesamiento — manual, opcional"]
         direction TB
-        f4_proc["BinaryImageConverter<br>extrae colores unicos<br>mascara binaria por capa<br>spline | polygon | none"]
-        f4_out["<b>rawSvg</b><br>multicolor, sin semantica"]
-    end
+        subgraph F4["<b>④ VECTORIZAR</b> — WASM local"]
+            direction TB
+            f4_proc["vtracer · BinaryImageConverter<br>extrae colores · máscara binaria<br>spline | polygon | none"]
+            f4_out["<b>rawSvg</b><br>multicolor · sin semántica"]
+        end
 
-    subgraph F5["<b>ESTRUCTURAR</b> — Gemini 3 Pro"]
-        direction TB
-        f5_multi["<b>MULTIMODAL</b><br>bitmap PNG + rawSvg<br>+ elements + CSS"]
-        f5_proc["Distribuye paths en<br>grupos semanticos<br>Sanitiza inline styles<br>Fuerza clases CSS"]
-        f5_out["<b>structuredSvg</b><br>mf-svg-schema"]
+        subgraph F5["<b>⑤ ESTRUCTURAR</b> — Gemini 3 Pro ⚡stream"]
+            direction TB
+            f5_multi["<b>MULTIMODAL</b><br>bitmap PNG + rawSvg<br>+ elements + CSS"]
+            f5_proc["Agrupa paths en g semánticos<br>Sanitiza inline styles<br>Aplica clases CSS"]
+            f5_out["<b>structuredSvg</b><br>mf-svg-schema"]
+        end
     end
 
     subgraph ROW["<b>RowData</b> — estado acumulativo por fila"]
@@ -114,36 +110,37 @@ flowchart TD
         r5["structuredSvg"]
     end
 
-    %% Flujo principal
-    UTT --> F1
+    %% Flujo principal (cascada automática)
+    UTT ==> F1
     cfg_lang --> F1
-    f1_in --> f1_out
+    f1_proc --> f1_out
 
-    f1_out --> F2
+    f1_out ==> F2
     cfg_css -.->|availableClasses| F2
-    f2a --> f2b
     f2a --> f2_elem
-    f2b --> f2_prompt
+    f2a --> f2_prompt
+    f2b -.->|"regenera solo prompt"| f2_prompt
 
-    f2_elem --> F3
-    f2_prompt --> F3
+    f2_elem ==> F3
+    f2_prompt ==> F3
     cfg_visual --> f3_merge
     cfg_img --> f3_gen
-    f1_out -.->|intent, focus, action| f3_merge
+    f1_out -.->|"intent · domain · focus"| f3_merge
     UTT -.->|contexto original| f3_merge
     f3_merge --> f3_gen --> f3_post --> f3_out
 
-    f3_out --> F4
+    %% Post-procesamiento (usuario lo inicia manualmente)
+    f3_out -.->|"usuario inicia"| F4
     f4_proc --> f4_out
 
-    f4_out --> F5
+    f4_out -.-> F5
     f3_out -.->|referencia visual| f5_multi
     f2_elem -.->|estructura DOM| f5_multi
-    f1_out -.->|contexto semantico| f5_multi
+    f1_out -.->|contexto semántico| f5_multi
     cfg_css -->|generateCssString| f5_multi
     f5_multi --> f5_proc --> f5_out
 
-    %% Acumulacion en RowData
+    %% Acumulación en RowData
     f1_out --> r1
     f2_elem --> r2
     f2_prompt --> r2
@@ -154,19 +151,18 @@ flowchart TD
     %% Colores por fase
     style UTT fill:#fff3cd,stroke:#e6a800,stroke-width:2px,color:#664d00
     style CFG fill:#f5f5f5,stroke:#aaa,stroke-width:1px,color:#555
-
     style cfg_lang fill:#e9e9e9,stroke:#bbb,color:#444
     style cfg_visual fill:#e9e9e9,stroke:#bbb,color:#444
     style cfg_css fill:#e9e9e9,stroke:#bbb,color:#444
     style cfg_img fill:#e9e9e9,stroke:#bbb,color:#444
 
     style F1 fill:#dbeafe,stroke:#3b82f6,stroke-width:2px
-    style f1_in fill:#eff6ff,stroke:#93c5fd,color:#1e40af
+    style f1_proc fill:#eff6ff,stroke:#93c5fd,color:#1e40af
     style f1_out fill:#bfdbfe,stroke:#3b82f6,stroke-width:2px,color:#1e3a5f
 
     style F2 fill:#d1fae5,stroke:#10b981,stroke-width:2px
     style f2a fill:#ecfdf5,stroke:#6ee7b7,color:#065f46
-    style f2b fill:#ecfdf5,stroke:#6ee7b7,color:#065f46
+    style f2b fill:#ecfdf5,stroke:#6ee7b7,color:#065f46,stroke-dasharray: 5 5
     style f2_elem fill:#a7f3d0,stroke:#10b981,stroke-width:2px,color:#064e3b
     style f2_prompt fill:#a7f3d0,stroke:#10b981,stroke-width:2px,color:#064e3b
 
@@ -176,6 +172,7 @@ flowchart TD
     style f3_post fill:#fff7ed,stroke:#fdba74,color:#7c2d12
     style f3_out fill:#fed7aa,stroke:#f97316,stroke-width:2px,color:#7c2d12
 
+    style POST fill:#f8f8ff,stroke:#999,stroke-width:1px,stroke-dasharray: 8 4
     style F4 fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px
     style f4_proc fill:#f5f3ff,stroke:#c4b5fd,color:#4c1d95
     style f4_out fill:#ddd6fe,stroke:#8b5cf6,stroke-width:2px,color:#4c1d95
@@ -191,6 +188,72 @@ flowchart TD
     style r3 fill:#fed7aa,stroke:#f97316,color:#7c2d12
     style r4 fill:#ddd6fe,stroke:#8b5cf6,color:#4c1d95
     style r5 fill:#fbcfe8,stroke:#ec4899,color:#831843
+```
+
+### Modelo de retroalimentación
+
+Cada campo es editable. Al modificar un dato, los pasos posteriores se marcan como `outdated` (desactualizado) y el usuario puede regenerarlos selectivamente:
+
+```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#fafafa',
+    'primaryTextColor': '#1a1a2e',
+    'lineColor': '#888',
+    'fontSize': '12px',
+    'fontFamily': 'Lexend, system-ui, sans-serif'
+  },
+  'flowchart': { 'curve': 'basis' }
+}}%%
+flowchart LR
+    subgraph EDIT["Edición del usuario"]
+        e1["✏️ Edita <b>utterance</b>"]
+        e2["✏️ Edita <b>NLU</b>"]
+        e3["✏️ Edita <b>elements</b>"]
+        e4["✏️ Edita <b>prompt</b>"]
+    end
+
+    subgraph INVALIDATION["Campos invalidados"]
+        nlu_out["⚠️ NLU outdated"]
+        vis_out["⚠️ visual outdated"]
+        bmp_out["⚠️ bitmap outdated"]
+    end
+
+    subgraph REGEN["Regeneración disponible"]
+        r1["▶ Regenerar NLU"]
+        r2["▶ Regenerar composición"]
+        r2b["▶ Regenerar solo prompt"]
+        r3["▶ Regenerar imagen"]
+        r_all["▶▶ Cascada completa"]
+    end
+
+    e1 --> nlu_out
+    e1 --> vis_out
+    e1 --> bmp_out
+
+    e2 --> vis_out
+    e2 --> bmp_out
+
+    e3 --> bmp_out
+    e3 -.->|"botón Regenerar Prompt"| r2b
+
+    e4 --> bmp_out
+    e4 -.->|"botón Producir"| r3
+
+    nlu_out --> r1
+    vis_out --> r2
+    bmp_out --> r3
+
+    nlu_out --> r_all
+
+    style EDIT fill:#fff3cd,stroke:#e6a800
+    style INVALIDATION fill:#fef3c7,stroke:#f59e0b
+    style REGEN fill:#ecfdf5,stroke:#10b981
+
+    style nlu_out fill:#fde68a,stroke:#f59e0b,color:#92400e
+    style vis_out fill:#fde68a,stroke:#f59e0b,color:#92400e
+    style bmp_out fill:#fde68a,stroke:#f59e0b,color:#92400e
 ```
 
 
