@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
 import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
-import { structureSVG, canGenerateSVG } from '../services/svgStructureService';
+import { structureSVG, canVectorize, canStructureSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
 
@@ -41,29 +41,33 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
 
-    // Only returns the structured (Gemini-processed) SVG — never the raw trace
+    // row.structuredSvg is the authoritative source (updated by parent via updateRow).
+    // The local SVG library may be stale because each useSVGLibrary() instance has
+    // independent state loaded only on mount. We use the library only to inherit
+    // metadata (lang, createdAt) if available, but the SVG content always comes from the prop.
     const structuredSvgEntry = React.useMemo(() => {
         const libSvg = getSVGByRowId(row.id);
-        if (libSvg) return libSvg;
 
         if (row.structuredSvg) {
             return {
-                id: `svg-${row.id}`,
+                id: libSvg?.id ?? `svg-${row.id}`,
                 utterance: row.UTTERANCE,
                 svg: row.structuredSvg,
                 sourceRowId: row.id,
-                createdAt: new Date().toISOString(),
+                createdAt: libSvg?.createdAt ?? new Date().toISOString(),
+                lang: libSvg?.lang,
             };
         }
+
+        if (libSvg) return libSvg;
+
         return undefined;
     }, [row.id, row.structuredSvg, row.UTTERANCE, getSVGByRowId]);
 
-    // Calculate eligibility (re-runs strictly when row updates)
-    const eligibility = canGenerateSVG({
-        bitmap: row.bitmap,
-        NLU: row.NLU,
-        elements: row.elements
-    });
+    // Vectorization only needs a bitmap (VTracer is independent of NLU/elements)
+    const vectorizeEligibility = canVectorize({ bitmap: row.bitmap });
+    // Structuring requires bitmap + NLU + non-empty elements
+    const structureEligibility = canStructureSVG({ bitmap: row.bitmap, NLU: row.NLU, elements: row.elements });
 
     // Dynamic Style Injection (Visual only)
     const displaySvg = React.useMemo(() => {
@@ -190,6 +194,8 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     ...structuredSvgEntry,
                     svg: newSvgContent
                 });
+                // Keep row.structuredSvg in sync as the SSoT
+                onUpdate({ structuredSvg: newSvgContent });
             }
         }
     };
@@ -209,14 +215,12 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
     // Debugging: Monitor row eligibility changes
     useEffect(() => {
-        if (eligibility.eligible !== undefined) {
-            console.log('[SVGGenerator] Eligibility Updated:', {
-                id: row.id,
-                eligible: eligibility.eligible,
-                reason: eligibility.reason
-            });
-        }
-    }, [eligibility]);
+        console.log('[SVGGenerator] Eligibility Updated:', {
+            id: row.id,
+            vectorize: vectorizeEligibility,
+            structure: structureEligibility,
+        });
+    }, [vectorizeEligibility, structureEligibility]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Determine status based on what SVG data is available for this row.
     // Priority: structuredSvg > rawSvg > idle
@@ -304,13 +308,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     };
 
 
-    if (!eligibility.eligible) {
+    if (!vectorizeEligibility.eligible) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-6 bg-slate-50 border border-slate-100 rounded text-center opacity-75">
                 <AlertCircle size={24} className="text-slate-300 mb-2" />
                 <p className="text-xs text-slate-400 font-medium mb-1">SVG Generation Unavailable</p>
                 <p className="text-[10px] text-slate-400 font-mono">
-                    {eligibility.reason || "Requirements not met"}
+                    {vectorizeEligibility.reason || "Requirements not met"}
                 </p>
             </div>
         );
@@ -424,7 +428,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <div className="flex gap-2">
                     <button
                         onClick={handleFormat}
-                        className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
+                        disabled={!structureEligibility.eligible}
+                        title={structureEligibility.eligible ? undefined : structureEligibility.reason}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'}`}
                     >
                         <Layers size={16} /> {t('svg.formatGemini')}
                     </button>

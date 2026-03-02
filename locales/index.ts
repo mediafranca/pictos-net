@@ -127,6 +127,8 @@ export type TranslationKey =
   | 'styleEditor.codeView'
   | 'styleEditor.animations'
   | 'styleEditor.deleteConfirm'
+  | 'styleEditor.restoreDefaults'
+  | 'styleEditor.restoreConfirm'
   | 'svg.traceSvg'
   | 'svg.retrace'
   | 'svg.rawTrace'
