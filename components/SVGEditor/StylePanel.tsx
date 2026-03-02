@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
-import { Trash2, Check, RotateCcw, X } from 'lucide-react';
+import { Trash2, Check, RotateCcw, X, Plus } from 'lucide-react';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
-import StylePreviewCard from '../../lib/style-editor/lib/components/StylePreviewCard';
 import { useTranslation } from '../../hooks/useTranslation';
+import { StylePickerModal } from './StylePickerModal';
 
 // ── RenameField ─────────────────────────────────────────────────────────────
 const RenameField: React.FC<{ elementId: string }> = ({ elementId }) => {
@@ -157,7 +157,6 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
         ([prop, val]) => libraryValues[prop] !== undefined && val !== libraryValues[prop]
     );
 
-    // Show only the editable visual properties
     const editableProps = ['fill', 'stroke', 'stroke-width', 'opacity'].filter(
         p => resolvedValues[p] !== undefined || libraryValues[p] !== undefined
     );
@@ -217,9 +216,12 @@ interface StylePanelProps {
 
 /**
  * Right panel of the SVG Editor.
- * Implements the two-level zero-inline-styles model:
- *   - Level 1 (class library): cite/uncite classes from the library grid
- *   - Level 2 (local overrides): edit per-element CSS overrides in the <style> block
+ * Shows only the classes already cited on the selected element (no full palette
+ * grid inline). The full palette opens via StylePickerModal.
+ *
+ * Two-level zero-inline-styles model:
+ *   - Level 1 (cite/uncite): via StylePickerModal
+ *   - Level 2 (local overrides): CitedClassEditor rows below
  * @see CSS_STYLING_ARCHITECTURE.md
  */
 export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
@@ -229,7 +231,6 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
         svgDocument,
         overrideMap,
         libraryValues,
-        citeClass,
         unciteClass,
         setLocalOverride,
         restoreClassToLibrary,
@@ -237,6 +238,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
     } = useSVGEditorStore();
 
     const [currentClasses, setCurrentClasses] = useState<string[]>([]);
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
 
     // Sync currentClasses from svgDocument whenever element or document changes
     useEffect(() => {
@@ -248,6 +250,11 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
         setCurrentClasses(classAttr.split(' ').filter(Boolean));
     }, [selectedElementId, svgDocument]);
 
+    // Close picker when selection changes
+    useEffect(() => {
+        setIsPickerOpen(false);
+    }, [selectedElementId]);
+
     if (!selectedElementId) {
         return (
             <div id="svg-editor-props-empty" className="p-6 text-center text-slate-400 text-sm">
@@ -256,23 +263,9 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
         );
     }
 
-    const handleCite = (cls: string) => {
-        if (!selectedElementId) return;
-        citeClass(selectedElementId, cls);
-    };
-
-    const handleUncite = (cls: string) => {
-        if (!selectedElementId) return;
-        unciteClass(selectedElementId, cls);
-    };
-
-    const handleRestore = (cls: string) => {
-        if (!selectedElementId) return;
-        restoreClassToLibrary(selectedElementId, cls);
-    };
-
+    const handleUncite = (cls: string) => unciteClass(selectedElementId, cls);
+    const handleRestore = (cls: string) => restoreClassToLibrary(selectedElementId, cls);
     const handleOverrideChange = (cls: string, property: string, value: string) => {
-        if (!selectedElementId) return;
         setLocalOverride(selectedElementId, cls, { [property]: value });
     };
 
@@ -287,53 +280,29 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
 
             <div className="flex-1 overflow-y-auto">
 
-                {/* ── Section A: Library — cite/uncite from grid ── */}
-                <div id="svg-editor-props-styles" className="px-4 py-4 border-b border-slate-100 space-y-2">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                        {t('svgEditor.cssClass')}
-                    </label>
-
-                    {styleDefs.length > 0 ? (
-                        <div className="grid grid-cols-4 gap-1.5">
-                            {styleDefs.map(styleDef => {
-                                const cls = styleDef.selectors[0]?.replace(/^\./, '') ?? '';
-                                const isCited = currentClasses.includes(cls);
-                                return (
-                                    <button
-                                        key={styleDef.id}
-                                        onClick={() => isCited ? handleUncite(cls) : handleCite(cls)}
-                                        title={isCited ? `quitar .${cls}` : `citar .${cls}`}
-                                        className={`rounded-lg p-1.5 transition-all text-left ${
-                                            isCited
-                                                ? 'ring-2 ring-violet-500 bg-violet-50'
-                                                : 'bg-slate-100 hover:ring-1 hover:ring-slate-300'
-                                        }`}
-                                    >
-                                        <StylePreviewCard
-                                            styleDef={styleDef}
-                                            shape="square"
-                                            onClick={() => {}}
-                                        />
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    ) : (
-                        <p className="text-[11px] text-slate-400 italic">No hay estilos definidos.</p>
-                    )}
-                </div>
-
-                {/* ── Section B: Cited classes — local overrides ── */}
-                {currentClasses.length > 0 && (
-                    <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                {/* ── Cited classes with local override editors ── */}
+                <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                             {t('svgEditor.localOverride')}
                         </label>
+                        <button
+                            onClick={() => setIsPickerOpen(true)}
+                            className="flex items-center gap-1 text-[10px] text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-violet-200"
+                        >
+                            <Plus size={10} />
+                            {t('svgEditor.addStyle')}
+                        </button>
+                    </div>
 
-                        {currentClasses.map(cls => {
+                    {currentClasses.length === 0 ? (
+                        <div className="py-6 text-center">
+                            <p className="text-xs text-slate-400 italic">{t('svgEditor.noStylesAssigned')}</p>
+                        </div>
+                    ) : (
+                        currentClasses.map(cls => {
                             const resolved = getResolvedClassValues(selectedElementId, cls);
                             const libVals = libraryValues.get(cls) ?? {};
-                            // Also show from-inline override rules if present
                             const overrides = overrideMap.get(selectedElementId)?.get(cls) ?? {};
                             const mergedResolved = { ...libVals, ...overrides, ...resolved };
 
@@ -349,11 +318,11 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
                                     onOverrideChange={(prop, val) => handleOverrideChange(cls, prop, val)}
                                 />
                             );
-                        })}
-                    </div>
-                )}
+                        })
+                    )}
+                </div>
 
-                {/* From-inline rules (unlinked to a library class) */}
+                {/* From-inline rules (not linked to a library class) */}
                 {(() => {
                     const fromInline = overrideMap.get(selectedElementId)?.get('from-inline');
                     if (!fromInline || Object.keys(fromInline).length === 0) return null;
@@ -362,7 +331,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
                             <div className="border border-amber-200 rounded-lg overflow-hidden bg-amber-50">
                                 <div className="px-2.5 py-1.5 border-b border-amber-100 flex items-center justify-between">
                                     <span className="text-[10px] font-mono text-amber-700 font-bold">from-inline</span>
-                                    <span className="text-[9px] text-amber-600">estilos convertidos del pipeline</span>
+                                    <span className="text-[9px] text-amber-600">{t('svgEditor.fromInlineLabel')}</span>
                                 </div>
                                 <div className="px-2.5 py-2 space-y-1.5">
                                     {Object.entries(fromInline).map(([prop, val]) => (
@@ -393,6 +362,15 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
             <div id="svg-editor-props-danger" className="border-t border-red-100 px-4 py-3 shrink-0">
                 <DeleteButton elementId={selectedElementId} />
             </div>
+
+            {/* Style picker — opened by "+ Agregar estilo" button */}
+            <StylePickerModal
+                isOpen={isPickerOpen}
+                onClose={() => setIsPickerOpen(false)}
+                elementId={selectedElementId}
+                styleDefs={styleDefs}
+                currentClasses={currentClasses}
+            />
         </div>
     );
 };

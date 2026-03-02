@@ -8,11 +8,14 @@ import { useMemo, useState, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Edit2, Check, X, Trash2 } from 'lucide-react';
 import { Input } from '../ui/input';
 import type { SVGElement } from '../../stores/svgEditorStore';
+import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { useTranslation } from '../../hooks/useTranslation';
+import { StylePickerModal } from './StylePickerModal';
 
 interface TreeNodeProps {
     node: SVGElement;
     level: number;
+    styleDefs: StyleDefinition[];
     getStyleInfo: (node: SVGElement) => {
         classes: { name: string; fill: string | null; stroke: string | null }[];
     };
@@ -42,6 +45,7 @@ const buildVisualGroupTree = (node: SVGElement): SVGElement[] => {
 function TreeNode({
     node,
     level,
+    styleDefs,
     getStyleInfo,
     onDragStart,
     onDragEnd,
@@ -56,6 +60,7 @@ function TreeNode({
     const [isEditingId, setIsEditingId] = useState(false);
     const [editedId, setEditedId] = useState(node.id);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
     const styleInfo = getStyleInfo(node);
     const classLabels = styleInfo.classes.map((cls) => `.${cls.name}`);
     const classText = classLabels.join(' ');
@@ -174,14 +179,19 @@ function TreeNode({
                     </>
                 )}
 
-                {/* Style dots */}
+                {/* Style dots — click to open style picker */}
                 {!isEditingId && (
-                    <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                    <button
+                        className="ml-auto flex items-center gap-0.5 shrink-0 rounded hover:bg-violet-50 px-0.5 py-0.5 transition-colors"
+                        title={t('svgEditor.selectStyle')}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            selectElement(node.id);
+                            setIsPickerOpen(true);
+                        }}
+                    >
                         {styleInfo.classes.length === 0 ? (
-                            <div
-                                className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300"
-                                title="No style assigned"
-                            >
+                            <div className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300">
                                 <svg width="8" height="8" viewBox="0 0 10 10">
                                     <circle cx="5" cy="5" r="4" fill="transparent" stroke="#94a3b8" />
                                     <line x1="2" y1="8" x2="8" y2="2" stroke="#ef4444" strokeWidth="1.4" strokeLinecap="round" />
@@ -195,7 +205,7 @@ function TreeNode({
                                     <div
                                         key={cls.name}
                                         className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300 bg-white"
-                                        title={`Style: ${cls.name}`}
+                                        title={`.${cls.name}`}
                                     >
                                         <svg width="8" height="8" viewBox="0 0 10 10">
                                             <circle cx="5" cy="5" r="4" fill={fill} stroke={stroke} />
@@ -204,8 +214,17 @@ function TreeNode({
                                 );
                             })
                         )}
-                    </div>
+                    </button>
                 )}
+
+                {/* Style picker modal for this tree node */}
+                <StylePickerModal
+                    isOpen={isPickerOpen}
+                    onClose={() => setIsPickerOpen(false)}
+                    elementId={node.id}
+                    styleDefs={styleDefs}
+                    currentClasses={styleInfo.classes.map(c => c.name)}
+                />
 
                 {/* Action buttons (visible on hover) */}
                 {!isEditingId && !isConfirmingDelete && (
@@ -258,6 +277,7 @@ function TreeNode({
                             key={child.id}
                             node={child}
                             level={level + 1}
+                            styleDefs={styleDefs}
                             getStyleInfo={getStyleInfo}
                             onDragStart={onDragStart}
                             onDragEnd={onDragEnd}
@@ -275,7 +295,7 @@ function TreeNode({
 
 export default function SemanticTree() {
     const { t } = useTranslation();
-    const { svgDOM, styleDefinitions, moveElement } = useSVGEditorStore();
+    const { svgDOM, styleDefinitions: styleDefs, moveElement } = useSVGEditorStore();
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
     const [dragMode, setDragMode] = useState<'inside' | 'after' | null>(null);
@@ -297,7 +317,7 @@ export default function SemanticTree() {
             return null;
         };
 
-        styleDefinitions.forEach((style) => {
+        styleDefs.forEach((style) => {
             const fill = getRuleValue(style.rules, 'fill');
             const stroke = getRuleValue(style.rules, 'stroke');
 
@@ -314,7 +334,7 @@ export default function SemanticTree() {
             });
         });
         return map;
-    }, [styleDefinitions]);
+    }, [styleDefs]);
 
     const getStyleInfo = useCallback(
         (node: SVGElement) => {
@@ -362,6 +382,7 @@ export default function SemanticTree() {
                         key={node.id}
                         node={node}
                         level={0}
+                        styleDefs={styleDefs}
                         getStyleInfo={getStyleInfo}
                         onDragStart={(id) => setDraggingId(id)}
                         onDragEnd={() => {
