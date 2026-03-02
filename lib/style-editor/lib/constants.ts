@@ -581,7 +581,7 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     selectors: ['.fade-in'],
     description: 'Animation: Fade in (one-shot)',
     rules: [
-      { id: generateId(), property: 'animation', value: 'kf-fade-in 10s ease-out both' },
+      { id: generateId(), property: 'animation', value: 'kf-fade-in 1s ease-out both' },
     ],
   },
 ];
