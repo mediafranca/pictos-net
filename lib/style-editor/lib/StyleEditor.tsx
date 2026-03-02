@@ -104,13 +104,39 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
     setIsModalOpen(true);
   };
 
+  const classifyStyle = (style: StyleDefinition): 'color' | 'stroke' | 'animation' => {
+    if (style.rules.some(r => r.property === 'animation')) return 'animation';
+    if (
+      style.selectors.some(s => s.startsWith('.st-')) ||
+      ['.dashed', '.dotted', '.flat', '.glow', '.glow-warm', '.glow-red'].some(s => style.selectors.includes(s)) ||
+      style.rules.some(r => ['stroke-dasharray', 'stroke-linecap'].includes(r.property))
+    ) return 'stroke';
+    return 'color';
+  };
+
   const handleSaveStyle = (updatedStyle: StyleDefinition) => {
     setStyles(prev => {
       const exists = prev.find(s => s.id === updatedStyle.id);
       if (exists) {
         return prev.map(s => s.id === updatedStyle.id ? updatedStyle : s);
       }
-      return [...prev, updatedStyle];
+      const type = classifyStyle(updatedStyle);
+      let insertIdx: number;
+      if (type === 'animation') {
+        insertIdx = prev.findIndex(s => classifyStyle(s) === 'animation');
+        if (insertIdx === -1) insertIdx = prev.length;
+      } else if (type === 'stroke') {
+        insertIdx = prev.findIndex(s => classifyStyle(s) === 'stroke');
+        if (insertIdx === -1) {
+          insertIdx = prev.findIndex(s => classifyStyle(s) === 'animation');
+          if (insertIdx === -1) insertIdx = prev.length;
+        }
+      } else {
+        insertIdx = 0;
+      }
+      const next = [...prev];
+      next.splice(insertIdx, 0, updatedStyle);
+      return next;
     });
     onSave?.(updatedStyle);
   };
@@ -238,16 +264,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
 
         {viewMode === ViewMode.GRID && (
           <div id="style-editor-gallery" className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(7.5em, 1fr))' }}>
-            {styles.map(style => (
-              <div key={style.id} className="bg-slate-100 rounded-lg p-1.5">
-                <StylePreviewCard
-                  styleDef={style}
-                  shape={effectiveShape}
-                  onClick={() => handleEditClick(style)}
-                />
-              </div>
-            ))}
-            {/* Add New */}
+            {/* Add New - always first */}
             {!hideNewButton && (
               <button
                 onClick={handleCreateNew}
@@ -257,6 +274,15 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
                 <span className="text-[10px] font-mono text-slate-400 group-hover:text-violet-500 transition-colors">nuevo</span>
               </button>
             )}
+            {styles.map(style => (
+              <div key={style.id} className="bg-slate-100 rounded-lg p-1.5">
+                <StylePreviewCard
+                  styleDef={style}
+                  shape={effectiveShape}
+                  onClick={() => handleEditClick(style)}
+                />
+              </div>
+            ))}
           </div>
         )}
 

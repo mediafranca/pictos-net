@@ -163,6 +163,7 @@ const App: React.FC = () => {
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
+  const scrollToRowRef = useRef<string | null>(null);
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
@@ -357,6 +358,13 @@ const App: React.FC = () => {
     loadLibraries();
   }, []);
 
+  useEffect(() => {
+    if (!openRowId || scrollToRowRef.current !== openRowId) return;
+    scrollToRowRef.current = null;
+    const el = document.getElementById(`picto-row-${openRowId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [openRowId]);
+
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
@@ -475,9 +483,11 @@ const App: React.FC = () => {
       UTTERANCE: textValue.trim() || 'Nueva Unidad Semántica',
       status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle'
     };
+    scrollToRowRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
     setOpenRowId(newId);
+    setShowConfig(false);
     setSearchValue('');
     setIsSearching(false);
   };
@@ -918,7 +928,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
-        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => setViewMode('home')}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewMode('home'); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
@@ -977,6 +987,8 @@ const App: React.FC = () => {
       </header>
 
       {showConfig && (
+        <>
+        <div className="fixed inset-0 z-[39]" onClick={() => setShowConfig(false)} />
         <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-8 animate-in slide-in-from-top duration-200">
           <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
 
@@ -1128,6 +1140,7 @@ const App: React.FC = () => {
 
           </div>
         </div>
+        </>
       )}
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
@@ -1241,7 +1254,7 @@ const App: React.FC = () => {
               const globalIndex = rows.findIndex(r => r.id === row.id);
               return (
                 <RowComponent
-                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => setOpenRowId(v ? row.id : null)}
+                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { setOpenRowId(v ? row.id : null); if (v) setShowConfig(false); }}
                   onUpdate={u => updateRow(globalIndex, u)} onProcess={s => processStep(globalIndex, s)}
                   onRegeneratePrompt={() => regeneratePrompt(globalIndex)}
                   onStop={() => {

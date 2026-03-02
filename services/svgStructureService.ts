@@ -504,26 +504,44 @@ restructured SVG — no explanation, no markdown, no code fences.`
 }
 
 /**
- * Check if a row has sufficient data for SVG generation
- * Requires: bitmap (for vectorization), NLU, and visual elements
+ * Check if a row has a bitmap available for VTracer vectorization.
+ * Does NOT require NLU or elements — tracing is independent of semantic data.
  */
+export function canVectorize(row: {
+    bitmap?: string;
+}): { eligible: boolean; reason?: string } {
+    if (!row.bitmap) {
+        return { eligible: false, reason: 'No bitmap available' };
+    }
+    return { eligible: true };
+}
+
+/**
+ * Check if a row has sufficient data for semantic SVG structuring.
+ * Requires: bitmap (raw SVG source), NLU analysis, and visual elements.
+ */
+export function canStructureSVG(row: {
+    bitmap?: string;
+    NLU?: NLUData | string;
+    elements?: VisualElement[];
+}): { eligible: boolean; reason?: string } {
+    if (!row.bitmap) {
+        return { eligible: false, reason: 'No bitmap available' };
+    }
+    if (!row.NLU || typeof row.NLU === 'string') {
+        return { eligible: false, reason: 'NLU analysis required' };
+    }
+    if (!row.elements || row.elements.length === 0) {
+        return { eligible: false, reason: 'Visual elements required' };
+    }
+    return { eligible: true };
+}
+
+/** @deprecated Use canVectorize() or canStructureSVG() instead */
 export function canGenerateSVG(row: {
     bitmap?: string;
     NLU?: NLUData | string;
     elements?: VisualElement[];
 }): { eligible: boolean; reason?: string } {
-
-    if (!row.bitmap) {
-        return { eligible: false, reason: 'No bitmap available' };
-    }
-
-    if (!row.NLU || typeof row.NLU === 'string') {
-        return { eligible: false, reason: 'NLU analysis required' };
-    }
-
-    if (!row.elements || row.elements.length === 0) {
-        return { eligible: false, reason: 'Visual elements required' };
-    }
-
-    return { eligible: true };
+    return canStructureSVG(row);
 }

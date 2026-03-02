@@ -6,6 +6,7 @@ import SemanticTree from './SemanticTree';
 import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
+import { convertInlineAttrsToCssRules } from '../../utils/styleUtils';
 
 interface SVGEditorModalProps {
     isOpen: boolean;
@@ -43,7 +44,13 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
             if (styleDefs.length > 0) {
                 setStyles(styleDefs);
             }
-            loadSVG(initialSvg);
+
+            // Pipeline cleanup: convert any residual inline presentation attributes
+            // (fill=, stroke=, etc.) from VTracer output into #id.from-inline { ... }
+            // rules in the <style> block. Enforces zero-inline-styles model on entry.
+            // @see CSS_STYLING_ARCHITECTURE.md — Pipeline Cleanup
+            const cleanedSvg = convertInlineAttrsToCssRules(initialSvg);
+            loadSVG(cleanedSvg);
         }
 
         // Cleanup on close

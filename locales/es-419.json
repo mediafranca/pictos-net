@@ -267,6 +267,12 @@
     "layersTraced": "{traced}/{total} capas trazadas"
   },
   "svgEditor": {
+    "localOverride": "Estilos locales",
+    "restoreToLibrary": "Restaurar",
+    "overriddenIndicator": "Modificado respecto a biblioteca",
+    "fromInlineLabel": "Estilos inline convertidos",
+    "cite": "Asignar clase",
+    "uncite": "Quitar clase",
     "rename": "Renombrar",
     "delete": "Eliminar",
     "deleteConfirm": "¿Eliminar?",

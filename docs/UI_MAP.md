@@ -135,10 +135,12 @@ APP-SHELL (#app-shell) ✅[via div.min-h-screen]
     │       ├── #svg-editor-props-empty ✅    [cuando no hay selección]
     │       ├── #svg-editor-props-content ✅  [cuando hay elemento seleccionado]
     │       │   ├── #svg-editor-props-header ✅
-    │       │   ├── #svg-editor-props-styles ✅   [galería StylePreviewCard × N]
-    │       │   ├── #svg-editor-props-inline ✅   [condicional: estilos hardcodeados]
+    │       │   ├── #svg-editor-props-styles ✅   [Section A: galería citar/descitar clases]
+    │       │   ├── #svg-editor-props-overrides ✅ [Section B: overrides locales por clase]
+    │       │   │   └── CitedClassEditor × N      [por cada clase citada]
     │       │   ├── #svg-editor-props-identity ✅ [RenameField]
     │       │   └── #svg-editor-props-danger ✅   [DeleteButton]
+    │       NOTE: #svg-editor-props-inline eliminado (modelo cero-inline)
     │
     ├── VectorizerModal ✅            [modal vectorizador bitmap→SVG]
     │   ├── #vectorizer-modal         [fixed inset-0 z-[50], dark backdrop]

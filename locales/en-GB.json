@@ -267,6 +267,12 @@
     "layersTraced": "{traced}/{total} layers traced"
   },
   "svgEditor": {
+    "localOverride": "Local overrides",
+    "restoreToLibrary": "Restore",
+    "overriddenIndicator": "Modified from library",
+    "fromInlineLabel": "Converted inline styles",
+    "cite": "Assign class",
+    "uncite": "Remove class",
     "rename": "Rename",
     "delete": "Delete",
     "deleteConfirm": "Delete?",

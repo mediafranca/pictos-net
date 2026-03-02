@@ -1,5 +1,5 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { NLUData, GlobalConfig, RowData, VisualElement } from "../types";
 
 // SECURITY WARNING: API key is exposed in client-side code
@@ -175,12 +175,38 @@ These classes will be applied to SVG elements later. You may suggest a \`suggest
 
 **Final Output:** A single valid JSON object containing \`elements\` and \`prompt\`.`;
 
+  // Recursive element schema — limited to 4 levels of nesting to satisfy Gemini's schema constraints
+  const leafElementSchema = {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      label: { type: Type.STRING },
+      suggestedClass: { type: Type.STRING },
+    },
+    required: ['id', 'label'],
+  };
+  const level3Schema = { ...leafElementSchema, properties: { ...leafElementSchema.properties, children: { type: Type.ARRAY, items: leafElementSchema } } };
+  const level2Schema = { ...level3Schema, properties: { ...level3Schema.properties, children: { type: Type.ARRAY, items: level3Schema } } };
+  const level1Schema = { ...level2Schema, properties: { ...level2Schema.properties, children: { type: Type.ARRAY, items: level2Schema } } };
+  const rootElementSchema = { ...level1Schema, properties: { ...level1Schema.properties, children: { type: Type.ARRAY, items: level1Schema } } };
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      elements: { type: Type.ARRAY, items: rootElementSchema },
+      prompt: { type: Type.STRING },
+    },
+    required: ['elements', 'prompt'],
+  };
+
   onLog?.('info', `[VISUAL] Enviando contexto NLU a Gemini 3 Pro...`);
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: `NLU Semantics: ${JSON.stringify(nlu)}`,
     config: {
       systemInstruction,
+      responseMimeType: 'application/json',
+      responseSchema,
     }
   });
 

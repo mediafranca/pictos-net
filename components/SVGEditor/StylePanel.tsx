@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
-import { Trash2, Check, Eraser } from 'lucide-react';
+import { Trash2, Check, RotateCcw, X } from 'lucide-react';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import StylePreviewCard from '../../lib/style-editor/lib/components/StylePreviewCard';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -95,71 +95,158 @@ const DeleteButton: React.FC<{ elementId: string }> = ({ elementId }) => {
     );
 };
 
+// ── PropertyRow — shows one CSS property with optional override editing ──────
+interface PropertyRowProps {
+    label: string;
+    property: string;
+    value: string;
+    libraryValue?: string;
+    onChange: (property: string, value: string) => void;
+}
+
+const PropertyRow: React.FC<PropertyRowProps> = ({ label, property, value, libraryValue, onChange }) => {
+    const isOverridden = libraryValue !== undefined && value !== libraryValue;
+    const isColor = property === 'fill' || property === 'stroke';
+
+    return (
+        <div className="flex items-center gap-1.5 text-[10px]">
+            <span className={`w-16 shrink-0 font-mono text-slate-500 ${isOverridden ? 'text-amber-600' : ''}`}>
+                {label}
+                {isOverridden && <span className="ml-0.5 text-amber-500">*</span>}
+            </span>
+            {isColor && (
+                <div className="relative w-5 h-5 rounded border border-slate-200 overflow-hidden shrink-0">
+                    <input
+                        type="color"
+                        value={value && value !== 'none' ? value : '#000000'}
+                        onChange={(e) => onChange(property, e.target.value)}
+                        className="absolute -top-0.5 -left-0.5 w-7 h-7 p-0 border-0 cursor-pointer"
+                    />
+                </div>
+            )}
+            <input
+                type="text"
+                value={value}
+                onChange={(e) => onChange(property, e.target.value)}
+                className="flex-1 min-w-0 font-mono border border-slate-200 rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-violet-400 bg-white"
+            />
+        </div>
+    );
+};
+
+// ── CitedClassEditor — expand/edit one cited class on the element ─────────────
+interface CitedClassEditorProps {
+    elementId: string;
+    className: string;
+    resolvedValues: Record<string, string>;
+    libraryValues: Record<string, string>;
+    onUncite: () => void;
+    onRestore: () => void;
+    onOverrideChange: (property: string, value: string) => void;
+}
+
+const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
+    className,
+    resolvedValues,
+    libraryValues,
+    onUncite,
+    onRestore,
+    onOverrideChange,
+}) => {
+    const hasOverrides = Object.entries(resolvedValues).some(
+        ([prop, val]) => libraryValues[prop] !== undefined && val !== libraryValues[prop]
+    );
+
+    // Show only the editable visual properties
+    const editableProps = ['fill', 'stroke', 'stroke-width', 'opacity'].filter(
+        p => resolvedValues[p] !== undefined || libraryValues[p] !== undefined
+    );
+
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-50 border-b border-slate-100">
+                <span className="text-[10px] font-mono text-violet-700 font-bold">.{className}</span>
+                <div className="flex items-center gap-1">
+                    {hasOverrides && (
+                        <button
+                            onClick={onRestore}
+                            className="flex items-center gap-0.5 text-[9px] text-amber-600 hover:text-amber-800 hover:bg-amber-50 px-1.5 py-0.5 rounded transition-colors"
+                            title="Restore to library original"
+                        >
+                            <RotateCcw size={9} />
+                            restaurar
+                        </button>
+                    )}
+                    <button
+                        onClick={onUncite}
+                        className="flex items-center gap-0.5 text-[9px] text-slate-400 hover:text-red-500 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors"
+                        title="Remove class from element"
+                    >
+                        <X size={9} />
+                        quitar
+                    </button>
+                </div>
+            </div>
+            <div className="px-2.5 py-2 space-y-1.5">
+                {editableProps.length > 0 ? editableProps.map(prop => (
+                    <PropertyRow
+                        key={prop}
+                        label={prop}
+                        property={prop}
+                        value={resolvedValues[prop] ?? libraryValues[prop] ?? ''}
+                        libraryValue={libraryValues[prop]}
+                        onChange={onOverrideChange}
+                    />
+                )) : (
+                    <p className="text-[10px] text-slate-400 italic">sin propiedades visuales</p>
+                )}
+                {hasOverrides && (
+                    <p className="text-[9px] text-amber-500 mt-1">
+                        * modificado — distinto del original de biblioteca
+                    </p>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // ── StylePanel ────────────────────────────────────────────────────────────────
 interface StylePanelProps {
     styleDefs?: StyleDefinition[];
 }
 
+/**
+ * Right panel of the SVG Editor.
+ * Implements the two-level zero-inline-styles model:
+ *   - Level 1 (class library): cite/uncite classes from the library grid
+ *   - Level 2 (local overrides): edit per-element CSS overrides in the <style> block
+ * @see CSS_STYLING_ARCHITECTURE.md
+ */
 export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
     const { t } = useTranslation();
-    const { selectedElementId, svgDocument, updateElementAttributes } = useSVGEditorStore();
+    const {
+        selectedElementId,
+        svgDocument,
+        overrideMap,
+        libraryValues,
+        citeClass,
+        unciteClass,
+        setLocalOverride,
+        restoreClassToLibrary,
+        getResolvedClassValues,
+    } = useSVGEditorStore();
 
-    // Multi-class set: each class is an independent on/off switch
-    const [currentClasses, setCurrentClasses] = useState<Set<string>>(new Set());
+    const [currentClasses, setCurrentClasses] = useState<string[]>([]);
 
-    // Inline style values (empty string = not set)
-    const [styles, setStyles] = useState({ fill: '', stroke: '', strokeWidth: '' });
-    const [hasInline, setHasInline] = useState(false);
-
+    // Sync currentClasses from svgDocument whenever element or document changes
     useEffect(() => {
-        if (!selectedElementId || !svgDocument) return;
+        if (!selectedElementId || !svgDocument) { setCurrentClasses([]); return; }
         const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
         const el = doc.getElementById(selectedElementId);
-        if (!el) return;
-
-        // Parse active classes
+        if (!el) { setCurrentClasses([]); return; }
         const classAttr = el.getAttribute('class') || '';
-        setCurrentClasses(new Set(classAttr.split(' ').filter(Boolean)));
-
-        // Parse inline style attributes
-        const fill = el.getAttribute('fill') || el.style.fill || '';
-        const stroke = el.getAttribute('stroke') || el.style.stroke || '';
-        const strokeWidth = el.getAttribute('stroke-width') || el.style.strokeWidth || '';
-        setStyles({ fill, stroke, strokeWidth });
-        setHasInline(!!(fill || stroke || strokeWidth || el.getAttribute('style')));
+        setCurrentClasses(classAttr.split(' ').filter(Boolean));
     }, [selectedElementId, svgDocument]);
-
-    // Toggle a single CSS class on/off (multi-select: other classes stay)
-    const handleClassToggle = (cls: string) => {
-        if (!selectedElementId) return;
-        const next = new Set(currentClasses);
-        if (next.has(cls)) {
-            next.delete(cls);
-        } else {
-            next.add(cls);
-        }
-        setCurrentClasses(next);
-        const classStr = [...next].join(' ') || null;
-        updateElementAttributes(selectedElementId, { class: classStr });
-    };
-
-    // Set an inline attribute; passing empty removes it
-    const handleInlineChange = (attr: 'fill' | 'stroke' | 'stroke-width', value: string) => {
-        if (!selectedElementId) return;
-        const stateKey = attr === 'stroke-width' ? 'strokeWidth' : attr;
-        setStyles(prev => ({ ...prev, [stateKey]: value }));
-        updateElementAttributes(selectedElementId, { [attr]: value || null });
-        if (value) setHasInline(true);
-    };
-
-    const handleClearInline = () => {
-        if (!selectedElementId) return;
-        updateElementAttributes(selectedElementId, {
-            fill: null, stroke: null, 'stroke-width': null, opacity: null, style: null,
-        });
-        setStyles({ fill: '', stroke: '', strokeWidth: '' });
-        setHasInline(false);
-    };
 
     if (!selectedElementId) {
         return (
@@ -168,6 +255,26 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
             </div>
         );
     }
+
+    const handleCite = (cls: string) => {
+        if (!selectedElementId) return;
+        citeClass(selectedElementId, cls);
+    };
+
+    const handleUncite = (cls: string) => {
+        if (!selectedElementId) return;
+        unciteClass(selectedElementId, cls);
+    };
+
+    const handleRestore = (cls: string) => {
+        if (!selectedElementId) return;
+        restoreClassToLibrary(selectedElementId, cls);
+    };
+
+    const handleOverrideChange = (cls: string, property: string, value: string) => {
+        if (!selectedElementId) return;
+        setLocalOverride(selectedElementId, cls, { [property]: value });
+    };
 
     return (
         <div id="svg-editor-props-content" className="flex flex-col h-full">
@@ -180,38 +287,24 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
 
             <div className="flex-1 overflow-y-auto">
 
-                {/* ── CSS Classes: multi-select toggles ── */}
+                {/* ── Section A: Library — cite/uncite from grid ── */}
                 <div id="svg-editor-props-styles" className="px-4 py-4 border-b border-slate-100 space-y-2">
-                    <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            {t('svgEditor.cssClass')}
-                        </label>
-                        {currentClasses.size > 0 && (
-                            <button
-                                onClick={() => {
-                                    if (!selectedElementId) return;
-                                    setCurrentClasses(new Set());
-                                    updateElementAttributes(selectedElementId, { class: null });
-                                }}
-                                className="text-[10px] text-slate-400 hover:text-red-500 transition-colors"
-                            >
-                                {t('svgEditor.noClass')}
-                            </button>
-                        )}
-                    </div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                        {t('svgEditor.cssClass')}
+                    </label>
 
                     {styleDefs.length > 0 ? (
                         <div className="grid grid-cols-4 gap-1.5">
                             {styleDefs.map(styleDef => {
                                 const cls = styleDef.selectors[0]?.replace(/^\./, '') ?? '';
-                                const isActive = currentClasses.has(cls);
+                                const isCited = currentClasses.includes(cls);
                                 return (
                                     <button
                                         key={styleDef.id}
-                                        onClick={() => handleClassToggle(cls)}
-                                        title={`.${cls}`}
+                                        onClick={() => isCited ? handleUncite(cls) : handleCite(cls)}
+                                        title={isCited ? `quitar .${cls}` : `citar .${cls}`}
                                         className={`rounded-lg p-1.5 transition-all text-left ${
-                                            isActive
+                                            isCited
                                                 ? 'ring-2 ring-violet-500 bg-violet-50'
                                                 : 'bg-slate-100 hover:ring-1 hover:ring-slate-300'
                                         }`}
@@ -228,129 +321,64 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
                     ) : (
                         <p className="text-[11px] text-slate-400 italic">No hay estilos definidos.</p>
                     )}
-
-                    {/* Active classes summary */}
-                    {currentClasses.size > 0 && (
-                        <p className="text-[10px] font-mono text-violet-600">
-                            {[...currentClasses].map(c => `.${c}`).join(' ')}
-                        </p>
-                    )}
                 </div>
 
-                {/* ── Inline style controls — always visible ── */}
-                <div id="svg-editor-props-inline" className="px-4 py-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            {t('svgEditor.inlineStyles')}
+                {/* ── Section B: Cited classes — local overrides ── */}
+                {currentClasses.length > 0 && (
+                    <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            {t('svgEditor.localOverride')}
                         </label>
-                        <button
-                            onClick={handleClearInline}
-                            disabled={!hasInline}
-                            className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded border transition-colors ${
-                                hasInline
-                                    ? 'text-red-500 hover:text-red-700 hover:bg-red-50 border-red-200'
-                                    : 'text-slate-300 border-slate-100 cursor-not-allowed'
-                            }`}
-                        >
-                            <Eraser size={10} />
-                            {t('svg.clearInlineStyles')}
-                        </button>
-                    </div>
 
-                    {/* Fill */}
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">
-                            {t('svgEditor.fill')}
-                        </label>
-                        <div className="flex items-center gap-2">
-                            <div className="relative w-8 h-8 rounded border border-slate-200 overflow-hidden shrink-0">
-                                <input
-                                    type="color"
-                                    value={styles.fill && styles.fill !== 'none' ? styles.fill : '#000000'}
-                                    onChange={(e) => handleInlineChange('fill', e.target.value)}
-                                    className="absolute -top-1 -left-1 w-12 h-12 p-0 border-0 cursor-pointer"
+                        {currentClasses.map(cls => {
+                            const resolved = getResolvedClassValues(selectedElementId, cls);
+                            const libVals = libraryValues.get(cls) ?? {};
+                            // Also show from-inline override rules if present
+                            const overrides = overrideMap.get(selectedElementId)?.get(cls) ?? {};
+                            const mergedResolved = { ...libVals, ...overrides, ...resolved };
+
+                            return (
+                                <CitedClassEditor
+                                    key={cls}
+                                    elementId={selectedElementId}
+                                    className={cls}
+                                    resolvedValues={mergedResolved}
+                                    libraryValues={libVals}
+                                    onUncite={() => handleUncite(cls)}
+                                    onRestore={() => handleRestore(cls)}
+                                    onOverrideChange={(prop, val) => handleOverrideChange(cls, prop, val)}
                                 />
-                            </div>
-                            <input
-                                type="text"
-                                value={styles.fill}
-                                placeholder="—"
-                                onChange={(e) => handleInlineChange('fill', e.target.value)}
-                                className="flex-1 text-xs border border-slate-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-violet-400"
-                            />
-                            <button
-                                onClick={() => handleInlineChange('fill', 'none')}
-                                className={`px-2 py-1.5 text-[10px] border rounded shrink-0 transition-colors ${
-                                    styles.fill === 'none'
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 hover:bg-slate-100'
-                                }`}
-                            >
-                                {t('svgEditor.noFill')}
-                            </button>
-                        </div>
+                            );
+                        })}
                     </div>
+                )}
 
-                    {/* Stroke */}
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">
-                            {t('svgEditor.stroke')}
-                        </label>
-                        <div className="flex items-center gap-2">
-                            <div className="relative w-8 h-8 rounded border border-slate-200 overflow-hidden shrink-0">
-                                <input
-                                    type="color"
-                                    value={styles.stroke && styles.stroke !== 'none' ? styles.stroke : '#000000'}
-                                    onChange={(e) => handleInlineChange('stroke', e.target.value)}
-                                    className="absolute -top-1 -left-1 w-12 h-12 p-0 border-0 cursor-pointer"
-                                />
+                {/* From-inline rules (unlinked to a library class) */}
+                {(() => {
+                    const fromInline = overrideMap.get(selectedElementId)?.get('from-inline');
+                    if (!fromInline || Object.keys(fromInline).length === 0) return null;
+                    return (
+                        <div className="px-4 pb-4">
+                            <div className="border border-amber-200 rounded-lg overflow-hidden bg-amber-50">
+                                <div className="px-2.5 py-1.5 border-b border-amber-100 flex items-center justify-between">
+                                    <span className="text-[10px] font-mono text-amber-700 font-bold">from-inline</span>
+                                    <span className="text-[9px] text-amber-600">estilos convertidos del pipeline</span>
+                                </div>
+                                <div className="px-2.5 py-2 space-y-1.5">
+                                    {Object.entries(fromInline).map(([prop, val]) => (
+                                        <PropertyRow
+                                            key={prop}
+                                            label={prop}
+                                            property={prop}
+                                            value={val}
+                                            onChange={(p, v) => setLocalOverride(selectedElementId, 'from-inline', { [p]: v })}
+                                        />
+                                    ))}
+                                </div>
                             </div>
-                            <input
-                                type="text"
-                                value={styles.stroke}
-                                placeholder="—"
-                                onChange={(e) => handleInlineChange('stroke', e.target.value)}
-                                className="flex-1 text-xs border border-slate-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-violet-400"
-                            />
-                            <button
-                                onClick={() => handleInlineChange('stroke', 'none')}
-                                className={`px-2 py-1.5 text-[10px] border rounded shrink-0 transition-colors ${
-                                    styles.stroke === 'none'
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 hover:bg-slate-100'
-                                }`}
-                            >
-                                {t('svgEditor.noStroke')}
-                            </button>
                         </div>
-                    </div>
-
-                    {/* Stroke-width */}
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">
-                            {t('svgEditor.strokeWidth')}
-                        </label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="range"
-                                min="0"
-                                max="20"
-                                step="0.5"
-                                value={parseFloat(styles.strokeWidth) || 0}
-                                onChange={(e) => handleInlineChange('stroke-width', e.target.value)}
-                                className="flex-1"
-                            />
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.5"
-                                value={parseFloat(styles.strokeWidth) || 0}
-                                onChange={(e) => handleInlineChange('stroke-width', e.target.value)}
-                                className="w-14 text-xs border border-slate-200 rounded px-2 py-1.5 font-mono text-right focus:outline-none focus:border-violet-400"
-                            />
-                        </div>
-                    </div>
-                </div>
+                    );
+                })()}
             </div>
 
             {/* ── Identity ── */}

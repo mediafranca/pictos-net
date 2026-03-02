@@ -126,11 +126,11 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     ],
   },
 
-  // === SKIN TONES (Fitzpatrick Scale) ===
+  // === SKIN TONES ===
   {
     id: generateId(),
     selectors: ['.skin-1'],
-    description: 'Skin tone: Very light / Type I',
+    description: 'Skin tone: Light',
     rules: [
       { id: generateId(), property: 'fill', value: '#fde8d0' },
       { id: generateId(), property: 'stroke', value: '#dbb896' },
@@ -139,16 +139,7 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   {
     id: generateId(),
     selectors: ['.skin-2'],
-    description: 'Skin tone: Light / Type II',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#f5d0a9' },
-      { id: generateId(), property: 'stroke', value: '#c8a07a' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.skin-3'],
-    description: 'Skin tone: Medium light / Type III',
+    description: 'Skin tone: Medium light',
     rules: [
       { id: generateId(), property: 'fill', value: '#d4a574' },
       { id: generateId(), property: 'stroke', value: '#a87d56' },
@@ -156,17 +147,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   },
   {
     id: generateId(),
-    selectors: ['.skin-4'],
-    description: 'Skin tone: Medium / Type IV',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#b07d4f' },
-      { id: generateId(), property: 'stroke', value: '#8a5e36' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.skin-5'],
-    description: 'Skin tone: Medium dark / Type V',
+    selectors: ['.skin-3'],
+    description: 'Skin tone: Medium dark',
     rules: [
       { id: generateId(), property: 'fill', value: '#7a5230' },
       { id: generateId(), property: 'stroke', value: '#5e3d22' },
@@ -174,8 +156,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   },
   {
     id: generateId(),
-    selectors: ['.skin-6'],
-    description: 'Skin tone: Dark / Type VI',
+    selectors: ['.skin-4'],
+    description: 'Skin tone: Dark',
     rules: [
       { id: generateId(), property: 'fill', value: '#4a3222' },
       { id: generateId(), property: 'stroke', value: '#2e1f15' },
@@ -185,29 +167,11 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   // === EARTH & NATURE ===
   {
     id: generateId(),
-    selectors: ['.ochre'],
-    description: 'Earth: Ochre / clay',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#c2813d' },
-      { id: generateId(), property: 'stroke', value: '#96622c' },
-    ],
-  },
-  {
-    id: generateId(),
     selectors: ['.sienna'],
     description: 'Earth: Burnt sienna',
     rules: [
       { id: generateId(), property: 'fill', value: '#a0522d' },
       { id: generateId(), property: 'stroke', value: '#6b371e' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.wood', '.brown'],
-    description: 'Earth: Wood / brown',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#8b6914' },
-      { id: generateId(), property: 'stroke', value: '#664e0f' },
     ],
   },
   {
@@ -230,15 +194,6 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   },
   {
     id: generateId(),
-    selectors: ['.water'],
-    description: 'Nature: Water / deep blue',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#2563eb' },
-      { id: generateId(), property: 'stroke', value: '#1e40af' },
-    ],
-  },
-  {
-    id: generateId(),
     selectors: ['.sand'],
     description: 'Nature: Sand / beach',
     rules: [
@@ -256,16 +211,6 @@ export const INITIAL_STYLES: StyleDefinition[] = [
       { id: generateId(), property: 'fill', value: '#6b7280' },
       { id: generateId(), property: 'stroke', value: 'none' },
       { id: generateId(), property: 'opacity', value: '0.5' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.shadow-cool'],
-    description: 'Shadow: Cool blue-gray',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#64748b' },
-      { id: generateId(), property: 'stroke', value: 'none' },
-      { id: generateId(), property: 'opacity', value: '0.4' },
     ],
   },
   {
@@ -305,15 +250,6 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     rules: [
       { id: generateId(), property: 'fill', value: '#d4a017' },
       { id: generateId(), property: 'stroke', value: '#a07c12' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.silver', '.metallic-silver'],
-    description: 'Material: Silver',
-    rules: [
-      { id: generateId(), property: 'fill', value: '#c0c0c0' },
-      { id: generateId(), property: 'stroke', value: '#8a8a8a' },
     ],
   },
   {
