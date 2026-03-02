@@ -1,0 +1,5 @@
+{
+  "utterance": "Close the window, please",
+  "lang": "en",
+  "metadata": { "speech_act": "directive", "intent": "request" }
+}
