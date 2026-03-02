@@ -33,6 +33,7 @@ export type TranslationKey =
   | 'pipeline.understand'
   | 'pipeline.compose'
   | 'pipeline.produce'
+  | 'pipeline.evaluate'
   | 'editor.hierarchicalElements'
   | 'editor.spatialLogic'
   | 'editor.addRootElement'
