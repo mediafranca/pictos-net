@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { NLUData, GlobalConfig, RowData, VisualElement } from "../types";
+import { NLUData, GlobalConfig, RowData, VisualElement, VOCAB_NSM, VOCAB } from "../types";
 
 // SECURITY WARNING: API key is exposed in client-side code
 // This is acceptable for development/research, but for production
@@ -79,15 +79,38 @@ const extractElementsFromPrompt = (prompt: string): VisualElement[] => {
   }];
 };
 
+/** Build formatted NSM primes block for the system instruction, in the active language */
+const buildNSMPrimesBlock = (langTag: string): string => {
+  const isEs = langTag.startsWith('es');
+  const key = isEs ? 'es' : 'en';
+  const entries = Object.entries(VOCAB_NSM) as [string, { en: string[]; es: string[] }][];
+  return entries.map(([category, primes]) => {
+    const label = category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `*   **${label}:** ${primes[key].join(', ')}`;
+  }).join('\n');
+};
+
 export const generateNLU = async (utterance: string, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void, config?: GlobalConfig): Promise<NLUData> => {
   const ai = getAI();
   onLog?.('info', `[NLU] Iniciando análisis semántico de: "${utterance.substring(0, 50)}..."`);
 
   const geoRegion = config?.geoContext?.region || 'No especificado';
-  const lang = config?.lang || 'es';
+  const lang = config?.lang || 'es-419';
+  const isEs = lang.startsWith('es');
+  const nsmPrimesBlock = buildNSMPrimesBlock(lang);
+  const domainList = VOCAB.domain.join(', ');
+
   const annotatedContext = config?.annotatedContext?.trim()
     ? `\n- Contexto anotado: "${config.annotatedContext.trim()}"`
     : '';
+
+  const explicLang = isEs
+    ? 'Las explicaciones NSM (nsm_explications) deben estar escritas usando los primos en ESPAÑOL.'
+    : 'The NSM explications (nsm_explications) must be written using the primes in ENGLISH.';
+
+  const frameLabelLang = isEs
+    ? 'Genera frame_label como traducción al español del frame_name (e.g., frame_name: "Expensiveness", frame_label: "Costo").'
+    : 'Generate frame_label as the English label for the frame (e.g., frame_name: "Expensiveness", frame_label: "Expensiveness").';
 
   const systemInstruction = `**Contexto de Arquitectura:**
 Operas como el nodo de procesamiento "NLU Schema Engine" dentro de la arquitectura de grafo PictoNet.
@@ -101,24 +124,17 @@ Ten en cuenta este contexto para interpretar correctamente la intención comunic
 **Función del Nodo:**
 Recibes una intención comunicativa (\`utterance\`) y debes mapearla al grafo semántico utilizando la ontología NSM (65 primos universales).
 
-**Ontología NSM (mediafranca/nsm-core):**
+**Ontología NSM (mediafranca/nsm-core, Goddard & Wierzbicka Chart v19, 2017):**
 Debes aplicar rigurosamente estos 65 primitivos para las explicaciones:
-*   **Substantives:** I, YOU, SOMEONE, SOMETHING, PEOPLE, BODY
-*   **Determiners:** THIS, THE SAME, OTHER
-*   **Quantifiers:** ONE, TWO, SOME, ALL, MUCH/MANY, LITTLE/FEW
-*   **Evaluators:** GOOD, BAD
-*   **Descriptors:** BIG, SMALL
-*   **Verbs:** DO, HAPPEN, MOVE, EXIST, THINK, SAY, WANT, FEEL, SEE, HEAR
-*   **Propositions:** KNOW, UNDERSTAND
-*   **Connectors:** AND, NOT, MAYBE, CAN, BECAUSE, IF
-*   **Intensifiers:** VERY, MORE
-*   **Similarity:** LIKE~AS~WAY
-*   **Time:** WHEN~TIME, NOW, BEFORE, AFTER, A LONG TIME, A SHORT TIME, FOR SOME TIME, MOMENT
-*   **Space:** WHERE~PLACE, HERE, ABOVE, BELOW, FAR, NEAR, SIDE, INSIDE, TOUCH
-*   **Possession:** (IS) MINE
-*   **Life/Death:** LIVE, DIE
-*   **Parts:** PART
-*   **Kind:** KIND
+${nsmPrimesBlock}
+
+${explicLang}
+
+**Dominio:**
+Infiere el dominio temático de la utterance. Debe ser uno de: ${domainList}
+
+**Frames:**
+${frameLabelLang}
 
 **Esquema de Salida (mediafranca/nlu-schema v1.0):**
 Tu salida debe adherirse *estrictamente* a este esquema.
@@ -127,13 +143,15 @@ Tu salida debe adherirse *estrictamente* a este esquema.
 {
   "utterance": "string",
   "lang": "string",
+  "domain": "string (one of: ${domainList})",
   "metadata": {
     "speech_act": "string",
     "intent": "string"
   },
   "frames": [
     {
-      "frame_name": "string (FrameNet compatible)",
+      "frame_name": "string (FrameNet compatible, always English)",
+      "frame_label": "string (translated label in utterance language)",
       "lexical_unit": "string",
       "roles": {
         "RoleName": {
@@ -145,7 +163,7 @@ Tu salida debe adherirse *estrictamente* a este esquema.
     }
   ],
   "nsm_explications": {
-    "KEY_CONCEPT": "string (usando SOLO primos NSM)"
+    "KEY_CONCEPT": "string (usando SOLO primos NSM en el idioma activo)"
   },
   "logical_form": {
     "event": "string",
