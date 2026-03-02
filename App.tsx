@@ -1769,13 +1769,20 @@ const RowComponent: React.FC<{
 
 const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRegen: () => void; onStop: () => void; onFocus: () => void; duration?: number; children: React.ReactNode; actionNode?: React.ReactNode; }> = ({ id, label, status, onRegen, onStop, onFocus, duration, children, actionNode }) => {
   const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(0);
   useEffect(() => {
-    let interval: number;
+    let raf: number;
     if (status === 'processing') {
+      startRef.current = Date.now();
+      const tick = () => {
+        setElapsed((Date.now() - startRef.current) / 1000);
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    } else {
       setElapsed(0);
-      interval = window.setInterval(() => { setElapsed(prev => prev + 1); }, 1000);
     }
-    return () => window.clearInterval(interval);
+    return () => cancelAnimationFrame(raf);
   }, [status]);
 
   const bg = status === 'processing' ? 'bg-orange-50/50' : status === 'completed' ? 'bg-white' : status === 'outdated' ? 'bg-amber-50/50' : 'bg-slate-50/50';
@@ -1787,7 +1794,7 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
         <div className="flex items-center gap-3">
           {status === 'processing' ? (
             <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono font-medium text-orange-600 animate-pulse">{elapsed}s</span>
+              <span className="text-[11px] font-mono font-medium text-orange-600">{elapsed.toFixed(1)}s</span>
               <button onClick={onStop} className="p-2 bg-orange-600 text-white animate-spectral rounded-full"><Square size={14} /></button>
             </div>
           ) : (
