@@ -27,6 +27,58 @@ const cleanJSONResponse = (text: string): string => {
   return cleaned;
 };
 
+/**
+ * Normalize element tree from Flash response:
+ * - Renames "elements" key to "children" (Flash inconsistency)
+ * - Strips extra keys like "label", "suggestedClass" (keep only id + children)
+ */
+const normalizeElements = (raw: any[]): VisualElement[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(el => {
+    const node: VisualElement = { id: el.id || 'unknown' };
+    const kids = el.children || el.elements;
+    if (Array.isArray(kids) && kids.length > 0) {
+      node.children = normalizeElements(kids);
+    }
+    return node;
+  });
+};
+
+/**
+ * Normalize prompt: may arrive as JSON array string, object, or plain text.
+ */
+const normalizePrompt = (raw: any): string => {
+  if (typeof raw === 'string') {
+    // Check if it's a JSON array string like '["sentence 1","sentence 2"]'
+    if (raw.startsWith('[')) {
+      try {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr.join(' ');
+      } catch { /* not JSON, use as-is */ }
+    }
+    return raw;
+  }
+  if (Array.isArray(raw)) return raw.join(' ');
+  if (raw && typeof raw === 'object') return JSON.stringify(raw);
+  return '';
+};
+
+/**
+ * Extract element IDs from prompt text as fallback when elements array is missing.
+ * The prompt convention wraps element IDs in single quotes: 'persona', 'casa', etc.
+ * Returns a flat hierarchy under a root 'pictograma' node.
+ */
+const extractElementsFromPrompt = (prompt: string): VisualElement[] => {
+  const matches = prompt.match(/'([a-záéíóúñü][a-záéíóúñü_]*?)'/gi) || [];
+  const unique = [...new Set(matches.map(m => m.replace(/'/g, '')))];
+  const ids = unique.filter(id => id !== 'pictograma');
+  if (ids.length === 0) return [];
+  return [{
+    id: 'pictograma',
+    children: ids.map(id => ({ id }))
+  }];
+};
+
 export const generateNLU = async (utterance: string, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void, config?: GlobalConfig): Promise<NLUData> => {
   const ai = getAI();
   onLog?.('info', `[NLU] Iniciando análisis semántico de: "${utterance.substring(0, 50)}..."`);
@@ -119,9 +171,9 @@ Tu salida debe adherirse *estrictamente* a este esquema.
 2.  Analiza la pragmática y semántica profunda, no solo la superficie.
 3.  Asegura JSON válido.`;
 
-  onLog?.('info', `[NLU] Enviando solicitud a Gemini 3 Pro...`);
+  onLog?.('info', `[NLU] Enviando solicitud a Gemini 2.5 Flash...`);
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.5-flash",
     contents: `UTTERANCE: "${utterance}"`,
     config: {
       systemInstruction,
@@ -175,51 +227,32 @@ These classes will be applied to SVG elements later. You may suggest a \`suggest
 
 **Final Output:** A single valid JSON object containing \`elements\` and \`prompt\`.`;
 
-  // Recursive element schema — limited to 4 levels of nesting to satisfy Gemini's schema constraints
-  const leafElementSchema = {
-    type: Type.OBJECT,
-    properties: {
-      id: { type: Type.STRING },
-      label: { type: Type.STRING },
-      suggestedClass: { type: Type.STRING },
-    },
-    required: ['id', 'label'],
-  };
-  const level3Schema = { ...leafElementSchema, properties: { ...leafElementSchema.properties, children: { type: Type.ARRAY, items: leafElementSchema } } };
-  const level2Schema = { ...level3Schema, properties: { ...level3Schema.properties, children: { type: Type.ARRAY, items: level3Schema } } };
-  const level1Schema = { ...level2Schema, properties: { ...level2Schema.properties, children: { type: Type.ARRAY, items: level2Schema } } };
-  const rootElementSchema = { ...level1Schema, properties: { ...level1Schema.properties, children: { type: Type.ARRAY, items: level1Schema } } };
-
-  const responseSchema = {
-    type: Type.OBJECT,
-    properties: {
-      elements: { type: Type.ARRAY, items: rootElementSchema },
-      prompt: { type: Type.STRING },
-    },
-    required: ['elements', 'prompt'],
-  };
-
-  onLog?.('info', `[VISUAL] Enviando contexto NLU a Gemini 3 Pro...`);
+  onLog?.('info', `[VISUAL] Enviando contexto NLU a Gemini 2.5 Flash...`);
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.5-flash",
     contents: `NLU Semantics: ${JSON.stringify(nlu)}`,
     config: {
       systemInstruction,
       responseMimeType: 'application/json',
-      responseSchema,
     }
   });
 
   onLog?.('info', `[VISUAL] Respuesta recibida, parseando blueprint...`);
   const result = JSON.parse(cleanJSONResponse(response.text));
 
-  // Validate that elements is an array
-  if (!Array.isArray(result.elements)) {
-    onLog?.('error', `[VISUAL] Error: 'elements' no es un array. Tipo recibido: ${typeof result.elements}. Retornando array vacío.`);
-    result.elements = [];
+  // Normalize prompt (may be JSON array string, array, or object)
+  result.prompt = normalizePrompt(result.prompt);
+
+  // Normalize elements tree ("elements" → "children", strip extras)
+  if (Array.isArray(result.elements) && result.elements.length > 0) {
+    result.elements = normalizeElements(result.elements);
+  } else {
+    onLog?.('info', `[VISUAL] Elements no recibidos, extrayendo del prompt...`);
+    result.elements = extractElementsFromPrompt(result.prompt);
   }
 
-  onLog?.('success', `[VISUAL] Blueprint completado. Elementos: ${result.elements.length}, Prompt: ${result.prompt?.substring(0, 50) || 'N/A'}...`);
+  const promptPreview = typeof result.prompt === 'string' ? result.prompt.substring(0, 50) : 'N/A';
+  onLog?.('success', `[VISUAL] Blueprint completado. Elementos: ${result.elements.length}, Prompt: ${promptPreview}...`);
   return result;
 };
 
@@ -269,9 +302,9 @@ Do NOT define style (that's handled elsewhere).`;
   const elementsText = formatElements(elements);
   const nluText = JSON.stringify(nlu, null, 2);
 
-  onLog?.('info', `[PROMPT] Enviando contexto (NLU + ${elements.length} elementos) a Gemini 3 Pro...`);
+  onLog?.('info', `[PROMPT] Enviando contexto (NLU + ${elements.length} elementos) a Gemini 2.5 Flash...`);
   const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.5-flash",
     contents: `
 NLU SEMANTIC CONTEXT:
 ${nluText}
