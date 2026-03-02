@@ -1,8 +1,8 @@
 #!/bin/bash
-# Copy necessary files from submodules to public directory for build
+# Copy schema data to public directory for build
 # This script is run as part of the build process
 
-echo "📦 Copying submodule data to public directory..."
+echo "Copying schema data to public directory..."
 
 # Create directories
 mkdir -p public/schemas/ICAP/data
@@ -13,19 +13,12 @@ mkdir -p public/libraries
 # Copy ICAP data (evaluation rubric) - optional, app works without it
 if [ -f "schemas/ICAP/data/rubric-scale-descriptions.json" ]; then
     cp schemas/ICAP/data/rubric-scale-descriptions.json public/schemas/ICAP/data/
-    echo "✅ ICAP rubric descriptions copied"
+    echo "ICAP rubric descriptions copied"
 fi
-# Note: ICAP rubric is optional - app works without it
-
-# Copy NLU schema (if needed in the future)
-# cp schemas/nlu-schema/schema.json public/schemas/nlu-schema/
-
-# Copy SVG schema (when implemented)
-# cp schemas/mf-svg-schema/schema.json public/schemas/mf-svg-schema/
 
 # Generate libraries index
 if [ -d "public/libraries" ]; then
     node scripts/generate-libraries-index.cjs
 fi
 
-echo "✅ Submodule data copy complete"
+echo "Schema data copy complete"

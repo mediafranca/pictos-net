@@ -218,6 +218,7 @@ const App: React.FC = () => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const appendPhrasesInputRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
+  const autoCascadeRef = useRef<string | null>(null);
 
   // Sanitize row data to prevent corrupted JSON from breaking the app
   const sanitizeRow = (row: any): RowData => {
@@ -365,6 +366,16 @@ const App: React.FC = () => {
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [openRowId]);
 
+  // Auto-cascade: when a new row with real text is added, start the pipeline
+  useEffect(() => {
+    const targetId = autoCascadeRef.current;
+    if (!targetId) return;
+    const idx = rows.findIndex(r => r.id === targetId);
+    if (idx === -1) return;
+    autoCascadeRef.current = null;
+    processCascade(idx);
+  }, [rows]);
+
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
@@ -478,12 +489,14 @@ const App: React.FC = () => {
 
   const addNewRow = (textValue: string = "") => {
     const newId = `R_MANUAL_${Date.now()}`;
+    const realText = textValue.trim();
     const newEntry: RowData = {
       id: newId,
-      UTTERANCE: textValue.trim() || 'Nueva Unidad Semántica',
+      UTTERANCE: realText || 'Nueva Unidad Semántica',
       status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle'
     };
     scrollToRowRef.current = newId;
+    if (realText) autoCascadeRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
     setOpenRowId(newId);
@@ -674,6 +687,14 @@ const App: React.FC = () => {
         ...(step === 'bitmap' ? { bitmap: result, status: 'completed', shared: false } : {})
       });
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
+
+      if (step === 'bitmap') {
+        requestAnimationFrame(() => {
+          const rowEl = document.getElementById(`picto-row-${row.id}`);
+          const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+          if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
       return true;
     } catch (err: any) {
       updateRow(index, { [statusKey]: 'error' });
@@ -696,7 +717,7 @@ const App: React.FC = () => {
       addLog('info', `[CASCADA] Paso 1/3: COMPRENDER - Análisis semántico`);
       updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
       const nluStartTime = Date.now();
-      const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog);
+      const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       if (stopFlags.current[row.id]) {
         addLog('info', `❌ [CASCADA] Detenida por usuario en paso COMPRENDER`);
         updateRow(index, { nluStatus: 'idle', status: 'idle' });
@@ -744,6 +765,12 @@ const App: React.FC = () => {
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
       addLog('success', `✓ [CASCADA] Pipeline completo en ${totalTime.toFixed(1)}s total para "${row.UTTERANCE}"`);
+
+      requestAnimationFrame(() => {
+        const rowEl = document.getElementById(`picto-row-${row.id}`);
+        const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+        if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
 
     } catch (err: any) {
       let stepFailed: 'nlu' | 'visual' | 'bitmap' = 'nlu';
@@ -1606,7 +1633,8 @@ const RowComponent: React.FC<{
                     }} />
                     {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
                       <button
-                        onClick={async (e) => {
+                        onMouseDown={async (e) => {
+                          e.preventDefault();
                           e.stopPropagation();
                           setIsRegeneratingPrompt(true);
                           await onRegeneratePrompt();
@@ -1659,7 +1687,8 @@ const RowComponent: React.FC<{
                     )}
                     {promptManuallyEdited && row.prompt && row.elements && row.elements.length > 0 && (
                       <button
-                        onClick={(e) => {
+                        onMouseDown={(e) => {
+                          e.preventDefault();
                           e.stopPropagation();
                           onProcess('bitmap');
                           setPromptManuallyEdited(false);
@@ -2302,7 +2331,8 @@ const FocusViewModal: React.FC<{
             }} />
             {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
               <button
-                onClick={async (e) => {
+                onMouseDown={async (e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setIsRegeneratingPrompt(true);
                   await onRegeneratePrompt();
