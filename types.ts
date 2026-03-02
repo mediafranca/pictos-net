@@ -15,6 +15,7 @@ export interface NLUFrameRole {
 
 export interface NLUFrame {
   frame_name: string;
+  frame_label?: string;
   lexical_unit: string;
   roles: Record<string, NLUFrameRole>;
 }
@@ -41,6 +42,7 @@ export interface LogicalForm {
 export interface NLUData {
   utterance: string;
   lang: string;
+  domain?: string;
   metadata: NLUMetadata;
   frames: NLUFrame[];
   nsm_explications: Record<string, string>;
@@ -140,27 +142,93 @@ export const VOCAB = {
   intent: ['inform', 'request', 'desire_expression', 'command', 'offer', 'promise', 'thanking', 'greeting', 'question', 'complaint'],
   role_type: ['Agent', 'Object', 'Event', 'Attribute', 'Place', 'Time', 'Abstract', 'Quantity', 'Recipient', 'Instrument'],
   definiteness: ['none', 'definite', 'indefinite'],
-  lang: ['en', 'es', 'fr', 'pt', 'it', 'de']
+  lang: ['es-419', 'en-GB'] as const,
+  domain: [
+    'transporte',
+    'salud',
+    'alimentación',
+    'educación',
+    'vida_cotidiana',
+    'trabajo',
+    'emociones',
+    'tiempo_libre',
+    'dinero',
+    'seguridad',
+    'comunicación',
+    'lugar',
+    'trámites',
+  ] as const,
 };
 
+/** NSM 65 semantic primes (Goddard & Wierzbicka, Chart v19, 2017) — bilingual ES/EN */
 export const VOCAB_NSM = {
-  substantives: ['I', 'YOU', 'SOMEONE', 'SOMETHING', 'PEOPLE', 'BODY'],
-  determiners: ['THIS', 'THE SAME', 'OTHER'],
-  quantifiers: ['ONE', 'TWO', 'SOME', 'ALL', 'MUCH/MANY', 'LITTLE/FEW'],
-  evaluators: ['GOOD', 'BAD'],
-  descriptors: ['BIG', 'SMALL'],
-  actions_events_movement: ['DO', 'HAPPEN', 'MOVE'],
-  existence: ['EXIST'],
-  mental_predicates: ['THINK', 'KNOW', 'WANT', 'FEEL', 'SEE', 'HEAR'],
-  speech: ['SAY', 'WORD'],
-  propositions: ['KNOW', 'UNDERSTAND'],
-  connectors: ['AND', 'NOT', 'MAYBE', 'CAN', 'BECAUSE', 'IF'],
-  intensifiers: ['VERY', 'MORE'],
-  similarity: ['LIKE', 'AS', 'WAY'],
-  time: ['WHEN', 'TIME', 'NOW', 'BEFORE', 'AFTER', 'A LONG TIME', 'A SHORT TIME', 'FOR SOME TIME', 'MOMENT'],
-  space: ['WHERE', 'PLACE', 'HERE', 'ABOVE', 'BELOW', 'FAR', 'NEAR', 'SIDE', 'INSIDE', 'TOUCH'],
-  possession: ['MINE'],
-  life_death: ['LIVE', 'DIE'],
-  parts: ['PART'],
-  taxonomy: ['KIND']
+  substantives: {
+    en: ['I', 'YOU', 'SOMEONE', 'SOMETHING~THING', 'PEOPLE', 'BODY'],
+    es: ['YO', 'TÚ~USTED', 'ALGUIEN', 'ALGO~COSA', 'GENTE~PERSONAS', 'CUERPO']
+  },
+  relational_substantives: {
+    en: ['KIND', 'PART'],
+    es: ['TIPO~CLASE', 'PARTE']
+  },
+  determiners: {
+    en: ['THIS', 'THE SAME', 'OTHER~ELSE'],
+    es: ['ESTE~ESTO', 'EL MISMO', 'OTRO']
+  },
+  quantifiers: {
+    en: ['ONE', 'TWO', 'SOME', 'ALL', 'MUCH~MANY', 'LITTLE~FEW'],
+    es: ['UNO', 'DOS', 'ALGUNOS', 'TODO~TODOS', 'MUCHO~MUCHOS', 'POCO~POCOS']
+  },
+  evaluators: {
+    en: ['GOOD', 'BAD'],
+    es: ['BUENO', 'MALO']
+  },
+  descriptors: {
+    en: ['BIG', 'SMALL'],
+    es: ['GRANDE', 'PEQUEÑO']
+  },
+  mental_predicates: {
+    en: ['THINK', 'KNOW', 'WANT', "DON'T WANT", 'FEEL', 'SEE', 'HEAR'],
+    es: ['PENSAR', 'SABER', 'QUERER', 'NO QUERER', 'SENTIR', 'VER', 'OÍR']
+  },
+  speech: {
+    en: ['SAY', 'WORDS', 'TRUE'],
+    es: ['DECIR', 'PALABRAS', 'VERDAD']
+  },
+  actions_events_movement: {
+    en: ['DO', 'HAPPEN', 'MOVE'],
+    es: ['HACER', 'PASAR~OCURRIR', 'MOVER~MOVERSE']
+  },
+  existence_possession: {
+    en: ['BE (THERE IS)', 'HAVE'],
+    es: ['HAY~ESTAR', 'TENER']
+  },
+  life_death: {
+    en: ['LIVE', 'DIE'],
+    es: ['VIVIR', 'MORIR']
+  },
+  time: {
+    en: ['WHEN~TIME', 'NOW', 'BEFORE', 'AFTER', 'A LONG TIME', 'A SHORT TIME', 'FOR SOME TIME', 'MOMENT'],
+    es: ['CUÁNDO~TIEMPO', 'AHORA', 'ANTES', 'DESPUÉS', 'MUCHO TIEMPO', 'POCO TIEMPO', 'POR UN TIEMPO', 'MOMENTO']
+  },
+  space: {
+    en: ['WHERE~PLACE', 'HERE', 'ABOVE', 'BELOW~UNDER', 'FAR', 'NEAR', 'SIDE', 'INSIDE', 'TOUCH'],
+    es: ['DÓNDE~LUGAR', 'AQUÍ', 'ARRIBA~ENCIMA', 'ABAJO~DEBAJO', 'LEJOS', 'CERCA', 'LADO', 'DENTRO', 'TOCAR']
+  },
+  logical_concepts: {
+    en: ['NOT', 'MAYBE', 'CAN', 'BECAUSE', 'IF'],
+    es: ['NO', 'QUIZÁS~TAL VEZ', 'PODER', 'PORQUE', 'SI']
+  },
+  intensifier_augmentor: {
+    en: ['VERY', 'MORE'],
+    es: ['MUY', 'MÁS']
+  },
+  similarity: {
+    en: ['LIKE~AS~WAY'],
+    es: ['COMO~ASÍ']
+  }
+};
+
+/** Get flat list of NSM primes for a given language key */
+export const getNSMPrimes = (langKey: 'en' | 'es'): string[] => {
+  return Object.values(VOCAB_NSM).flatMap(cat => cat[langKey]);
 };

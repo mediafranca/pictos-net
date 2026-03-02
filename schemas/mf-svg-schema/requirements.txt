@@ -1,0 +1,4 @@
+# Python dependencies for MediaFranca SVG Schema validation tools
+
+# JSON Schema validation
+jsonschema>=4.0.0

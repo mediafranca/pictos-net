@@ -1,0 +1,165 @@
+<svg id="pictogram" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 100 100" role="img"
+    aria-labelledby="title desc" lang="en" tabindex="0" focusable="true">
+
+    <title id="title">Make the bed</title>
+    <desc id="desc">
+        A person standing beside a single bed with frame, mattress, pillow and sheet visible.
+        The person's arm reaches towards the bed, indicating the making action.
+        Intended meaning: action "make" applied to object "bed"; everyday domestic routine.
+    </desc>
+
+    <metadata id="mf-accessibility">
+        {
+        "version": "1.0.0",
+        "utterance": "Make the bed",
+        "nsm": {
+            "primes": ["SOMEONE", "DO", "SOMETHING", "PLACE", "NOW"],
+            "gloss": "SOMEONE DO something to bed NOW so bed is good"
+        },
+        "concepts": [
+            {
+                "id": "g-person",
+                "role": "Agent",
+                "label": "Person making the bed",
+                "nsmPrime": "SOMEONE",
+                "note": "The Agent performs the Action through body posture and arm position"
+            },
+            {
+                "role": "Action",
+                "label": "Making (implicit action performed by Agent)",
+                "nsmPrime": "DO",
+                "implicit": true,
+                "performedBy": "g-person",
+                "note": "Action is not a separate visual element; it is executed by the Agent"
+            },
+            {
+                "id": "g-bed",
+                "role": "Patient",
+                "label": "The bed being made",
+                "nsmPrime": "SOMETHING"
+            }
+        ],
+        "accessibility": {
+            "cognitiveDescription": "A person is making a bed",
+            "visualDescription": "A person standing beside a single bed with frame, mattress, pillow and sheet visible. The person's arm reaches towards the bed, indicating the making action."
+        },
+        "provenance": {
+            "generator": "PictoNet v2.1",
+            "generatedAt": "2026-01-27T16:00:00Z",
+            "sourceDataset": "MediaFranca-Canonical-v1",
+            "licence": "CC BY 4.0"
+        },
+        "vcsci": {
+            "validated": true,
+            "validatedAt": "2026-01-27T16:30:00Z",
+            "validator": "MF-Team",
+            "clarityScore": 5,
+            "comments": "High-quality visual representation with excellent detail. Gold-standard reference implementation. Action is implicit in Agent's posture."
+        }
+        }
+    </metadata>
+
+    <defs>
+        <style>
+            /* Base styles - Foreground (.f) and Key/Contrast (.k) */
+            .f,
+            .k {
+                stroke-linejoin: round;
+                stroke-linecap: round;
+            }
+
+            .f {
+                fill: #fff;
+                stroke: #000;
+                stroke-width: 2;
+            }
+
+            .k {
+                fill: #000;
+                stroke: #fff;
+                stroke-width: 2.5;
+            }
+
+            /* High contrast mode */
+            @media (prefers-contrast: high) {
+                .f {
+                    fill: #fff;
+                    stroke: #000;
+                    stroke-width: 3;
+                }
+
+                .k {
+                    fill: #000;
+                    stroke: #fff;
+                    stroke-width: 3.5;
+                }
+            }
+
+            /* Forced colours mode (Windows High Contrast) */
+            @media (forced-colors: active) {
+                .f,
+                .k {
+                    fill: CanvasText;
+                    stroke: Canvas;
+                }
+            }
+
+            /* Focus states for keyboard navigation */
+            g[role="group"]:focus {
+                outline: 2px solid #0066cc;
+                outline-offset: 2px;
+            }
+
+            /* Legacy high contrast class support (optional) */
+            svg.hc .f {
+                fill: #fff;
+                stroke: #000;
+                stroke-width: 2.5;
+            }
+
+            svg.hc .k {
+                fill: #000;
+                stroke: #fff;
+                stroke-width: 3;
+            }
+        </style>
+    </defs>
+
+    <!-- BED (Patient) -->
+    <g id="g-bed" role="group" class="f" tabindex="0" aria-label="The bed being made"
+        data-concept="Patient">
+        <path id="bed_frame" d="M86.6,66.1l6.7,10.9v7.1h-5.1v5.1c0,.9-.7,1.6-1.6,1.6h-2.3c-.9,
+      0-1.6-.7-1.6-1.6v-5.1h-38.2v5.1c0,.9-.7,1.6-1.6,1.6h-2.3c-.9,
+      0-1.6-.7-1.6-1.6v-5.1h-5.1v-7.1l6.7-10.9v-18.5c0-1.3,1.1-2.4,
+      2.4-2.4h41.3c1.3,0,2.4,1.1,2.4,2.4v18.5h-.1Z" aria-label="Bed frame" />
+        <path id="mattress" d="M85.9,78.6h-44.4c-3,0-5.4-2.4-5.4-5.4v-1.9c0-1.5.7-3,
+      1.8-4l7.7-6.8c1-.9,2.3-1.4,3.6-1.4h29c1.3,0,2.6.5,3.6,1.4l7.7,
+      6.8c1.2,1,1.8,2.5,1.8,4v1.9c0,3-2.4,5.4-5.4,5.4Z" aria-label="Mattress" />
+        <path id="pillow" d="M52.2,53.5h22.4c2.3,0,4.1,1.8,4.1,4h0c0,2.2-1.8,4-4.1,
+      4h-22.4c-2.3,0-4.1-1.8-4.1-4h0c0-2.2,1.8-4,4.1-4Z" aria-label="Pillow" />
+        <path id="sheet" d="M50.6,39.6c2.1,1.3,15.3,5.5,15.3,5.5,0,0-1.3,9.6-3.9,
+      12.5-6.3,7.1-17.2,8.3-20.7,10.2s-3.4,9.7.8,
+      10.8c-7.6.3-6.9-8.9-4.2-11.3s7.9-6.7,10.7-11.7c4.1-7.4,2.3-13.8,2-16Z"
+            aria-label="Top sheet, to be pulled and smoothed" />
+    </g>
+
+    <!-- PERSON (Agent) -->
+    <!-- The person performs the action of making the bed through their posture and arm position -->
+    <g id="g-person" role="group" class="k" tabindex="0" aria-label="Person making the bed"
+        data-concept="Agent" data-action="making">
+        <!-- Head drawn first -->
+        <circle id="head" cx="38.9" cy="19.9" r="5.5" aria-label="Head" />
+
+        <!-- Arm drawn second (back arm, reaches towards bed) -->
+        <path id="arm" d="M29.9,37.5l4.2,7.8,6.7,3.7c1.1.6,1.5,2.1.7,3.2h0c-.6.8-1.7,
+      1.1-2.6.7l-9.1-3.9-4.1-6.4" aria-label="Back arm reaching towards bed" />
+
+        <!-- Body drawn third (covers the back arm, showing depth) -->
+        <path id="body" d="M29,90.5l-4.9.2-5-35.6-3,18.9-4.2,
+      17.1h-5l4.3-19.7.6-19.4c.2-2.1.2-3.2.6-5,0,0,.8-3.7,2-6.9s3.5-7.2,
+      5.2-9.3l2.3-2.7c2.4-2.8,6.7-3.1,9.5-.7l2.1,1.8,7.6,9.2c.8.9,1.8,1.6,
+      3,2l10,3c1.4.4,2.2,2,1.6,3.4h0c-.5,1.1-1.7,1.8-2.9,
+      1.5l-13.7-3.3-9.1-7.5-4.9,7.5,4,45.5h0Z" aria-label="Torso, legs, and front arm" />
+    </g>
+
+</svg>

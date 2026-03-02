@@ -1,0 +1,15 @@
+{
+  "utterance": "Haz tu cama",
+  "lang": "spanish-CL",
+  "frames": [
+    {
+      "frame_name": "Directed_action",
+      "lexical_unit": "hacer",
+      "roles": {
+        "Agent": { "type": "Addressee", "ref": "tú", "surface": "tu" },
+        "Theme": { "type": "Object", "lemma": "cama", "surface": "cama" }
+      }
+    }
+  ],
+  "logical_form": { "event": "hacer(tú, cama)" }
+}

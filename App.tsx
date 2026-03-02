@@ -167,7 +167,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
-    lang: 'es',
+    lang: 'es-419',
     aspectRatio: '1:1',
     imageModel: 'flash',
     author: 'PICTOS.NET',
@@ -218,6 +218,7 @@ const App: React.FC = () => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const appendPhrasesInputRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
+  const autoCascadeRef = useRef<string | null>(null);
 
   // Sanitize row data to prevent corrupted JSON from breaking the app
   const sanitizeRow = (row: any): RowData => {
@@ -365,6 +366,16 @@ const App: React.FC = () => {
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [openRowId]);
 
+  // Auto-cascade: when a new row with real text is added, start the pipeline
+  useEffect(() => {
+    const targetId = autoCascadeRef.current;
+    if (!targetId) return;
+    const idx = rows.findIndex(r => r.id === targetId);
+    if (idx === -1) return;
+    autoCascadeRef.current = null;
+    processCascade(idx);
+  }, [rows]);
+
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
@@ -478,12 +489,14 @@ const App: React.FC = () => {
 
   const addNewRow = (textValue: string = "") => {
     const newId = `R_MANUAL_${Date.now()}`;
+    const realText = textValue.trim();
     const newEntry: RowData = {
       id: newId,
-      UTTERANCE: textValue.trim() || 'Nueva Unidad Semántica',
+      UTTERANCE: realText || 'Nueva Unidad Semántica',
       status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle'
     };
     scrollToRowRef.current = newId;
+    if (realText) autoCascadeRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
     setOpenRowId(newId);
@@ -674,6 +687,14 @@ const App: React.FC = () => {
         ...(step === 'bitmap' ? { bitmap: result, status: 'completed', shared: false } : {})
       });
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
+
+      if (step === 'bitmap') {
+        requestAnimationFrame(() => {
+          const rowEl = document.getElementById(`picto-row-${row.id}`);
+          const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+          if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
       return true;
     } catch (err: any) {
       updateRow(index, { [statusKey]: 'error' });
@@ -696,7 +717,7 @@ const App: React.FC = () => {
       addLog('info', `[CASCADA] Paso 1/3: COMPRENDER - Análisis semántico`);
       updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
       const nluStartTime = Date.now();
-      const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog);
+      const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       if (stopFlags.current[row.id]) {
         addLog('info', `❌ [CASCADA] Detenida por usuario en paso COMPRENDER`);
         updateRow(index, { nluStatus: 'idle', status: 'idle' });
@@ -744,6 +765,12 @@ const App: React.FC = () => {
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
       addLog('success', `✓ [CASCADA] Pipeline completo en ${totalTime.toFixed(1)}s total para "${row.UTTERANCE}"`);
+
+      requestAnimationFrame(() => {
+        const rowEl = document.getElementById(`picto-row-${row.id}`);
+        const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+        if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
 
     } catch (err: any) {
       let stepFailed: 'nlu' | 'visual' | 'bitmap' = 'nlu';
@@ -954,7 +981,11 @@ const App: React.FC = () => {
           {/* Language Switcher */}
           <select
             value={lang}
-            onChange={(e) => setLang(e.target.value as Locale)}
+            onChange={(e) => {
+              const newLang = e.target.value as Locale;
+              setLang(newLang);
+              setConfig(prev => ({ ...prev, lang: newLang, uiLang: newLang }));
+            }}
             className="p-2.5 text-xs border border-slate-200 bg-white hover:border-violet-200 rounded-md transition-all text-slate-600 font-medium cursor-pointer shadow-sm"
             title="UI Language"
           >
@@ -1051,13 +1082,18 @@ const App: React.FC = () => {
                   <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
                     <div className="flex items-center gap-2">
                       <Globe size={14} className="text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Language (es, en...)"
+                      <select
                         value={config.lang}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig({ ...config, lang: e.target.value })}
-                        className="w-full text-xs bg-transparent border-none outline-none font-medium"
-                      />
+                        onChange={(e) => {
+                          const newLang = e.target.value as Locale;
+                          setConfig({ ...config, lang: newLang, uiLang: newLang });
+                          setLang(newLang);
+                        }}
+                        className="w-full text-xs bg-transparent border-none outline-none font-medium cursor-pointer"
+                      >
+                        <option value="es-419">Español</option>
+                        <option value="en-GB">English</option>
+                      </select>
                     </div>
                   </div>
                   <GeoAutocomplete
@@ -1281,6 +1317,7 @@ const App: React.FC = () => {
                   onShare={() => sharePictogram(globalIndex)}
                   onLog={addLog}
                   config={config}
+                  onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
                   onOpenEditor={() => openSVGEditor(globalIndex)}
                   onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: globalIndex })}
                 />
@@ -1315,6 +1352,7 @@ const App: React.FC = () => {
           onShare={() => sharePictogram(rows.findIndex(r => r.id === focusMode.rowId))}
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
+          onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
           onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
@@ -1508,9 +1546,10 @@ const RowComponent: React.FC<{
   onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
+  onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: () => void;
   onOpenVectorizer: () => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onOpenEditor, onOpenVectorizer }) => {
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -1564,7 +1603,12 @@ const RowComponent: React.FC<{
         <>
           <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
             <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
-              <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />
+              <SmartNLUEditor
+                data={row.NLU}
+                onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })}
+                config={config}
+                onConfigChange={onConfigChange}
+              />
             </StepBox>
             <StepBox
               id="block-compose"
@@ -1589,7 +1633,8 @@ const RowComponent: React.FC<{
                     }} />
                     {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
                       <button
-                        onClick={async (e) => {
+                        onMouseDown={async (e) => {
+                          e.preventDefault();
                           e.stopPropagation();
                           setIsRegeneratingPrompt(true);
                           await onRegeneratePrompt();
@@ -1642,7 +1687,8 @@ const RowComponent: React.FC<{
                     )}
                     {promptManuallyEdited && row.prompt && row.elements && row.elements.length > 0 && (
                       <button
-                        onClick={(e) => {
+                        onMouseDown={(e) => {
+                          e.preventDefault();
                           e.stopPropagation();
                           onProcess('bitmap');
                           setPromptManuallyEdited(false);
@@ -1769,13 +1815,20 @@ const RowComponent: React.FC<{
 
 const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRegen: () => void; onStop: () => void; onFocus: () => void; duration?: number; children: React.ReactNode; actionNode?: React.ReactNode; }> = ({ id, label, status, onRegen, onStop, onFocus, duration, children, actionNode }) => {
   const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(0);
   useEffect(() => {
-    let interval: number;
+    let raf: number;
     if (status === 'processing') {
+      startRef.current = Date.now();
+      const tick = () => {
+        setElapsed((Date.now() - startRef.current) / 1000);
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    } else {
       setElapsed(0);
-      interval = window.setInterval(() => { setElapsed(prev => prev + 1); }, 1000);
     }
-    return () => window.clearInterval(interval);
+    return () => cancelAnimationFrame(raf);
   }, [status]);
 
   const bg = status === 'processing' ? 'bg-orange-50/50' : status === 'completed' ? 'bg-white' : status === 'outdated' ? 'bg-amber-50/50' : 'bg-slate-50/50';
@@ -1787,7 +1840,7 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
         <div className="flex items-center gap-3">
           {status === 'processing' ? (
             <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono font-medium text-orange-600 animate-pulse">{elapsed}s</span>
+              <span className="text-[11px] font-mono font-medium text-orange-600">{elapsed.toFixed(1)}s</span>
               <button onClick={onStop} className="p-2 bg-orange-600 text-white animate-spectral rounded-full"><Square size={14} /></button>
             </div>
           ) : (
@@ -1805,8 +1858,13 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
   );
 };
 
-const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ data, onUpdate }) => {
-  const { t } = useTranslation();
+const SmartNLUEditor: React.FC<{
+  data: any;
+  onUpdate: (v: any) => void;
+  config: GlobalConfig;
+  onConfigChange: (c: Partial<GlobalConfig>) => void;
+}> = ({ data, onUpdate, config, onConfigChange }) => {
+  const { t, lang: uiLang, setLang } = useTranslation();
   const nlu = useMemo<Partial<NLUData>>(() => {
     if (typeof data === 'string') {
       try { return JSON.parse(data); } catch (e) { return {}; }
@@ -1845,8 +1903,81 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
     );
   };
 
+  const domainLabels: Record<string, Record<string, string>> = {
+    'es-419': {
+      transporte: 'Transporte', salud: 'Salud', alimentación: 'Alimentación',
+      educación: 'Educación', vida_cotidiana: 'Vida Cotidiana', trabajo: 'Trabajo',
+      emociones: 'Emociones', tiempo_libre: 'Tiempo Libre', dinero: 'Dinero',
+      seguridad: 'Seguridad', comunicación: 'Comunicación', lugar: 'Lugar',
+      trámites: 'Trámites',
+    },
+    'en-GB': {
+      transporte: 'Transport', salud: 'Health', alimentación: 'Food',
+      educación: 'Education', vida_cotidiana: 'Daily Life', trabajo: 'Work',
+      emociones: 'Emotions', tiempo_libre: 'Leisure', dinero: 'Money',
+      seguridad: 'Safety', comunicación: 'Communication', lugar: 'Place',
+      trámites: 'Paperwork',
+    },
+  };
+
+  const getDomainLabel = (key: string) => {
+    return domainLabels[uiLang]?.[key] || domainLabels['es-419']?.[key] || key;
+  };
+
   return (
     <div className="space-y-4">
+      {/* CONTEXTO section */}
+      <div id="nlu-context" className="border bg-white p-3 shadow-sm text-[10px] space-y-2">
+        <span className="nlu-key uppercase">{t('editor.context')}</span>
+        <div className="mt-2 space-y-2 pt-2 border-t">
+          {/* Language selector */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.language')}</label>
+            <select
+              value={config.lang}
+              onChange={e => {
+                const newLang = e.target.value;
+                onConfigChange({ lang: newLang, uiLang: newLang as 'es-419' | 'en-GB' });
+                setLang(newLang as Locale);
+              }}
+              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+            >
+              <option value="es-419">Español</option>
+              <option value="en-GB">English</option>
+            </select>
+          </div>
+          {/* Domain selector */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.domain')}</label>
+            <select
+              value={nlu.domain || ''}
+              onChange={e => {
+                updateField(['domain'], e.target.value);
+                // Mark NLU as outdated so user can regenerate
+                onUpdate({ ...nlu, domain: e.target.value });
+              }}
+              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+            >
+              <option value="" disabled>{t('placeholders.selectOption')}</option>
+              {VOCAB.domain.map(d => <option key={d} value={d}>{getDomainLabel(d)}</option>)}
+            </select>
+          </div>
+          {/* Geo region (read-only) */}
+          <div className="grid grid-cols-3 gap-2 items-center">
+            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.region')}</label>
+            <div className="col-span-2 flex items-center gap-1 text-xs">
+              <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-400 italic'}>
+                {config.geoContext?.region || t('editor.regionNotConfigured')}
+              </span>
+              <span className="text-slate-300 cursor-help" title={t('editor.regionTooltip')}>
+                <HelpCircle size={12} />
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* METADATA CLASSIFICATION */}
       <details className="border bg-white p-3 shadow-sm text-[10px]" open>
         <summary className="nlu-key cursor-pointer uppercase">{t('editor.metadataClassification')}</summary>
         <div className="mt-3 space-y-2 pt-3 border-t">
@@ -1875,10 +2006,17 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
         </div>
       </details>
 
+      {/* FRAMES */}
       {nlu.frames?.map((frame, fIdx) => (
         <details key={fIdx} className="border bg-white p-3 shadow-sm text-[10px]" open>
-          <summary className="nlu-key cursor-pointer uppercase">{frame.frame_name} <span className="font-mono lowercase text-violet-500">({frame.lexical_unit})</span></summary>
+          <summary className="nlu-key cursor-pointer uppercase">
+            {frame.frame_label || frame.frame_name}
+            {' '}<span className="font-mono lowercase text-violet-500" title={frame.frame_name}>({frame.lexical_unit})</span>
+          </summary>
           <div className="mt-3 space-y-2 pt-3 border-t">
+            {frame.frame_label && frame.frame_name !== frame.frame_label && (
+              <div className="text-[9px] text-slate-400 font-mono mb-1">FrameNet: {frame.frame_name}</div>
+            )}
             {Object.entries(frame.roles || {}).map(([role, rawData]) => {
               const data = rawData as NLUFrameRole;
               return (
@@ -1892,7 +2030,8 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
         </details>
       ))}
 
-      <details className="border bg-white p-3 shadow-sm text-[10px]">
+      {/* DETAILED LINGUISTIC ANALYSIS — expanded by default */}
+      <details className="border bg-white p-3 shadow-sm text-[10px]" open>
         <summary className="nlu-key cursor-pointer">{t('editor.detailedAnalysis').toUpperCase()}</summary>
         <div className="mt-3 space-y-4 pt-3 border-t">
           <div>
@@ -1904,7 +2043,7 @@ const SmartNLUEditor: React.FC<{ data: any; onUpdate: (v: any) => void }> = ({ d
             {renderEditableDict(nlu.logical_form as unknown as Record<string, string>, 'logical_form')}
           </div>
           <div>
-            <h4 className="nlu-key mb-1">PRAGMATICS</h4>
+            <h4 className="nlu-key mb-1">{t('editor.pragmatics').toUpperCase()}</h4>
             {renderEditableDict(nlu.pragmatics as unknown as Record<string, string>, 'pragmatics')}
           </div>
         </div>
@@ -2144,10 +2283,11 @@ const FocusViewModal: React.FC<{
   onShare: () => void;
   onRegeneratePrompt: () => void;
   config: GlobalConfig;
+  onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   onOpenEditor?: () => void;
   onOpenVectorizer?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onLog, onOpenEditor, onOpenVectorizer }) => {
+}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
@@ -2180,7 +2320,7 @@ const FocusViewModal: React.FC<{
 
   const renderContent = () => {
     switch (mode) {
-      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} />;
+      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} />;
       case 'visual': return (
         <div className="flex flex-col h-full gap-6">
           <div>
@@ -2191,7 +2331,8 @@ const FocusViewModal: React.FC<{
             }} />
             {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
               <button
-                onClick={async (e) => {
+                onMouseDown={async (e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setIsRegeneratingPrompt(true);
                   await onRegeneratePrompt();

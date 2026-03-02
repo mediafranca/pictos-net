@@ -1,0 +1,19 @@
+{
+  "utterance": "Please brush your teeth",
+  "lang": "en",
+  "metadata": { "speech_act": "directive", "intent": "request" },
+  "frames": [
+    {
+      "id": "f1",
+      "frame_name": "Directed_action",
+      "lexical_unit": "brush",
+      "roles": {
+        "Agent": { "type": "Addressee", "ref": "you", "surface": "your" },
+        "Theme": { "type": "Object", "lemma": "teeth", "surface": "teeth" }
+      }
+    }
+  ],
+  "logical_form": { "event": "brush(you, teeth)" },
+  "pragmatics": { "politeness": "polite", "formality": "neutral", "expected_response": "compliance" },
+  "visual_guidelines": { "focus_actor": "you", "action_core": "brush", "object_core": "teeth", "context": "bathroom", "temporal": "immediate" }
+}

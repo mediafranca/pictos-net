@@ -1,0 +1,58 @@
+{
+  "utterance": "Don't touch the stove",
+  "lang": "en-NZ",
+  "metadata": { "speech_act": "directive", "intent": "warning" },
+  "frames": [
+    {
+      "id": "f1",
+      "frame_name": "Directed_action",
+      "lexical_unit": "touch",
+      "roles": {
+        "Agent": { "type": "Addressee", "ref": "you", "surface": "you" },
+        "Theme": { "type": "Object", "lemma": "stove", "surface": "the stove", "definiteness": "definite" },
+        "Location": { "type": "Location", "surface": "kitchen" }
+      }
+    },
+    {
+      "id": "f2",
+      "frame_name": "Warning",
+      "lexical_unit": "do not",
+      "roles": {
+        "Speaker": { "type": "Speaker", "ref": "speaker", "surface": "(implicit)" },
+        "Addressee": { "type": "Addressee", "ref": "you", "surface": "you" },
+        "Risk": { "type": "Event", "lemma": "burn", "surface": "burns" }
+      }
+    }
+  ],
+  "nsm_explications": {
+    "NOT": "This something must not happen.",
+    "TOUCH": "Someone's hand is on something for a short time.",
+    "STOVE": "Something in a house, people use it to make food hot.",
+    "BURN": "Something very bad can happen to someone's body because it is very hot."
+  },
+  "logical_form": {
+    "event": "touch(you, stove)",
+    "modality": "must_not(event)",
+    "negation": true,
+    "tense": "unspecified",
+    "aspect": "none"
+  },
+  "pragmatics": {
+    "politeness": "neutral",
+    "formality": "informal",
+    "expected_response": "compliance",
+    "urgency": "high",
+    "speaker_stance": "protective"
+  },
+  "visual_guidelines": {
+    "focus_actor": "you",
+    "action_core": "touch",
+    "object_core": "stove",
+    "context": "kitchen",
+    "temporal": "immediate",
+    "salience": {
+      "you": 0.9,
+      "stove": 1.0
+    }
+  }
+}

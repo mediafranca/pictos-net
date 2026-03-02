@@ -1,0 +1,131 @@
+/**
+ * MediaFranca SVG Schema – Base Stylesheet
+ *
+ * This stylesheet defines the dual-class system for MediaFranca pictograms:
+ * - .f (foreground): Standard primary fills and strokes
+ * - .k (key/contrast): High-contrast elements for visual accessibility
+ *
+ * These classes are embedded within SVG <style> blocks to ensure
+ * platform independence and deterministic rendering.
+ */
+
+/* ===================================================================
+   Foreground Elements (.f)
+   Primary visual elements with standard contrast
+   =================================================================== */
+
+.f {
+  fill: #333333;
+  stroke: #333333;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Fill-only variant for solid shapes */
+.f-fill {
+  fill: #333333;
+  stroke: none;
+}
+
+/* Stroke-only variant for outlines */
+.f-stroke {
+  fill: none;
+  stroke: #333333;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ===================================================================
+   Key/Contrast Elements (.k)
+   High-visibility elements critical for semantic comprehension
+   =================================================================== */
+
+.k {
+  fill: #000000;
+  stroke: #000000;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Fill-only variant for solid key shapes */
+.k-fill {
+  fill: #000000;
+  stroke: none;
+}
+
+/* Stroke-only variant for key outlines */
+.k-stroke {
+  fill: none;
+  stroke: #000000;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ===================================================================
+   High Contrast Mode
+   Activated via media query for enhanced accessibility
+   =================================================================== */
+
+@media (prefers-contrast: high) {
+  .f {
+    fill: #000000;
+    stroke: #000000;
+    stroke-width: 3;
+  }
+
+  .f-fill {
+    fill: #000000;
+  }
+
+  .f-stroke {
+    stroke: #000000;
+    stroke-width: 3;
+  }
+
+  .k {
+    stroke-width: 4;
+  }
+
+  .k-stroke {
+    stroke-width: 4;
+  }
+}
+
+/* ===================================================================
+   Forced Colours Mode (Windows High Contrast)
+   Ensures compatibility with assistive technology overrides
+   =================================================================== */
+
+@media (forced-colors: active) {
+  .f, .f-fill, .f-stroke,
+  .k, .k-fill, .k-stroke {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+}
+
+/* ===================================================================
+   Animation & Interaction States (Optional)
+   For implementations requiring focus or hover feedback
+   =================================================================== */
+
+g[role="group"]:focus .f,
+g[role="group"]:focus .k {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* ===================================================================
+   Usage Guidelines
+
+   1. Apply .f or .k classes to SVG primitives (path, circle, rect, etc.)
+   2. Use .f for the majority of visual elements
+   3. Reserve .k for semantically critical elements (e.g., Agent faces,
+      Action indicators, key Patient features)
+   4. Embed this CSS within <style> tags in the SVG <defs> section
+   5. Test rendering with prefers-contrast and forced-colors modes
+   =================================================================== */

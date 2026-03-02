@@ -1,0 +1,14 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test artefacts
+coverage/
+dist/
