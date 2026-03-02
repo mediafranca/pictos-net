@@ -145,13 +145,13 @@ graph LR
 
 ---
 
-## Esquemas de Investigación (Git Submodules)
+## Esquemas (living standard)
 
-El proyecto integra esquemas externos como submodules:
-- `schemas/nlu-schema` - Análisis lingüístico NSM
-- `schemas/mf-svg-schema` - SVG estructurados
+Los esquemas viven directamente en el repo (no son submodules):
+- `schemas/nlu-schema` — Esquema NLU (NSM, frames, pragmatics)
+- `schemas/mf-svg-schema` — SVG estructurados (mf-svg-schema)
 
-**Importante**: No modificar contenido de submodules directamente.
+Se actualizan directamente desde este proyecto.
 
 ---
 
