@@ -1,0 +1,18 @@
+{
+  "utterance": "Turn off the lights",
+  "lang": "en",
+  "speech_act": "directive",
+  "intent": "command",
+  "metadata": { "speech_act": "directive", "intent": "command" },
+  "frames": [
+    {
+      "frame_name": "Directed_action",
+      "lexical_unit": "turn off",
+      "roles": {
+        "Agent": { "type": "Addressee", "ref": "you" },
+        "Theme": { "type": "Object", "lemma": "lights", "surface": "the lights" }
+      }
+    }
+  ],
+  "logical_form": { "event": "turn_off(you, lights)" }
+}

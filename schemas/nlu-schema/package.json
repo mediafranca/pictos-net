@@ -1,0 +1,21 @@
+{
+  "name": "@mediafranca/nlu-schema",
+  "version": "1.0.0",
+  "type": "module",
+
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "glob": "^10.3.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mediafranca/nlu-schema.git"
+  },
+    "scripts": {
+    "test": "node test-runner.js",
+    "validate:one": "node scripts/validate-one.js"
+  },
+  "author": "Herbert Spencer González <contact@pictos.net>",
+  "license": "CC-BY-4.0"
+}

@@ -1,0 +1,16 @@
+{
+  "utterance": "Open the door",
+  "lang": "en-NZ",
+  "metadata": { "speech_act": "order", "intent": "do_it_now" },
+  "frames": [
+    {
+      "frame_name": "Directed_action",
+      "lexical_unit": "open",
+      "roles": {
+        "Agent": { "type": "Addressee", "ref": "you" },
+        "Theme": { "type": "Object", "lemma": "door", "surface": "the door" }
+      }
+    }
+  ],
+  "logical_form": { "event": "open(you, door)" }
+}
