@@ -3,7 +3,7 @@
  *
  * Uses the official vtracer WASM (visioncortex) with:
  * - Progressive rendering: WASM writes paths directly to a visible <svg> element
- * - Desynchronized model: sliders don't auto-retrace; explicit "Trazar" button
+ * - Auto-retrace: config changes debounce-trigger retrace (~500ms)
  * - Presets: B&W, Pictogram, Poster, Photo
  * - Hierarchical modes: Stacked / Cutout (color mode only)
  *
@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, RefreshCw, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import {
     traceInteractive,
     drawBitmapToCanvas,
@@ -42,11 +42,6 @@ type TraceState = 'idle' | 'tracing' | 'done' | 'error';
 // ---------------------------------------------------------------------------
 
 const CANVAS_ID = 'vtracer-canvas';
-const SVG_ID = 'vtracer-svg';
-
-function bitmapSrc(base64: string): string {
-    return base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
-}
 
 function downloadSvgBlob(svg: string, filename: string) {
     const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -62,10 +57,6 @@ function downloadSvgBlob(svg: string, filename: string) {
 
 function sanitizeName(s: string) {
     return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-}
-
-function configsEqual(a: VectorizerConfig, b: VectorizerConfig): boolean {
-    return JSON.stringify(a) === JSON.stringify(b);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,19 +200,22 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     const [result, setResult] = useState<VectorizerResult | null>(null);
     const [errorMsg, setErrorMsg] = useState('');
     const [advancedOpen, setAdvancedOpen] = useState(false);
-    const [isDirty, setIsDirty] = useState(false);
     const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+    const [canvasReady, setCanvasReady] = useState(false);
+    const [resultSvgHtml, setResultSvgHtml] = useState('');
 
     const isMounted = useRef(false);
-    const lastTracedConfig = useRef<VectorizerConfig | null>(null);
-    const svgRef = useRef<SVGSVGElement | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const pendingProgress = useRef<number>(0);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
+    const activeTraceRef = useRef<Promise<void> | null>(null);
+
+    // Hidden SVG element for WASM to write paths into (outside React's control)
+    const HIDDEN_SVG_ID = 'vtracer-svg-hidden';
 
     const updateConfig = useCallback((partial: Partial<VectorizerConfig>) => {
-        setConfig(prev => {
-            const next = { ...prev, ...partial };
-            setIsDirty(!configsEqual(next, lastTracedConfig.current ?? {}));
-            return next;
-        });
+        setConfig(prev => ({ ...prev, ...partial }));
     }, []);
 
     // Preload WASM and prepare canvas on open
@@ -233,11 +227,20 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         setTraceState('idle');
         setResult(null);
         setErrorMsg('');
-        setIsDirty(false);
-        lastTracedConfig.current = null;
+        setCanvasReady(false);
+        setResultSvgHtml('');
 
         // Preload WASM while image loads
         preloadWasm();
+
+        // Create hidden SVG container for WASM (outside React's control)
+        const hiddenContainer = document.createElement('div');
+        hiddenContainer.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;pointer-events:none;';
+        const hiddenSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        hiddenSvg.id = HIDDEN_SVG_ID;
+        hiddenSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        hiddenContainer.appendChild(hiddenSvg);
+        document.body.appendChild(hiddenContainer);
 
         // Draw bitmap to canvas after DOM is ready
         const timer = setTimeout(async () => {
@@ -245,12 +248,9 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 const dims = await drawBitmapToCanvas(bitmap, CANVAS_ID);
                 if (!isMounted.current) return;
                 setImageDims(dims);
-                // Set viewBox on the SVG element
-                if (svgRef.current) {
-                    svgRef.current.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
-                }
-                // Auto-trace on first open
-                runTrace({ ...DEFAULT_CONFIG, ...initialConfig });
+                // Set viewBox on the hidden SVG so paths render correctly
+                hiddenSvg.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
+                setCanvasReady(true);
             } catch (err) {
                 console.error('[VectorizerModal] Failed to draw bitmap:', err);
             }
@@ -259,20 +259,65 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         return () => {
             isMounted.current = false;
             clearTimeout(timer);
+            if (rafRef.current !== null) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+            }
+            if (debounceRef.current !== null) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+            }
+            // Abort any in-progress trace so its converter is freed
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+            }
+            // Remove hidden SVG container
+            try { document.body.removeChild(hiddenContainer); } catch { /* already removed */ }
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
+    // Auto-retrace whenever config changes (debounced)
+    useEffect(() => {
+        if (!canvasReady || !isOpen) return;
+        if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+            debounceRef.current = null;
+            runTrace(config);
+        }, 500);
+        return () => {
+            if (debounceRef.current !== null) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+            }
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [config, canvasReady]);
+
     const runTrace = useCallback(async (cfg: VectorizerConfig) => {
         if (!isMounted.current) return;
+
+        // Abort any in-progress trace and wait for its converter to be freed
+        if (abortRef.current) {
+            abortRef.current.abort();
+        }
+        if (activeTraceRef.current) {
+            await activeTraceRef.current.catch(() => {});
+        }
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         setTraceState('tracing');
         setProgress(0);
         setErrorMsg('');
+        setResultSvgHtml('');
 
-        // Clear previous SVG paths
-        const svgEl = document.getElementById(SVG_ID);
-        if (svgEl) {
-            while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+        // Clear previous paths from the hidden SVG
+        const hiddenSvg = document.getElementById(HIDDEN_SVG_ID);
+        if (hiddenSvg) {
+            while (hiddenSvg.firstChild) hiddenSvg.removeChild(hiddenSvg.firstChild);
         }
 
         // Redraw canvas (WASM reads from it)
@@ -280,42 +325,55 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
             await drawBitmapToCanvas(bitmap, CANVAS_ID);
         } catch { /* canvas already drawn */ }
 
-        try {
-            await traceInteractive(
-                CANVAS_ID,
-                SVG_ID,
-                cfg,
-                (p) => { if (isMounted.current) setProgress(p); }
-            );
-            if (!isMounted.current) return;
+        if (controller.signal.aborted) return;
 
-            // Serialize the SVG from DOM
-            const svgEl = document.getElementById(SVG_ID);
-            const svg = svgEl ? new XMLSerializer().serializeToString(svgEl) : '';
-            const pathCount = svgEl?.querySelectorAll('path').length ?? 0;
+        const tracePromise = (async () => {
+            try {
+                await traceInteractive(
+                    CANVAS_ID,
+                    HIDDEN_SVG_ID,
+                    cfg,
+                    (p) => {
+                        pendingProgress.current = p;
+                        if (rafRef.current === null) {
+                            rafRef.current = requestAnimationFrame(() => {
+                                rafRef.current = null;
+                                if (isMounted.current) setProgress(pendingProgress.current);
+                            });
+                        }
+                    },
+                    controller.signal,
+                );
+                if (!isMounted.current || controller.signal.aborted) return;
 
-            const res: VectorizerResult = {
-                svg,
-                warnings: [],
-                layersTraced: pathCount,
-                layersTotal: pathCount,
-                tiersUsed: 1,
-                usedConfig: cfg,
-            };
-            setResult(res);
-            setTraceState('done');
-            lastTracedConfig.current = cfg;
-            setIsDirty(false);
-        } catch (err) {
-            if (!isMounted.current) return;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn('[vtracer] Trace failed:', msg);
-            setErrorMsg(msg);
-            setTraceState('error');
-        }
+                // Serialize the hidden SVG and store for display
+                const svg = hiddenSvg ? new XMLSerializer().serializeToString(hiddenSvg) : '';
+                const pathCount = hiddenSvg?.querySelectorAll('path').length ?? 0;
+                setResultSvgHtml(svg);
+
+                const res: VectorizerResult = {
+                    svg,
+                    warnings: [],
+                    layersTraced: pathCount,
+                    layersTotal: pathCount,
+                    tiersUsed: 1,
+                    usedConfig: cfg,
+                };
+                setResult(res);
+                setTraceState('done');
+            } catch (err) {
+                if (!isMounted.current || controller.signal.aborted) return;
+                if (err instanceof DOMException && err.name === 'AbortError') return;
+                const msg = err instanceof Error ? err.message : String(err);
+                console.warn('[vtracer] Trace failed:', msg);
+                setErrorMsg(msg);
+                setTraceState('error');
+            }
+        })();
+
+        activeTraceRef.current = tracePromise;
+        await tracePromise;
     }, [bitmap]);
-
-    const handleRetrace = () => runTrace(config);
 
     const handleApply = () => {
         if (result) { onApply(result); onClose(); }
@@ -326,9 +384,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     };
 
     const handlePreset = (preset: Partial<VectorizerConfig>) => {
-        const merged = { ...DEFAULT_CONFIG, ...preset };
-        setConfig(merged);
-        setIsDirty(true);
+        setConfig({ ...DEFAULT_CONFIG, ...preset });
     };
 
     const isTracing = traceState === 'tracing';
@@ -500,22 +556,6 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     {/* Action buttons */}
                     <div className="p-5 border-t border-slate-200 space-y-2 shrink-0">
                         <button
-                            onClick={handleRetrace}
-                            disabled={isTracing}
-                            className={`w-full flex items-center justify-center gap-2 border px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed
-                                ${isDirty && !isTracing
-                                    ? 'border-violet-400 text-violet-700 bg-violet-50 hover:bg-violet-100'
-                                    : 'border-slate-200 text-slate-600 bg-white hover:border-slate-400 hover:text-slate-900'
-                                }`}
-                        >
-                            <RefreshCw size={12} className={isTracing ? 'animate-spin' : ''} />
-                            Trazar
-                            {isDirty && !isTracing && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                            )}
-                        </button>
-
-                        <button
                             onClick={handleDownload}
                             disabled={!result?.svg || isTracing}
                             className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-900 bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -592,7 +632,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             </div>
                         </div>
 
-                        {/* SVG result (WASM writes paths directly here) */}
+                        {/* SVG result — rendered from serialized trace output */}
                         <div
                             id="vectorizer-result"
                             className="flex-1 flex flex-col overflow-hidden"
@@ -600,17 +640,18 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <p className="text-[9px] font-medium uppercase tracking-widest text-slate-400 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
                                 SVG Result
                             </p>
-                            <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-                                <svg
-                                    id={SVG_ID}
-                                    ref={svgRef}
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox={imageDims ? `0 0 ${imageDims.width} ${imageDims.height}` : '0 0 100 100'}
-                                    className="max-w-full max-h-full w-full h-full"
-                                />
-                                {traceState === 'idle' && (
+                            <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
+                                {resultSvgHtml ? (
+                                    <div
+                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-full [&>svg]:h-full"
+                                        style={{ width: '100%', height: '100%' }}
+                                        dangerouslySetInnerHTML={{ __html: resultSvgHtml }}
+                                    />
+                                ) : traceState === 'idle' ? (
                                     <p className="absolute text-xs text-slate-400">Starting...</p>
-                                )}
+                                ) : traceState === 'tracing' ? (
+                                    <Loader2 size={32} className="animate-spin text-violet-300" />
+                                ) : null}
                                 {traceState === 'error' && (
                                     <div className="absolute flex flex-col items-center gap-3 text-slate-400">
                                         <AlertTriangle size={32} className="text-red-400" />

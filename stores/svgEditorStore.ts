@@ -31,8 +31,12 @@ export interface EditorState {
     svgDocument: string | null;
     svgDOM: SVGElement | null;
 
-    // Selection
+    // Source mode: 'raw' (VTracer output, inline fills sacred) or 'structured' (library styles)
+    svgSource: 'raw' | 'structured' | null;
+
+    // Selection — single element or multi-select
     selectedElementId: string | null;
+    selectedElementIds: Set<string>;
 
     // Styles
     styleDefinitions: StyleDefinition[];
@@ -52,14 +56,28 @@ export interface EditorState {
     onSvgChange?: (svg: string) => void;
 
     // Actions
-    loadSVG: (svg: string, onChange?: (svg: string) => void) => void;
+    setSvgSource: (source: 'raw' | 'structured' | null) => void;
+    loadSVG: (svg: string, onChange?: (svg: string) => void, isRaw?: boolean) => void;
     updateSVGDOM: (dom: SVGElement) => void;
     selectElement: (id: string | null) => void;
     updateElementId: (oldId: string, newId: string) => void;
     updateElement: (id: string, updates: Partial<SVGElement>) => void;
     updateElementAttributes: (id: string, attributes: Record<string, string | null>) => void;
-    moveElement: (dragId: string, targetId: string, mode?: 'inside' | 'after') => void;
+    moveElement: (dragId: string, targetId: string, mode?: 'inside' | 'after' | 'before') => void;
     deleteElement: (id: string) => void;
+
+    // Multi-select actions
+    selectElements: (ids: string[]) => void;
+    toggleSelection: (id: string) => void;
+    clearSelection: () => void;
+
+    // Grouping actions
+    groupElements: (ids: string[]) => void;
+    ungroupElement: (groupId: string) => void;
+
+    // Class application (additive, does NOT strip inline styles)
+    addClassToElement: (elementId: string, className: string) => void;
+    stripInlineStyles: (elementId: string) => void;
     setStyles: (styles: StyleDefinition[]) => void;
     setKeyframes: (keyframes: KeyframeDefinition[]) => void;
     setElementClasses: (id: string, classes: string[]) => void;
@@ -247,7 +265,9 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
     return {
         svgDocument: null,
         svgDOM: null,
+        svgSource: null,
         selectedElementId: null,
+        selectedElementIds: new Set<string>(),
         styleDefinitions: INITIAL_STYLES,
         keyframes: INITIAL_KEYFRAMES,
         stylesVersion: 0,
@@ -257,11 +277,27 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         historyIndex: -1,
         onSvgChange: undefined,
 
-        loadSVG: (svg: string, onChange?: (svg: string) => void) => {
+        setSvgSource: (source) => set({ svgSource: source }),
+
+        loadSVG: (svg: string, onChange?: (svg: string) => void, isRaw?: boolean) => {
             // Persist IDs to svgDocument so updateElementId can find elements
             // by ID. normalizeSVG in SVGCanvas assigns IDs only in-memory;
             // without this step those IDs exist in svgDOM but not svgDocument.
             const withIds = assignMissingElementIds(svg);
+
+            if (isRaw) {
+                // Raw SVG: skip style resolution and library injection,
+                // keep inline fills sacred
+                set((state) => ({
+                    stylesVersion: state.stylesVersion + 1,
+                    onSvgChange: onChange,
+                    overrideMap: new Map(),
+                    libraryValues: new Map(),
+                }));
+                commitSvg(withIds);
+                return;
+            }
+
             const styles = resolveStylesForSvg(withIds);
             const keyframes = get().keyframes.length > 0 ? get().keyframes : INITIAL_KEYFRAMES;
             const nextSvg = applyUsedStylesToSvg(withIds, styles, keyframes);
@@ -283,7 +319,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         },
 
         selectElement: (id: string | null) => {
-            set({ selectedElementId: id });
+            set({ selectedElementId: id, selectedElementIds: new Set() });
         },
 
         updateElementId: (oldId: string, newId: string) => {
@@ -365,7 +401,8 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             });
 
             const serialized = new XMLSerializer().serializeToString(doc);
-            const nextSvg = applyUsedStylesToSvg(
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
                 serialized,
                 get().styleDefinitions,
                 get().keyframes
@@ -373,7 +410,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             commitSvg(nextSvg);
         },
 
-        moveElement: (dragId: string, targetId: string, mode: 'inside' | 'after' = 'after') => {
+        moveElement: (dragId: string, targetId: string, mode: 'inside' | 'after' | 'before' = 'after') => {
             const svgDocument = get().svgDocument;
             if (!svgDocument) return;
 
@@ -387,6 +424,10 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
 
             if (mode === 'inside') {
                 targetElement.appendChild(dragElement);
+            } else if (mode === 'before') {
+                const parent = targetElement.parentNode;
+                if (!parent) return;
+                parent.insertBefore(dragElement, targetElement);
             } else {
                 const parent = targetElement.parentNode;
                 if (!parent) return;
@@ -394,7 +435,8 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             }
 
             const serialized = new XMLSerializer().serializeToString(doc);
-            const nextSvg = applyUsedStylesToSvg(
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
                 serialized,
                 get().styleDefinitions,
                 get().keyframes
@@ -413,7 +455,8 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             element.remove();
 
             const serialized = new XMLSerializer().serializeToString(doc);
-            const nextSvg = applyUsedStylesToSvg(
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
                 serialized,
                 get().styleDefinitions,
                 get().keyframes
@@ -481,6 +524,138 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
                 get().keyframes
             );
             commitSvg(nextSvg);
+        },
+
+        // ── Multi-select actions ──────────────────────────────────────────────
+
+        selectElements: (ids: string[]) => {
+            set({
+                selectedElementIds: new Set(ids),
+                selectedElementId: ids.length === 1 ? ids[0] : ids.length > 0 ? ids[0] : null,
+            });
+        },
+
+        toggleSelection: (id: string) => {
+            const current = new Set(get().selectedElementIds);
+            if (current.has(id)) {
+                current.delete(id);
+            } else {
+                current.add(id);
+            }
+            set({
+                selectedElementIds: current,
+                selectedElementId: current.size === 1 ? Array.from(current)[0] : current.size > 0 ? id : null,
+            });
+        },
+
+        clearSelection: () => {
+            set({ selectedElementIds: new Set(), selectedElementId: null });
+        },
+
+        // ── Group / Ungroup actions ────────────────────────────────────────────
+
+        groupElements: (ids: string[]) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument || ids.length < 2) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+
+            // Collect elements in document order
+            const elements: Element[] = [];
+            ids.forEach(id => {
+                const el = doc.querySelector(`#${CSS.escape(id)}`);
+                if (el) elements.push(el);
+            });
+            if (elements.length < 2) return;
+
+            // Create group at position of first element
+            const groupId = 'grupo-' + Math.random().toString(36).substr(2, 5);
+            const group = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+            group.id = groupId;
+
+            // Insert group before the first element
+            const firstEl = elements[0];
+            firstEl.parentNode?.insertBefore(group, firstEl);
+
+            // Move all elements into the group (preserves order)
+            elements.forEach(el => group.appendChild(el));
+
+            const serialized = new XMLSerializer().serializeToString(doc);
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
+                serialized,
+                get().styleDefinitions,
+                get().keyframes
+            );
+            commitSvg(nextSvg);
+            set({ selectedElementId: groupId, selectedElementIds: new Set([groupId]) });
+        },
+
+        ungroupElement: (groupId: string) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+            const group = doc.querySelector(`#${CSS.escape(groupId)}`);
+            if (!group || group.tagName.toLowerCase() !== 'g') return;
+
+            const parent = group.parentNode;
+            if (!parent) return;
+
+            // Move children out before the group, preserving order
+            while (group.firstChild) {
+                parent.insertBefore(group.firstChild, group);
+            }
+            group.remove();
+
+            const serialized = new XMLSerializer().serializeToString(doc);
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
+                serialized,
+                get().styleDefinitions,
+                get().keyframes
+            );
+            commitSvg(nextSvg);
+            set({ selectedElementId: null, selectedElementIds: new Set() });
+        },
+
+        addClassToElement: (elementId: string, className: string) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+
+            const current = getElementClassesFromSvg(svgDocument, elementId);
+            if (current.includes(className)) return;
+
+            // Additive: add class WITHOUT stripping inline fills
+            let svg = updateElementClassesInSvg(svgDocument, elementId, [...current, className]);
+
+            const isRaw = get().svgSource === 'raw';
+            if (!isRaw) {
+                svg = applyUsedStylesToSvg(svg, get().styleDefinitions, get().keyframes);
+                set({ overrideMap: parseOverrideRules(getSvgStyleText(svg)) });
+            }
+            commitSvg(svg);
+        },
+
+        stripInlineStyles: (elementId: string) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+
+            const stripEl = (el: Element) => {
+                ['fill', 'stroke', 'stroke-width', 'opacity', 'style'].forEach(attr => el.removeAttribute(attr));
+                // Recurse into children
+                Array.from(el.children).forEach(child => stripEl(child));
+            };
+
+            const el = doc.querySelector(`#${CSS.escape(elementId)}`);
+            if (!el) return;
+            stripEl(el);
+            const svg = new XMLSerializer().serializeToString(doc);
+            commitSvg(svg);
         },
 
         // ── Two-level CSS model actions ────────────────────────────────────────
@@ -664,7 +839,9 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             set({
                 svgDocument: null,
                 svgDOM: null,
+                svgSource: null,
                 selectedElementId: null,
+                selectedElementIds: new Set<string>(),
                 styleDefinitions: INITIAL_STYLES,
                 keyframes: INITIAL_KEYFRAMES,
                 stylesVersion: 0,

@@ -8,6 +8,69 @@ import { StylePanel } from './StylePanel';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { convertInlineAttrsToCssRules } from '../../utils/styleUtils';
 
+/**
+ * Detects and removes a background rectangle or path that covers >=85% of the
+ * SVG viewBox. VTracer often inserts a full-canvas fill as the first path.
+ */
+function removeBackgroundRect(svgString: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgString, 'image/svg+xml');
+    const svgEl = doc.querySelector('svg');
+    if (!svgEl) return svgString;
+
+    // Parse viewBox dimensions
+    const vb = svgEl.getAttribute('viewBox');
+    if (!vb) return svgString;
+    const parts = vb.split(/[\s,]+/).map(Number);
+    if (parts.length < 4) return svgString;
+    const [, , vbW, vbH] = parts;
+    const vbArea = vbW * vbH;
+    if (vbArea <= 0) return svgString;
+
+    // Find first visual child (skip defs, style, title, desc, metadata)
+    const skipTags = new Set(['defs', 'style', 'title', 'desc', 'metadata']);
+    let firstVisual: Element | null = null;
+    for (const child of Array.from(svgEl.children)) {
+        if (!skipTags.has(child.tagName.toLowerCase())) {
+            firstVisual = child;
+            break;
+        }
+    }
+    if (!firstVisual) return svgString;
+
+    let elArea = 0;
+    const tag = firstVisual.tagName.toLowerCase();
+
+    if (tag === 'rect') {
+        const w = parseFloat(firstVisual.getAttribute('width') || '0');
+        const h = parseFloat(firstVisual.getAttribute('height') || '0');
+        elArea = w * h;
+    } else if (tag === 'path') {
+        // Approximate bbox from the d attribute by extracting numeric coordinates
+        const d = firstVisual.getAttribute('d') || '';
+        const nums = d.match(/-?\d+\.?\d*/g)?.map(Number) || [];
+        if (nums.length >= 4) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            // Coordinates come in pairs
+            for (let i = 0; i < nums.length - 1; i += 2) {
+                const x = nums[i], y = nums[i + 1];
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+            elArea = (maxX - minX) * (maxY - minY);
+        }
+    }
+
+    if (elArea >= vbArea * 0.85) {
+        firstVisual.remove();
+        return new XMLSerializer().serializeToString(doc);
+    }
+
+    return svgString;
+}
+
 interface SVGEditorModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -15,6 +78,7 @@ interface SVGEditorModalProps {
     utterance: string;
     onSave: (svg: string) => void;
     styleDefs?: StyleDefinition[];
+    svgSource?: 'raw' | 'structured' | null;
 }
 
 export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
@@ -23,12 +87,14 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     initialSvg,
     utterance,
     onSave,
-    styleDefs = []
+    styleDefs = [],
+    svgSource = null,
 }) => {
     const { t } = useTranslation();
     const [currentSvg, setCurrentSvg] = useState(initialSvg);
     const loadSVG = useSVGEditorStore(state => state.loadSVG);
     const setStyles = useSVGEditorStore(state => state.setStyles);
+    const setSvgSource = useSVGEditorStore(state => state.setSvgSource);
     const svgDocument = useSVGEditorStore(state => state.svgDocument);
     const undo = useSVGEditorStore(state => state.undo);
     const redo = useSVGEditorStore(state => state.redo);
@@ -38,19 +104,25 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
     useEffect(() => {
         if (isOpen && initialSvg) {
-            // Prime the store with global style definitions BEFORE parsing the SVG,
-            // so resolveStylesForSvg uses them as the base and applyUsedStylesToSvg
-            // can include custom classes (e.g. .yellow) in the embedded <style>.
-            if (styleDefs.length > 0) {
-                setStyles(styleDefs);
-            }
+            const isRaw = svgSource === 'raw';
 
-            // Pipeline cleanup: convert any residual inline presentation attributes
-            // (fill=, stroke=, etc.) from VTracer output into #id.from-inline { ... }
-            // rules in the <style> block. Enforces zero-inline-styles model on entry.
-            // @see CSS_STYLING_ARCHITECTURE.md — Pipeline Cleanup
-            const cleanedSvg = convertInlineAttrsToCssRules(initialSvg);
-            loadSVG(cleanedSvg);
+            // Tell the store what mode we're in
+            setSvgSource(svgSource);
+
+            // Always remove background rect first
+            let svg = removeBackgroundRect(initialSvg);
+
+            if (isRaw) {
+                // Raw SVG: skip library style injection, keep inline fills sacred
+                loadSVG(svg, undefined, true);
+            } else {
+                // Structured SVG: full pipeline with library styles
+                if (styleDefs.length > 0) {
+                    setStyles(styleDefs);
+                }
+                const cleanedSvg = convertInlineAttrsToCssRules(svg);
+                loadSVG(cleanedSvg);
+            }
         }
 
         // Cleanup on close
@@ -168,7 +240,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
                     {/* Right Panel: Style Properties */}
                     <aside id="svg-editor-properties-panel" className="w-80 border-l border-slate-200 bg-white flex flex-col shrink-0 z-10 shadow-lg text-slate-700">
-                        <StylePanel styleDefs={styleDefs} />
+                        <StylePanel styleDefs={styleDefs} svgSource={svgSource} />
                     </aside>
                 </div>
             </div>

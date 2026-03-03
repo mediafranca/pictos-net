@@ -1382,6 +1382,7 @@ const App: React.FC = () => {
           utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
           styleDefs={config.svgStyleDefs ?? []}
+          svgSource={svgEditorState.svgSource}
         />
       )}
 
@@ -1895,13 +1896,28 @@ const SmartNLUEditor: React.FC<{
     return (
       <div className="space-y-2 text-xs bg-slate-50 p-2 border">
         {Object.entries(dict || {}).map(([key, value]) => (
-          <div key={key} className="grid grid-cols-3 gap-2 items-center">
-            <span className="font-mono text-slate-500 truncate col-span-1">{key}</span>
-            <input
-              type="text"
+          <div key={key} className="grid grid-cols-3 gap-2 items-start">
+            <span className="font-mono text-slate-500 truncate col-span-1 pt-1">{key}</span>
+            <textarea
+              rows={1}
               value={value}
-              onChange={e => updateField([path, key], e.target.value)}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400"
+              onChange={e => {
+                updateField([path, key], e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+              }}
+              onInput={e => {
+                const t = e.target as HTMLTextAreaElement;
+                t.style.height = 'auto';
+                t.style.height = t.scrollHeight + 'px';
+              }}
+              ref={el => {
+                if (el) {
+                  el.style.height = 'auto';
+                  el.style.height = el.scrollHeight + 'px';
+                }
+              }}
+              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 resize-none overflow-hidden"
             />
           </div>
         ))}

@@ -313,7 +313,22 @@
     "idInvalidChars": "Only alphanumeric characters, hyphens and underscores",
     "idExists": "ID \"{id}\" already exists",
     "undo": "Undo (Ctrl+Z)",
-    "redo": "Redo (Ctrl+Y)"
+    "redo": "Redo (Ctrl+Y)",
+    "group": "Group",
+    "ungroup": "Ungroup",
+    "applyClass": "Apply class",
+    "removeInlineStyles": "Strip inline styles",
+    "removeInlineStylesWarning": "Traced colours will be replaced by CSS class values",
+    "deleteSelected": "Delete selected",
+    "backgroundRemoved": "Background removed automatically",
+    "multipleSelected": "{count} elements selected",
+    "dragToReorder": "Drag to reorder",
+    "animationComingSoon": "Animations — coming soon",
+    "inlineFill": "Inline fill",
+    "inlineStroke": "Inline stroke",
+    "inlineOpacity": "Inline opacity",
+    "groupName": "Group name",
+    "presentationAttrs": "Presentation attributes"
   },
   "share": {
     "shareWithPictos": "Share with PICTOS",

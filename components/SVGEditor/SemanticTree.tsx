@@ -4,13 +4,15 @@
  */
 
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
-import { useMemo, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Edit2, Check, X, Trash2 } from 'lucide-react';
+import React, { useMemo, useState, useCallback, useRef } from 'react';
+import { ChevronRight, ChevronDown, Edit2, Check, X, Trash2, GripVertical } from 'lucide-react';
 import { Input } from '../ui/input';
 import type { SVGElement } from '../../stores/svgEditorStore';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { StylePickerModal } from './StylePickerModal';
+
+type DropMode = 'before' | 'after' | 'inside';
 
 interface TreeNodeProps {
     node: SVGElement;
@@ -18,13 +20,16 @@ interface TreeNodeProps {
     styleDefs: StyleDefinition[];
     getStyleInfo: (node: SVGElement) => {
         classes: { name: string; fill: string | null; stroke: string | null }[];
+        inlineFill: string | null;
     };
     onDragStart: (id: string) => void;
     onDragEnd: () => void;
-    onDragOverNode: (node: SVGElement) => void;
-    onDropNode: (node: SVGElement) => void;
+    onDragOverNode: (node: SVGElement, mode: DropMode) => void;
+    onDropNode: (node: SVGElement, mode: DropMode) => void;
     dragOverId: string | null;
-    dragMode: 'inside' | 'after' | null;
+    dragMode: DropMode | null;
+    isMultiSelected: boolean;
+    onShiftClick: (id: string) => void;
 }
 
 const SKIP_TAGS = new Set(['defs', 'metadata', 'title', 'desc', 'style']);
@@ -53,6 +58,8 @@ function TreeNode({
     onDropNode,
     dragOverId,
     dragMode,
+    isMultiSelected,
+    onShiftClick,
 }: TreeNodeProps) {
     const { t } = useTranslation();
     const { selectedElementId, selectElement, updateElementId, deleteElement } = useSVGEditorStore();
@@ -61,19 +68,23 @@ function TreeNode({
     const [editedId, setEditedId] = useState(node.id);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [isPickerOpen, setIsPickerOpen] = useState(false);
+    const rowRef = useRef<HTMLDivElement>(null);
     const styleInfo = getStyleInfo(node);
     const classLabels = styleInfo.classes.map((cls) => `.${cls.name}`);
     const classText = classLabels.join(' ');
 
     const hasChildren = node.children && node.children.length > 0;
+    const isContainer = node.tagName.toLowerCase() === 'g' || hasChildren;
     const isSelected = selectedElementId === node.id;
     const isDragOver = dragOverId === node.id;
     const dragIndicator =
-        isDragOver && dragMode === 'after'
-            ? 'border-b-2 border-blue-600/60'
-            : isDragOver
-                ? 'ring-1 ring-blue-600/40'
-                : '';
+        isDragOver && dragMode === 'before'
+            ? 'border-t-2 border-blue-500'
+            : isDragOver && dragMode === 'after'
+                ? 'border-b-2 border-blue-500'
+                : isDragOver && dragMode === 'inside'
+                    ? 'ring-2 ring-blue-400 bg-blue-50/50'
+                    : '';
 
     const handleSaveId = useCallback(() => {
         const trimmed = editedId.trim();
@@ -90,12 +101,32 @@ function TreeNode({
         setIsEditingId(false);
     }, [node.id]);
 
+    const computeDropMode = useCallback((event: React.DragEvent<HTMLDivElement>): DropMode => {
+        const rect = rowRef.current?.getBoundingClientRect();
+        if (!rect) return 'after';
+        const y = event.clientY - rect.top;
+        const ratio = y / rect.height;
+        if (isContainer) {
+            if (ratio < 0.25) return 'before';
+            if (ratio > 0.75) return 'after';
+            return 'inside';
+        }
+        return ratio < 0.5 ? 'before' : 'after';
+    }, [isContainer]);
+
     return (
         <div id={`tree-node-${node.id}`} className="select-none">
             <div
-                className={`group flex items-center gap-1 px-2 py-1.5 hover:bg-slate-100 cursor-grab active:cursor-grabbing transition-colors text-slate-700 ${dragIndicator} ${isSelected ? 'bg-slate-100' : ''}`}
+                ref={rowRef}
+                className={`group flex items-center gap-1 px-2 py-1.5 hover:bg-slate-100 transition-colors text-slate-700 ${dragIndicator} ${isSelected || isMultiSelected ? 'bg-slate-100' : ''}`}
                 style={{ paddingLeft: `${level * 14 + 8}px` }}
-                onClick={() => selectElement(node.id)}
+                onClick={(e) => {
+                    if (e.shiftKey) {
+                        onShiftClick(node.id);
+                    } else {
+                        selectElement(node.id);
+                    }
+                }}
                 draggable={!isEditingId}
                 onDragStart={(event) => {
                     event.stopPropagation();
@@ -108,13 +139,20 @@ function TreeNode({
                     if (isEditingId) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
-                    onDragOverNode(node);
+                    const mode = computeDropMode(event);
+                    onDragOverNode(node, mode);
                 }}
                 onDrop={(event) => {
                     event.preventDefault();
-                    onDropNode(node);
+                    const mode = computeDropMode(event);
+                    onDropNode(node, mode);
                 }}
             >
+                {/* Drag handle */}
+                <div className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" title={t('svgEditor.dragToReorder')}>
+                    <GripVertical className="w-3 h-3" />
+                </div>
+
                 {/* Expand/collapse toggle */}
                 {hasChildren ? (
                     <button
@@ -175,6 +213,14 @@ function TreeNode({
                         </span>
                         {classText && (
                             <span className="text-[10px] text-violet-500 truncate font-mono ml-1">{classText}</span>
+                        )}
+                        {/* Inline fill indicator for raw SVGs without classes */}
+                        {!classText && styleInfo.inlineFill && (
+                            <div
+                                className="w-3 h-3 rounded-sm border border-slate-300 shrink-0 ml-1"
+                                style={{ backgroundColor: styleInfo.inlineFill }}
+                                title={`fill: ${styleInfo.inlineFill}`}
+                            />
                         )}
                     </>
                 )}
@@ -285,6 +331,8 @@ function TreeNode({
                             onDropNode={onDropNode}
                             dragOverId={dragOverId}
                             dragMode={dragMode}
+                            isMultiSelected={isMultiSelected}
+                            onShiftClick={onShiftClick}
                         />
                     ))}
                 </div>
@@ -295,10 +343,10 @@ function TreeNode({
 
 export default function SemanticTree() {
     const { t } = useTranslation();
-    const { svgDOM, styleDefinitions: styleDefs, moveElement } = useSVGEditorStore();
+    const { svgDOM, styleDefinitions: styleDefs, moveElement, selectedElementIds, toggleSelection } = useSVGEditorStore();
     const [draggingId, setDraggingId] = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
-    const [dragMode, setDragMode] = useState<'inside' | 'after' | null>(null);
+    const [dragMode, setDragMode] = useState<DropMode | null>(null);
 
     const visualGroups = useMemo(() => {
         if (!svgDOM) return [];
@@ -348,17 +396,11 @@ export default function SemanticTree() {
                     fill: classStyleMap.get(cls)?.fill ?? null,
                     stroke: classStyleMap.get(cls)?.stroke ?? null,
                 }));
-            return { classes };
+            const inlineFill = node.attributes?.fill || null;
+            return { classes, inlineFill };
         },
         [classStyleMap]
     );
-
-    const getDropMode = useCallback((node: SVGElement): 'inside' | 'after' => {
-        if (node.tagName.toLowerCase() === 'g' || node.children.length > 0) {
-            return 'inside';
-        }
-        return 'after';
-    }, []);
 
     if (!svgDOM) {
         return (
@@ -369,8 +411,17 @@ export default function SemanticTree() {
         );
     }
 
+    const multiSelectCount = selectedElementIds.size;
+
     return (
         <div id="svg-editor-tree" className="py-1">
+            {/* Multi-select badge */}
+            {multiSelectCount > 1 && (
+                <div className="px-3 py-1.5 text-[10px] font-medium text-blue-700 bg-blue-50 border-b border-blue-100">
+                    {t('svgEditor.multipleSelected', { count: String(multiSelectCount) })}
+                </div>
+            )}
+
             {visualGroups.length === 0 ? (
                 <div className="p-4 text-center text-sm text-slate-500">
                     <p>{t('svgEditor.noElements')}</p>
@@ -390,14 +441,13 @@ export default function SemanticTree() {
                             setDragOverId(null);
                             setDragMode(null);
                         }}
-                        onDragOverNode={(target) => {
+                        onDragOverNode={(target, mode) => {
                             if (!draggingId || draggingId === target.id) return;
                             setDragOverId(target.id);
-                            setDragMode(getDropMode(target));
+                            setDragMode(mode);
                         }}
-                        onDropNode={(target) => {
+                        onDropNode={(target, mode) => {
                             if (!draggingId || draggingId === target.id) return;
-                            const mode = getDropMode(target);
                             moveElement(draggingId, target.id, mode);
                             setDraggingId(null);
                             setDragOverId(null);
@@ -405,6 +455,8 @@ export default function SemanticTree() {
                         }}
                         dragOverId={dragOverId}
                         dragMode={dragMode}
+                        isMultiSelected={selectedElementIds.has(node.id)}
+                        onShiftClick={(id) => toggleSelection(id)}
                     />
                 ))
             )}
