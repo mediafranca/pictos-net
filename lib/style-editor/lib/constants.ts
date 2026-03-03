@@ -405,6 +405,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Slide Horizontal',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-slide-r 2s infinite ease-in-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-slide-r-dist', value: '15' },
     ],
   },
@@ -414,6 +416,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Slide Vertical',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-slide-u 2s infinite ease-in-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-slide-u-dist', value: '15' },
     ],
   },
@@ -458,6 +462,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Gesture right (ease-out exit)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-gesture-r 1.5s infinite ease-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-gesture-r-dist', value: '30' },
     ],
   },
@@ -467,6 +473,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Gesture left (ease-out exit)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-gesture-l 1.5s infinite ease-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-gesture-l-dist', value: '30' },
     ],
   },
@@ -476,6 +484,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Gesture down (falling ease-in)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-gesture-d 1.5s infinite ease-in' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-gesture-d-dist', value: '25' },
     ],
   },
@@ -520,6 +530,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Shake (horizontal vibration)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-shake 0.6s infinite ease-in-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-shake-amp', value: '8' },
     ],
   },
@@ -529,6 +541,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Tremble (micro-vibration, fear/cold)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-tremble 0.15s infinite linear' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-tremble-amp', value: '3' },
     ],
   },
@@ -549,6 +563,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Float (gentle levitation)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-float 3s infinite ease-in-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-float-h', value: '14' },
     ],
   },
@@ -571,6 +587,8 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Animation: Nod no (horizontal denial)',
     rules: [
       { id: generateId(), property: 'animation', value: 'kf-nod-no 0.8s infinite ease-in-out' },
+      { id: generateId(), property: 'transform-box', value: 'fill-box' },
+      { id: generateId(), property: 'transform-origin', value: 'center' },
       { id: generateId(), property: '--kf-nod-no-d', value: '8' },
     ],
   },
@@ -581,7 +599,7 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     selectors: ['.fade-in'],
     description: 'Animation: Fade in (one-shot)',
     rules: [
-      { id: generateId(), property: 'animation', value: 'kf-fade-in 1s ease-out both' },
+      { id: generateId(), property: 'animation', value: 'kf-fade-in 1.5s ease-out both' },
     ],
   },
 ];

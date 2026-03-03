@@ -10,6 +10,7 @@ import { Button } from '../ui/button';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { normalizeSVG, parseSVGToDOM } from '../../utils/svgNormalizer';
 import BoundingBox from './BoundingBox';
+import { SelectionToolbar } from './SelectionToolbar';
 // Import directly from the extraction path if aliases are tricky
 import { updateDynamicStyles } from '../../lib/style-editor/lib/utils/cssGenerator';
 
@@ -20,8 +21,11 @@ export default function SVGCanvas() {
         updateSVGDOM,
         selectedElementId,
         selectElement,
+        toggleSelection,
+        selectedElementIds,
         styleDefinitions,
         keyframes,
+        svgSource,
     } = useSVGEditorStore();
 
     const [refreshKey, setRefreshKey] = useState(0);
@@ -35,6 +39,10 @@ export default function SVGCanvas() {
     const [zoom, setZoom] = useState(1);
     const [fitZoom, setFitZoom] = useState(1);
     const [fitMode, setFitMode] = useState(true);
+
+    // Marquee selection state
+    const [marquee, setMarquee] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+    const marqueeActive = useRef(false);
 
     const MIN_ZOOM = 0.1;
     const MAX_ZOOM = 8;
@@ -66,16 +74,18 @@ export default function SVGCanvas() {
 
     useEffect(() => {
         if (svgDocument && svgContentRef.current) {
-            // Parse and normalize SVG
-            const normalized = normalizeSVG(svgDocument);
-            const dom = parseSVGToDOM(normalized.svg);
+            // For raw SVGs, skip normalization to preserve inline fills/styles.
+            // normalizeSVG strips `style` attributes and moves them to CSS classes
+            // that are never injected, which causes fills to be lost.
+            const renderSvg = svgSource === 'raw' ? svgDocument : normalizeSVG(svgDocument).svg;
+            const dom = parseSVGToDOM(renderSvg);
 
             if (dom) {
                 updateSVGDOM(dom);
             }
 
             // Render SVG
-            svgContentRef.current.innerHTML = normalized.svg;
+            svgContentRef.current.innerHTML = renderSvg;
             const svg = svgContentRef.current.querySelector('svg');
 
             if (svg) {
@@ -121,16 +131,22 @@ export default function SVGCanvas() {
                 setCanvasSize({ width, height });
             }
         }
-    }, [svgDocument, updateSVGDOM]);
+    }, [svgDocument, svgSource, updateSVGDOM]);
 
     useEffect(() => {
+        // Skip dynamic style injection for raw SVGs — their inline fills are sacred
+        if (svgSource === 'raw') {
+            // Clear any leftover dynamic styles from a previous structured session
+            const existing = document.getElementById('dynamic-svg-styles');
+            if (existing) existing.textContent = '';
+            return;
+        }
+
         if (!document.getElementById('dynamic-svg-styles')) {
             const styleTag = document.createElement('style');
             styleTag.id = 'dynamic-svg-styles';
             document.head.appendChild(styleTag);
         }
-        // Update extracted styles from extracted files logic if necessary
-        // Here we pass the definitions from store to the generator
         if (styleDefinitions && keyframes) {
             try {
                 updateDynamicStyles(styleDefinitions, keyframes);
@@ -138,7 +154,7 @@ export default function SVGCanvas() {
                 console.warn("Failed to update dynamic styles", e);
             }
         }
-    }, [styleDefinitions, keyframes]);
+    }, [styleDefinitions, keyframes, svgSource]);
 
     useEffect(() => {
         if (!canvasSize) return;
@@ -173,6 +189,9 @@ export default function SVGCanvas() {
         if (!svgElement) return;
 
         const handleSvgClick = (event: MouseEvent) => {
+            // Don't process if marquee was just completed
+            if (marqueeActive.current) return;
+
             const target = event.target;
             if (!(target instanceof Element)) {
                 selectElement(null);
@@ -184,36 +203,35 @@ export default function SVGCanvas() {
                 return;
             }
 
-            // Prioritize selecting the direct element (leaf) if it has an ID, 
-            // otherwise look for a group, 
-            // otherwise use the target itself if it matches criteria.
-
-            // Try explicit element first
             const elementTarget = target.closest('[id]');
+            let id: string | null = null;
 
-            // If the element is found and is not the root SVG
             if (elementTarget && elementTarget !== svgElement) {
-                const id = elementTarget.getAttribute('id');
-                selectElement(id);
-                return;
+                id = elementTarget.getAttribute('id');
+            } else {
+                const groupTarget = target.closest('g[id]');
+                if (groupTarget && groupTarget !== svgElement) {
+                    id = groupTarget.getAttribute('id');
+                }
             }
 
-            // Fallback to group if needed (though usually elements inside have IDs due to normalizer)
-            const groupTarget = target.closest('g[id]');
-            if (groupTarget && groupTarget !== svgElement) {
-                const id = groupTarget.getAttribute('id');
-                selectElement(id);
-                return;
+            if (id) {
+                // Shift+click toggles multi-select
+                if (event.shiftKey) {
+                    toggleSelection(id);
+                } else {
+                    selectElement(id);
+                }
+            } else {
+                selectElement(null);
             }
-
-            selectElement(null);
         };
 
         svgElement.addEventListener('click', handleSvgClick);
         return () => {
             svgElement.removeEventListener('click', handleSvgClick);
         };
-    }, [svgElement, selectElement]);
+    }, [svgElement, selectElement, toggleSelection]);
 
     const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -255,6 +273,90 @@ export default function SVGCanvas() {
         setFitMode(false);
         setZoom(prev => clampZoom(prev * direction));
     };
+
+    // ── Marquee selection handlers ──────────────────────────────────────────
+    const handleMarqueeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        // Only start marquee when clicking on the background (not on an SVG element)
+        if ((event.target as Element).closest('svg [id]')) return;
+        if (event.button !== 0) return;
+
+        const rect = canvasFrameRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        setMarquee({ startX: x, startY: y, endX: x, endY: y });
+        marqueeActive.current = true;
+    }, []);
+
+    const handleMarqueeMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (!marquee || !marqueeActive.current) return;
+
+        const rect = canvasFrameRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        setMarquee(prev => prev ? {
+            ...prev,
+            endX: event.clientX - rect.left,
+            endY: event.clientY - rect.top,
+        } : null);
+    }, [marquee]);
+
+    const handleMarqueeMouseUp = useCallback(() => {
+        if (!marquee || !marqueeActive.current || !svgElement || !canvasFrameRef.current) {
+            setMarquee(null);
+            marqueeActive.current = false;
+            return;
+        }
+
+        // Compute marquee rect in screen coords relative to canvas frame
+        const left = Math.min(marquee.startX, marquee.endX);
+        const top = Math.min(marquee.startY, marquee.endY);
+        const width = Math.abs(marquee.endX - marquee.startX);
+        const height = Math.abs(marquee.endY - marquee.startY);
+
+        // Only process if marquee has some size
+        if (width > 5 && height > 5) {
+            const frameRect = canvasFrameRef.current.getBoundingClientRect();
+            // Convert to client coords
+            const marqueeClientRect = {
+                left: frameRect.left + left,
+                top: frameRect.top + top,
+                right: frameRect.left + left + width,
+                bottom: frameRect.top + top + height,
+            };
+
+            // Find all elements whose bounding boxes intersect the marquee
+            const hits: string[] = [];
+            const allElements = svgElement.querySelectorAll('[id]');
+            allElements.forEach(el => {
+                if (el === svgElement) return;
+                try {
+                    const elRect = el.getBoundingClientRect();
+                    if (elRect.width === 0 && elRect.height === 0) return;
+                    // Check intersection
+                    if (
+                        elRect.left < marqueeClientRect.right &&
+                        elRect.right > marqueeClientRect.left &&
+                        elRect.top < marqueeClientRect.bottom &&
+                        elRect.bottom > marqueeClientRect.top
+                    ) {
+                        const id = el.getAttribute('id');
+                        if (id) hits.push(id);
+                    }
+                } catch { /* ignore bbox errors */ }
+            });
+
+            if (hits.length > 0) {
+                const { selectElements } = useSVGEditorStore.getState();
+                selectElements(hits);
+            }
+        }
+
+        setMarquee(null);
+        // Delay resetting marqueeActive to prevent the click handler from firing
+        requestAnimationFrame(() => { marqueeActive.current = false; });
+    }, [marquee, svgElement]);
 
     if (!svgDocument) {
         return (
@@ -335,13 +437,27 @@ export default function SVGCanvas() {
                             }
                             : undefined
                     }
+                    onMouseDown={handleMarqueeMouseDown}
+                    onMouseMove={handleMarqueeMouseMove}
+                    onMouseUp={handleMarqueeMouseUp}
+                    onMouseLeave={() => { if (marqueeActive.current) { setMarquee(null); marqueeActive.current = false; } }}
                 >
                     <div
                         id="canvas-stage"
                         ref={svgContentRef}
                         className="w-full h-full rounded-[0.15ex] bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNicgaGVpZ2h0PScxNic+PHJlY3Qgd2lkdGg9JzE2JyBoZWlnaHQ9JzE2JyBmaWxsPSd3aGl0ZScvPjxyZWN0IHg9JzAnIHk9JzAnIHdpZHRoPSc4JyBoZWlnaHQ9JzgnIGZpbGw9JyNmM2YzZjMnLz48cmVjdCB4PSc4JyB5PSc4JyB3aWR0aD0nOCcgaGVpZ2h0PSc4JyBmaWxsPScjZjNmM2YzJy8+PC9zdmc+')] shadow-[0_0_4px_rgba(0,0,0,0.05)]"
                     />
-                    {svgElement && selectedElementId && (
+                    {/* Bounding boxes for all selected elements */}
+                    {svgElement && selectedElementIds.size > 0 && Array.from(selectedElementIds).map(id => (
+                        <BoundingBox
+                            key={`${refreshKey}-${id}`}
+                            svgElement={svgElement}
+                            elementId={id}
+                            containerElement={canvasFrameRef.current ?? svgElement}
+                            onTransformComplete={() => setRefreshKey(prev => prev + 1)}
+                        />
+                    ))}
+                    {svgElement && selectedElementId && selectedElementIds.size === 0 && (
                         <BoundingBox
                             key={refreshKey}
                             svgElement={svgElement}
@@ -350,7 +466,21 @@ export default function SVGCanvas() {
                             onTransformComplete={() => setRefreshKey(prev => prev + 1)}
                         />
                     )}
+                    {/* Marquee selection overlay */}
+                    {marquee && (
+                        <div
+                            className="absolute border border-dashed border-blue-500 bg-blue-500/10 pointer-events-none z-20"
+                            style={{
+                                left: `${Math.min(marquee.startX, marquee.endX)}px`,
+                                top: `${Math.min(marquee.startY, marquee.endY)}px`,
+                                width: `${Math.abs(marquee.endX - marquee.startX)}px`,
+                                height: `${Math.abs(marquee.endY - marquee.startY)}px`,
+                            }}
+                        />
+                    )}
                 </div>
+                {/* Floating selection toolbar */}
+                <SelectionToolbar styleDefs={styleDefinitions} />
             </div>
         </div>
     );

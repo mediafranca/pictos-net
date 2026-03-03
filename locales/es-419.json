@@ -313,7 +313,22 @@
     "idInvalidChars": "Solo alfanuméricos, guiones y guión bajo",
     "idExists": "El ID \"{id}\" ya existe",
     "undo": "Deshacer (Ctrl+Z)",
-    "redo": "Rehacer (Ctrl+Y)"
+    "redo": "Rehacer (Ctrl+Y)",
+    "group": "Agrupar",
+    "ungroup": "Desagrupar",
+    "applyClass": "Aplicar clase",
+    "removeInlineStyles": "Limpiar estilos inline",
+    "removeInlineStylesWarning": "Los colores del trazado seran reemplazados por los de la clase CSS",
+    "deleteSelected": "Eliminar seleccionados",
+    "backgroundRemoved": "Fondo removido automaticamente",
+    "multipleSelected": "{count} elementos seleccionados",
+    "dragToReorder": "Arrastrar para reordenar",
+    "animationComingSoon": "Animaciones — proximamente",
+    "inlineFill": "Relleno inline",
+    "inlineStroke": "Trazo inline",
+    "inlineOpacity": "Opacidad inline",
+    "groupName": "Nombre del grupo",
+    "presentationAttrs": "Atributos de presentacion"
   },
   "share": {
     "shareWithPictos": "Compartir con PICTOS",

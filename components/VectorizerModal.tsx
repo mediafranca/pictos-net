@@ -1,16 +1,26 @@
 /**
  * VectorizerModal — full-screen bitmap-to-SVG preview and parameter tuning.
  *
- * Mirrors the UX of visioncortex.org/vtracer: split-view (original | result),
- * controls panel on the left, debounced auto-retrace on parameter changes.
+ * Uses the official vtracer WASM (visioncortex) with:
+ * - Progressive rendering: WASM writes paths directly to a visible <svg> element
+ * - Auto-retrace: config changes debounce-trigger retrace (~500ms)
+ * - Presets: B&W, Pictogram, Poster, Photo
+ * - Hierarchical modes: Stacked / Cutout (color mode only)
  *
- * Rendered at the App.tsx level so `fixed inset-0` correctly covers the viewport.
  * Region ID: #vectorizer-modal
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, RefreshCw, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
-import { vectorizeBitmap, type VectorizerConfig, type VectorizerResult } from '../services/vtracerService';
+import { X, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import {
+    traceInteractive,
+    drawBitmapToCanvas,
+    preloadWasm,
+    DEFAULT_CONFIG,
+    PRESETS,
+    type VectorizerConfig,
+    type VectorizerResult,
+} from '../services/vtracerService';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,7 +28,7 @@ import { vectorizeBitmap, type VectorizerConfig, type VectorizerResult } from '.
 
 interface VectorizerModalProps {
     isOpen: boolean;
-    bitmap: string;           // base64 PNG, with or without data: prefix
+    bitmap: string;
     utterance: string;
     initialConfig?: Partial<VectorizerConfig>;
     onClose: () => void;
@@ -31,25 +41,7 @@ type TraceState = 'idle' | 'tracing' | 'done' | 'error';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULTS: Required<Pick<VectorizerConfig,
-    'mode' | 'colorMode' | 'colorPrecision' | 'colorStep' | 'gradientStep' |
-    'filterSpeckle' | 'cornerThreshold' | 'lengthThreshold' | 'spliceThreshold' | 'pathPrecision'
->> = {
-    mode: 'spline',
-    colorMode: 'bw',
-    colorPrecision: 4,
-    colorStep: 16,
-    gradientStep: 16,
-    filterSpeckle: 4,
-    cornerThreshold: 60,
-    lengthThreshold: 4.0,
-    spliceThreshold: 45,
-    pathPrecision: 3,
-};
-
-function bitmapSrc(base64: string): string {
-    return base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
-}
+const CANVAS_ID = 'vtracer-canvas';
 
 function downloadSvgBlob(svg: string, filename: string) {
     const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -68,7 +60,7 @@ function sanitizeName(s: string) {
 }
 
 // ---------------------------------------------------------------------------
-// LabeledSlider — replaces NumericStepper and segment groups for numeric params
+// LabeledSlider
 // ---------------------------------------------------------------------------
 
 interface LabeledSliderProps {
@@ -115,7 +107,7 @@ function LabeledSlider({
 }
 
 // ---------------------------------------------------------------------------
-// SegmentGroup — for mode toggles that have discrete named options
+// SegmentGroup
 // ---------------------------------------------------------------------------
 
 interface SegmentGroupProps<T extends string> {
@@ -155,6 +147,39 @@ function SegmentGroup<T extends string>({
 }
 
 // ---------------------------------------------------------------------------
+// PresetChips
+// ---------------------------------------------------------------------------
+
+const PRESET_LABELS: { key: string; label: string }[] = [
+    { key: 'bw', label: 'B&W' },
+    { key: 'pictogram', label: 'Pictogram' },
+    { key: 'poster', label: 'Poster' },
+    { key: 'photo', label: 'Photo' },
+];
+
+function PresetChips({
+    onSelect, disabled
+}: { onSelect: (config: Partial<VectorizerConfig>) => void; disabled?: boolean }) {
+    return (
+        <div className="mb-4">
+            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-1.5">Presets</p>
+            <div className="flex flex-wrap gap-1.5">
+                {PRESET_LABELS.map(({ key, label }) => (
+                    <button
+                        key={key}
+                        disabled={disabled}
+                        onClick={() => onSelect(PRESETS[key])}
+                        className="px-3 py-1 text-[10px] font-medium bg-white border border-slate-200 text-slate-600 rounded hover:border-violet-300 hover:text-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -166,99 +191,189 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     onClose,
     onApply,
 }) => {
-    // --- Config state ---
-    const [mode, setMode] = useState<'polygon' | 'spline'>(initialConfig?.mode ?? DEFAULTS.mode);
-    const [colorMode, setColorMode] = useState<'auto' | 'bw'>(initialConfig?.colorMode ?? DEFAULTS.colorMode);
-    const [colorPrecision, setColorPrecision] = useState<number>(initialConfig?.colorPrecision ?? DEFAULTS.colorPrecision);
-    const [colorStep, setColorStep] = useState<number>(initialConfig?.colorStep ?? DEFAULTS.colorStep);
-    const [gradientStep, setGradientStep] = useState<number>(initialConfig?.gradientStep ?? DEFAULTS.gradientStep);
-    const [filterSpeckle, setFilterSpeckle] = useState<number>(initialConfig?.filterSpeckle ?? DEFAULTS.filterSpeckle);
-    const [cornerThreshold, setCornerThreshold] = useState<number>(initialConfig?.cornerThreshold ?? DEFAULTS.cornerThreshold);
-    const [lengthThreshold, setLengthThreshold] = useState<number>(initialConfig?.lengthThreshold ?? DEFAULTS.lengthThreshold);
-    const [spliceThreshold, setSpliceThreshold] = useState<number>(initialConfig?.spliceThreshold ?? DEFAULTS.spliceThreshold);
-    const [pathPrecision, setPathPrecision] = useState<number>(initialConfig?.pathPrecision ?? DEFAULTS.pathPrecision);
-
-    // --- Trace state ---
+    const [config, setConfig] = useState<VectorizerConfig>({
+        ...DEFAULT_CONFIG,
+        ...initialConfig,
+    });
     const [traceState, setTraceState] = useState<TraceState>('idle');
     const [progress, setProgress] = useState(0);
     const [result, setResult] = useState<VectorizerResult | null>(null);
     const [errorMsg, setErrorMsg] = useState('');
     const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
+    const [canvasReady, setCanvasReady] = useState(false);
+    const [resultSvgHtml, setResultSvgHtml] = useState('');
 
-    const debounceRef = useRef<ReturnType<typeof setTimeout>>();
     const isMounted = useRef(false);
-    const isFirstRender = useRef(true);
+    const rafRef = useRef<number | null>(null);
+    const pendingProgress = useRef<number>(0);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
+    const activeTraceRef = useRef<Promise<void> | null>(null);
 
-    // Sync config when modal opens with a new initialConfig
+    // Hidden SVG element for WASM to write paths into (outside React's control)
+    const HIDDEN_SVG_ID = 'vtracer-svg-hidden';
+
+    const updateConfig = useCallback((partial: Partial<VectorizerConfig>) => {
+        setConfig(prev => ({ ...prev, ...partial }));
+    }, []);
+
+    // Preload WASM and prepare canvas on open
     useEffect(() => {
-        if (isOpen) {
-            setMode(initialConfig?.mode ?? DEFAULTS.mode);
-            setColorMode(initialConfig?.colorMode ?? DEFAULTS.colorMode);
-            setColorPrecision(initialConfig?.colorPrecision ?? DEFAULTS.colorPrecision);
-            setColorStep(initialConfig?.colorStep ?? DEFAULTS.colorStep);
-            setGradientStep(initialConfig?.gradientStep ?? DEFAULTS.gradientStep);
-            setFilterSpeckle(initialConfig?.filterSpeckle ?? DEFAULTS.filterSpeckle);
-            setCornerThreshold(initialConfig?.cornerThreshold ?? DEFAULTS.cornerThreshold);
-            setLengthThreshold(initialConfig?.lengthThreshold ?? DEFAULTS.lengthThreshold);
-            setSpliceThreshold(initialConfig?.spliceThreshold ?? DEFAULTS.spliceThreshold);
-            setPathPrecision(initialConfig?.pathPrecision ?? DEFAULTS.pathPrecision);
-        }
+        isMounted.current = true;
+        if (!isOpen) return;
+
+        setConfig({ ...DEFAULT_CONFIG, ...initialConfig });
+        setTraceState('idle');
+        setResult(null);
+        setErrorMsg('');
+        setCanvasReady(false);
+        setResultSvgHtml('');
+
+        // Preload WASM while image loads
+        preloadWasm();
+
+        // Create hidden SVG container for WASM (outside React's control)
+        const hiddenContainer = document.createElement('div');
+        hiddenContainer.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;pointer-events:none;';
+        const hiddenSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        hiddenSvg.id = HIDDEN_SVG_ID;
+        hiddenSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        hiddenContainer.appendChild(hiddenSvg);
+        document.body.appendChild(hiddenContainer);
+
+        // Draw bitmap to canvas after DOM is ready
+        const timer = setTimeout(async () => {
+            try {
+                const dims = await drawBitmapToCanvas(bitmap, CANVAS_ID);
+                if (!isMounted.current) return;
+                setImageDims(dims);
+                // Set viewBox on the hidden SVG so paths render correctly
+                hiddenSvg.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
+                setCanvasReady(true);
+            } catch (err) {
+                console.error('[VectorizerModal] Failed to draw bitmap:', err);
+            }
+        }, 50);
+
+        return () => {
+            isMounted.current = false;
+            clearTimeout(timer);
+            if (rafRef.current !== null) {
+                cancelAnimationFrame(rafRef.current);
+                rafRef.current = null;
+            }
+            if (debounceRef.current !== null) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+            }
+            // Abort any in-progress trace so its converter is freed
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+            }
+            // Remove hidden SVG container
+            try { document.body.removeChild(hiddenContainer); } catch { /* already removed */ }
+        };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
-    // --- Current config snapshot ---
-    const currentConfig = useCallback((): Partial<VectorizerConfig> => ({
-        mode, colorMode, colorStep, gradientStep,
-        filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision,
-    }), [mode, colorMode, colorStep, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
+    // Auto-retrace whenever config changes (debounced)
+    useEffect(() => {
+        if (!canvasReady || !isOpen) return;
+        if (debounceRef.current !== null) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+            debounceRef.current = null;
+            runTrace(config);
+        }, 500);
+        return () => {
+            if (debounceRef.current !== null) {
+                clearTimeout(debounceRef.current);
+                debounceRef.current = null;
+            }
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [config, canvasReady]);
 
-    // --- Core trace function ---
-    const runTrace = useCallback(async (cfg: Partial<VectorizerConfig>) => {
+    const runTrace = useCallback(async (cfg: VectorizerConfig) => {
         if (!isMounted.current) return;
+
+        // Abort any in-progress trace and wait for its converter to be freed
+        if (abortRef.current) {
+            abortRef.current.abort();
+        }
+        if (activeTraceRef.current) {
+            await activeTraceRef.current.catch(() => {});
+        }
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         setTraceState('tracing');
         setProgress(0);
         setErrorMsg('');
-        try {
-            const res = await vectorizeBitmap(
-                bitmap,
-                cfg,
-                (p) => { if (isMounted.current) setProgress(p); }
-            );
-            if (!isMounted.current) return;
-            setResult(res);
-            setTraceState('done');
-        } catch (err) {
-            if (!isMounted.current) return;
-            setErrorMsg(err instanceof Error ? err.message : String(err));
-            setTraceState('error');
+        setResultSvgHtml('');
+
+        // Clear previous paths from the hidden SVG (viewBox attribute is preserved)
+        const hiddenSvg = document.getElementById(HIDDEN_SVG_ID);
+        if (hiddenSvg) {
+            while (hiddenSvg.firstChild) hiddenSvg.removeChild(hiddenSvg.firstChild);
         }
-    }, [bitmap]);
 
-    // Auto-run on open
-    useEffect(() => {
-        isMounted.current = true;
-        isFirstRender.current = true;
-        if (isOpen) {
-            runTrace(currentConfig());
-        }
-        return () => { isMounted.current = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen]);
+        // Canvas already has valid pixel data from the initial draw.
+        // Do NOT call drawBitmapToCanvas here — it resets canvas.width which
+        // clears pixel data; if the subsequent image reload fails the WASM
+        // reads an empty canvas and produces 0 paths.
 
-    // Debounced retrace on config change (skip initial render after open)
-    useEffect(() => {
-        if (!isOpen) return;
-        if (isFirstRender.current) { isFirstRender.current = false; return; }
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => runTrace(currentConfig()), 600);
-        return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, colorMode, colorStep, gradientStep, filterSpeckle, cornerThreshold, lengthThreshold, spliceThreshold, pathPrecision]);
+        if (controller.signal.aborted) return;
 
-    const handleRetrace = () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        runTrace(currentConfig());
-    };
+        const tracePromise = (async () => {
+            try {
+                await traceInteractive(
+                    CANVAS_ID,
+                    HIDDEN_SVG_ID,
+                    cfg,
+                    (p) => {
+                        pendingProgress.current = p;
+                        if (rafRef.current === null) {
+                            rafRef.current = requestAnimationFrame(() => {
+                                rafRef.current = null;
+                                if (isMounted.current) setProgress(pendingProgress.current);
+                            });
+                        }
+                    },
+                    controller.signal,
+                );
+                if (!isMounted.current || controller.signal.aborted) return;
+
+                // Serialize the hidden SVG and store for display
+                const svg = hiddenSvg ? new XMLSerializer().serializeToString(hiddenSvg) : '';
+                const pathCount = hiddenSvg?.querySelectorAll('path').length ?? 0;
+                setResultSvgHtml(svg);
+
+                const res: VectorizerResult = {
+                    svg,
+                    warnings: [],
+                    layersTraced: pathCount,
+                    layersTotal: pathCount,
+                    tiersUsed: 1,
+                    usedConfig: cfg,
+                };
+                setResult(res);
+                setTraceState('done');
+            } catch (err) {
+                if (!isMounted.current || controller.signal.aborted) return;
+                if (err instanceof DOMException && err.name === 'AbortError') return;
+                const msg = err instanceof Error ? err.message : String(err);
+                console.warn('[vtracer] Trace failed:', msg);
+                setErrorMsg(msg);
+                setTraceState('error');
+            }
+        })();
+
+        activeTraceRef.current = tracePromise;
+        await tracePromise;
+    }, []);
 
     const handleApply = () => {
         if (result) { onApply(result); onClose(); }
@@ -268,7 +383,13 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         if (result?.svg) downloadSvgBlob(result.svg, `${sanitizeName(utterance)}_vectorized.svg`);
     };
 
+    const handlePreset = (preset: Partial<VectorizerConfig>) => {
+        setConfig({ ...DEFAULT_CONFIG, ...preset });
+    };
+
     const isTracing = traceState === 'tracing';
+    const mode = config.mode ?? 'spline';
+    const colorMode = config.colorMode ?? 'color';
 
     if (!isOpen) return null;
 
@@ -280,14 +401,15 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
             aria-modal="true"
             aria-label={`Vectorizer — ${utterance}`}
         >
-            {/* ── Header ── */}
+            {/* Header */}
             <header className="flex items-center justify-between px-6 h-14 border-b border-slate-200 shrink-0 bg-white">
                 <div className="flex items-center gap-3 min-w-0">
                     <span className="text-slate-900 font-bold text-sm uppercase tracking-widest">Vectorizer</span>
                     <span className="text-slate-400 text-sm truncate">— "{utterance}"</span>
                     {traceState === 'done' && result && (
                         <span className="text-[10px] font-mono text-slate-400 ml-2">
-                            {result.layersTraced}/{result.layersTotal} layers · tier {result.tiersUsed}
+                            {result.layersTraced} paths
+                            {result.tiersUsed > 1 && ` · tier ${result.tiersUsed}`}
                         </span>
                     )}
                 </div>
@@ -300,65 +422,78 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 </button>
             </header>
 
-            {/* ── Body ── */}
+            {/* Body */}
             <div className="flex flex-1 overflow-hidden">
 
-                {/* ── Left: Controls panel ── */}
+                {/* Left: Controls */}
                 <div
                     id="vectorizer-controls"
                     className="w-72 shrink-0 bg-slate-50 border-r border-slate-200 flex flex-col overflow-y-auto"
                 >
                     <div className="flex-1 p-5">
 
+                        {/* Presets */}
+                        <PresetChips onSelect={handlePreset} disabled={isTracing} />
+
                         {/* Curve mode */}
                         <SegmentGroup
                             label="Curve Mode"
-                            value={mode}
+                            value={mode as 'polygon' | 'spline'}
                             disabled={isTracing}
                             options={[
                                 { label: 'Polygon', value: 'polygon' as const, title: 'Sharp corners, geometric shapes' },
-                                { label: 'Spline', value: 'spline' as const, title: 'Smooth curves (may panic on parallel lines — auto-retries)' },
+                                { label: 'Spline', value: 'spline' as const, title: 'Smooth curves' },
                             ]}
-                            onChange={setMode}
+                            onChange={v => updateConfig({ mode: v })}
                         />
 
                         {/* Color mode */}
                         <SegmentGroup
                             label="Color Mode"
-                            value={colorMode}
+                            value={colorMode as 'color' | 'bw'}
                             disabled={isTracing}
                             options={[
-                                { label: 'Auto', value: 'auto' as const, title: 'Per-color-layer tracing — preserves original colors' },
-                                { label: 'B&W', value: 'bw' as const, title: 'Single black binary trace — fastest, most robust' },
+                                { label: 'Color', value: 'color' as const, title: 'Multi-color hierarchical clustering' },
+                                { label: 'B&W', value: 'bw' as const, title: 'Single black binary trace' },
                             ]}
-                            onChange={setColorMode}
+                            onChange={v => updateConfig({ colorMode: v })}
                         />
 
-                        {/* Color-specific params — only in Auto mode */}
-                        {colorMode === 'auto' && (
+                        {/* Color-specific params */}
+                        {colorMode === 'color' && (
                             <>
+                                <SegmentGroup
+                                    label="Hierarchical"
+                                    value={(config.hierarchical ?? 'stacked') as 'stacked' | 'cutout'}
+                                    disabled={isTracing}
+                                    options={[
+                                        { label: 'Stacked', value: 'stacked' as const, title: 'Layered overlapping shapes' },
+                                        { label: 'Cutout', value: 'cutout' as const, title: 'Non-overlapping shapes' },
+                                    ]}
+                                    onChange={v => updateConfig({ hierarchical: v })}
+                                />
                                 <LabeledSlider
-                                    label="Color Detail"
-                                    value={52 - colorStep}
-                                    min={4} max={48} step={4}
+                                    label="Color Precision"
+                                    value={config.colorPrecision ?? 6}
+                                    min={1} max={8} step={1}
                                     leftLabel="Fewer colors"
                                     rightLabel="More colors"
                                     disabled={isTracing}
-                                    onChange={(v) => setColorStep(52 - v)}
+                                    onChange={v => updateConfig({ colorPrecision: v })}
                                 />
                                 <LabeledSlider
-                                    label="Color Merging"
-                                    value={gradientStep}
-                                    min={8} max={32} step={8}
-                                    leftLabel="Separate shades"
-                                    rightLabel="Merge similar"
+                                    label="Layer Difference"
+                                    value={config.layerDifference ?? 16}
+                                    min={0} max={128} step={4}
+                                    leftLabel="More layers"
+                                    rightLabel="Fewer layers"
                                     disabled={isTracing}
-                                    onChange={setGradientStep}
+                                    onChange={v => updateConfig({ layerDifference: v })}
                                 />
                             </>
                         )}
 
-                        {/* Advanced section (collapsible) */}
+                        {/* Advanced (collapsible) */}
                         <button
                             onClick={() => setAdvancedOpen(v => !v)}
                             className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors mt-1 mb-3 w-full"
@@ -371,64 +506,55 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <div className="border-t border-slate-200 pt-4">
                                 <LabeledSlider
                                     label="Noise Removal"
-                                    value={filterSpeckle}
+                                    value={config.filterSpeckle ?? 4}
                                     min={0} max={16} step={1}
                                     leftLabel="Keep detail"
                                     rightLabel="Remove specks"
                                     disabled={isTracing}
-                                    onChange={setFilterSpeckle}
+                                    onChange={v => updateConfig({ filterSpeckle: v })}
                                 />
                                 <LabeledSlider
                                     label="Corner Sharpness"
-                                    value={cornerThreshold}
-                                    min={10} max={150} step={5}
+                                    value={config.cornerThreshold ?? 60}
+                                    min={10} max={180} step={5}
                                     leftLabel="Smooth"
                                     rightLabel="Sharp corners"
                                     disabled={isTracing}
-                                    onChange={setCornerThreshold}
+                                    onChange={v => updateConfig({ cornerThreshold: v })}
                                 />
                                 <LabeledSlider
                                     label="Path Detail"
-                                    value={lengthThreshold}
+                                    value={config.lengthThreshold ?? 4}
                                     min={1} max={10} step={0.5}
                                     leftLabel="More detail"
                                     rightLabel="Simplified"
                                     disabled={isTracing}
-                                    onChange={setLengthThreshold}
+                                    onChange={v => updateConfig({ lengthThreshold: v })}
                                 />
                                 <LabeledSlider
                                     label="Path Joining"
-                                    value={spliceThreshold}
+                                    value={config.spliceThreshold ?? 45}
                                     min={10} max={90} step={5}
                                     leftLabel="Keep separate"
                                     rightLabel="Join paths"
                                     disabled={isTracing}
-                                    onChange={setSpliceThreshold}
+                                    onChange={v => updateConfig({ spliceThreshold: v })}
                                 />
                                 <LabeledSlider
                                     label="Coordinate Precision"
-                                    value={pathPrecision}
+                                    value={config.pathPrecision ?? 8}
                                     min={1} max={8} step={1}
                                     leftLabel="Compact"
                                     rightLabel="Precise"
                                     disabled={isTracing}
-                                    onChange={setPathPrecision}
+                                    onChange={v => updateConfig({ pathPrecision: v })}
                                 />
                             </div>
                         )}
                     </div>
 
-                    {/* ── Action buttons ── */}
+                    {/* Action buttons */}
                     <div className="p-5 border-t border-slate-200 space-y-2 shrink-0">
-                        <button
-                            onClick={handleRetrace}
-                            disabled={isTracing}
-                            className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-900 bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            <RefreshCw size={12} className={isTracing ? 'animate-spin' : ''} />
-                            Re-trace
-                        </button>
-
                         <button
                             onClick={handleDownload}
                             disabled={!result?.svg || isTracing}
@@ -449,7 +575,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     </div>
                 </div>
 
-                {/* ── Right: Split preview ── */}
+                {/* Right: Split preview */}
                 <div
                     id="vectorizer-preview"
                     className="flex-1 flex flex-col overflow-hidden bg-white"
@@ -490,7 +616,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
 
                     {/* Split panels */}
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Original bitmap */}
+                        {/* Original bitmap (canvas — WASM reads from here) */}
                         <div
                             id="vectorizer-original"
                             className="flex-1 flex flex-col overflow-hidden border-r border-slate-200"
@@ -499,15 +625,14 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                                 Original
                             </p>
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
-                                <img
-                                    src={bitmapSrc(bitmap)}
-                                    alt="Original bitmap"
+                                <canvas
+                                    id={CANVAS_ID}
                                     className="max-w-full max-h-full object-contain drop-shadow-sm"
                                 />
                             </div>
                         </div>
 
-                        {/* SVG result */}
+                        {/* SVG result — rendered from serialized trace output */}
                         <div
                             id="vectorizer-result"
                             className="flex-1 flex flex-col overflow-hidden"
@@ -515,27 +640,23 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <p className="text-[9px] font-medium uppercase tracking-widest text-slate-400 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
                                 SVG Result
                             </p>
-                            <div className="flex-1 flex items-center justify-center p-6 overflow-auto">
-                                {isTracing && (
-                                    <div className="flex flex-col items-center gap-3 text-slate-400">
-                                        <Loader2 size={32} className="animate-spin text-violet-400" />
-                                        <p className="text-xs">Tracing…</p>
-                                    </div>
-                                )}
-                                {traceState === 'done' && result?.svg && (
+                            <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
+                                {resultSvgHtml ? (
                                     <div
-                                        dangerouslySetInnerHTML={{ __html: result.svg }}
                                         className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-full [&>svg]:h-full"
+                                        style={{ width: '100%', height: '100%' }}
+                                        dangerouslySetInnerHTML={{ __html: resultSvgHtml }}
                                     />
-                                )}
+                                ) : traceState === 'idle' ? (
+                                    <p className="absolute text-xs text-slate-400">Starting...</p>
+                                ) : traceState === 'tracing' ? (
+                                    <Loader2 size={32} className="animate-spin text-violet-300" />
+                                ) : null}
                                 {traceState === 'error' && (
-                                    <div className="flex flex-col items-center gap-3 text-slate-400">
+                                    <div className="absolute flex flex-col items-center gap-3 text-slate-400">
                                         <AlertTriangle size={32} className="text-red-400" />
                                         <p className="text-xs text-red-500">Trace failed — adjust settings and retry</p>
                                     </div>
-                                )}
-                                {traceState === 'idle' && (
-                                    <p className="text-xs text-slate-400">Starting…</p>
                                 )}
                             </div>
                         </div>

@@ -1,182 +1,152 @@
 /**
  * VTracer Service - Raster to Vector Conversion
  *
- * Uses the `vectortracer` WASM package (v0.1.2) which wraps vtracer's
- * binary trace only — it exposes `BinaryImageConverter` with no native
- * color mode. Color tracing is implemented manually: we extract unique
- * colors, build a binary mask per color layer, trace each mask with
- * BinaryImageConverter, then assemble the final multicolor SVG.
+ * Uses the official vtracer-webapp WASM (visioncortex) which provides both
+ * ColorImageConverter (hierarchical clustering) and BinaryImageConverter.
  *
- * Parameter semantics follow the vtracer documentation:
- *   - colorPrecision: bits per RGB channel (like CLI --color_precision).
- *     step = round(256 / 2^bits). Default 4 bits = step 16.
- *   - gradientStep: minimum color distance between kept layers
- *     (like CLI --gradient_step). Default 16.
- *   - Binary converter params mirror CLI flags directly.
+ * The WASM API is DOM-coupled: it reads pixels from a <canvas> element and
+ * writes <path> elements directly to an <svg> element, both referenced by ID.
+ *
+ * Value transformations (JS UI values -> WASM params):
+ *   - corner_threshold, splice_threshold: degrees -> radians
+ *   - filter_speckle: squared (UI value^2)
+ *   - color_precision: inverted (8 - UI value)
  *
  * @module services/vtracerService
  */
 
-import {
-    BinaryImageConverter,
-    type BinaryImageConverterParams,
-    type Options
-} from "vectortracer";
+import type { ColorImageConverter, BinaryImageConverter } from '../lib/vtracer-wasm/vtracer_webapp';
 
-/**
- * Configuration options for vectorization.
- * Names mirror vtracer CLI/Python flags where possible.
- */
+// Re-export the converter types for use in VectorizerModal
+export type Converter = ColorImageConverter | BinaryImageConverter;
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
 export interface VectorizerConfig {
-    /**
-     * Curve fitting mode (vtracer --mode).
-     * 'spline' — smooth Bézier curves, best for icons/posters.
-     * 'polygon' — simplified straight segments, geometric shapes.
-     * 'none' — raw pixel-aligned contours.
-     * Default: 'spline' (recommended by vtracer docs for flat-color icons).
-     */
+    /** Curve fitting mode. Default: 'spline' */
     mode?: 'polygon' | 'spline' | 'none';
-
-    /**
-     * Color mode: 'auto' uses per-layer color tracing (multicolor output);
-     * 'bw' forces single-layer binary tracing (black paths only).
-     * NOTE: the `vectortracer` npm package only exposes BinaryImageConverter.
-     * Multicolor output is achieved via manual per-layer masking.
-     */
-    colorMode?: 'auto' | 'bw';
-
-    /**
-     * Color precision in bits per RGB channel (vtracer --color_precision).
-     * Quantization step = round(256 / 2^bits).
-     *   4 bits → step 16 (default, good for JPEG bitmaps)
-     *   5 bits → step  8 (fine, more layers)
-     *   3 bits → step 32 (coarse, fewer layers)
-     * Default: 4
-     */
+    /** 'color' for multi-color hierarchical clustering, 'bw' for binary trace. Default: 'color' */
+    colorMode?: 'color' | 'bw';
+    /** Hierarchical mode (color only). 'stacked' layers overlap; 'cutout' shapes don't. Default: 'stacked' */
+    hierarchical?: 'stacked' | 'cutout';
+    /** Color precision: significant bits per RGB channel (1-8). Higher = more colors. Default: 6 */
     colorPrecision?: number;
-
-    /**
-     * Direct quantization step per RGB channel (4–64).
-     * Overrides colorPrecision when provided.
-     * Lower = more colors/layers; higher = fewer colors/layers.
-     * Default: undefined (colorPrecision is used instead)
-     */
-    colorStep?: number;
-
-    /**
-     * Minimum Euclidean color distance between kept layers
-     * (vtracer --gradient_step / layer_difference).
-     * Layers closer than this to an already-kept layer are merged into it.
-     * Default: 16
-     */
-    gradientStep?: number;
-
-    /** Minimum momentary angle (degrees) to be considered a corner (vtracer --corner_threshold). Default: 60 */
-    cornerThreshold?: number;
-    /** Max segment length in smoothing subdivision (vtracer --segment_length). Default: 4.0 */
-    lengthThreshold?: number;
-    /** Maximum smoothing iterations. Default: 10 */
-    maxIterations?: number;
-    /** Minimum angle displacement (degrees) to splice a spline (vtracer --splice_threshold). Default: 45 */
-    spliceThreshold?: number;
-    /** Discard patches smaller than X pixels (vtracer --filter_speckle). Default: 4 */
+    /** Min color difference between gradient layers (0-255). Higher = fewer layers. Default: 16 */
+    layerDifference?: number;
+    /** Discard patches smaller than X pixels (0-16 UI value, squared for WASM). Default: 4 */
     filterSpeckle?: number;
-    /** Decimal precision for path coordinates (vtracer --path_precision). Default: 3 */
+    /** Min angle (degrees) to be a corner (0-180). Default: 60 */
+    cornerThreshold?: number;
+    /** Max segment length for subdivision (1-10). Default: 4.0 */
+    lengthThreshold?: number;
+    /** Max smoothing iterations. Default: 10 */
+    maxIterations?: number;
+    /** Min angle displacement (degrees) to splice splines (0-180). Default: 45 */
+    spliceThreshold?: number;
+    /** Decimal precision for path coordinates (1-8). Default: 8 */
     pathPrecision?: number;
-    /** Enable debug mode (slower). */
-    debug?: boolean;
 }
 
-/**
- * Default configuration based on vtracer documentation recommendations
- * for flat-color icons / posters.
- *
- * Key doc insight: for flat-color icons, `spline` mode with
- * cornerThreshold=60 and segmentLength≈4 produces the best compact paths.
- */
-const DEFAULT_CONFIG: VectorizerConfig = {
-    mode: 'spline',           // Docs recommend spline for flat-color icons/posters
-    colorMode: 'bw',          // Default: single-layer binary trace (robust, fast)
-    colorPrecision: 4,        // 4 bits = step 16 (matches vtracer 4-bit color precision)
-    gradientStep: 16,         // Merge color layers within distance 16 (vtracer default)
-    filterSpeckle: 4,         // vtracer default; 8 was too aggressive for thin lines
-    cornerThreshold: 60,      // vtracer default; 45 detected too many false corners
-    lengthThreshold: 4.0,     // vtracer default
-    maxIterations: 10,        // vtracer default
-    spliceThreshold: 45,      // vtracer default
-    pathPrecision: 3,         // slightly more precision than our previous 2
-    debug: false,
+export const DEFAULT_CONFIG: Required<VectorizerConfig> = {
+    mode: 'spline',
+    colorMode: 'color',
+    hierarchical: 'stacked',
+    colorPrecision: 6,
+    layerDifference: 16,
+    filterSpeckle: 4,
+    cornerThreshold: 60,
+    lengthThreshold: 4.0,
+    maxIterations: 10,
+    spliceThreshold: 45,
+    pathPrecision: 8,
 };
 
-// ---------------------------------------------------------------------------
-// Vectorizer result types
-// ---------------------------------------------------------------------------
-
-/**
- * Structured result returned by the public vectorizeBitmap() API.
- */
 export interface VectorizerResult {
     svg: string;
     warnings: string[];
     layersTraced: number;
     layersTotal: number;
-    tiersUsed: number;   // 1, 2, or 3 — how many fallback tiers were needed
+    tiersUsed: number;
     usedConfig: VectorizerConfig;
 }
 
-/** Internal result shared between trace functions. */
-interface InternalResult {
-    svg: string;
-    warnings: string[];
-    layersTraced: number;
-    layersTotal: number;
+/** Presets for common use cases */
+export const PRESETS: Record<string, Partial<VectorizerConfig>> = {
+    bw: {
+        colorMode: 'bw', mode: 'spline', filterSpeckle: 4,
+        cornerThreshold: 60, spliceThreshold: 45,
+    },
+    pictogram: {
+        colorMode: 'color', hierarchical: 'stacked',
+        colorPrecision: 6, layerDifference: 16, filterSpeckle: 4,
+        cornerThreshold: 60, mode: 'spline',
+    },
+    poster: {
+        colorMode: 'color', hierarchical: 'stacked',
+        colorPrecision: 8, layerDifference: 25, filterSpeckle: 4,
+        cornerThreshold: 60, mode: 'spline',
+    },
+    photo: {
+        colorMode: 'color', hierarchical: 'stacked',
+        colorPrecision: 8, layerDifference: 48, filterSpeckle: 10,
+        cornerThreshold: 180, mode: 'spline',
+    },
+};
+
+// ---------------------------------------------------------------------------
+// WASM lazy loading
+// ---------------------------------------------------------------------------
+
+let wasmInit: typeof import('../lib/vtracer-wasm/vtracer_webapp').default | null = null;
+let ColorImageConverterClass: typeof ColorImageConverter | null = null;
+let BinaryImageConverterClass: typeof BinaryImageConverter | null = null;
+let wasmReady = false;
+
+async function ensureWasm(): Promise<void> {
+    if (wasmReady) return;
+    const mod = await import('../lib/vtracer-wasm/vtracer_webapp');
+    wasmInit = mod.default;
+    ColorImageConverterClass = mod.ColorImageConverter;
+    BinaryImageConverterClass = mod.BinaryImageConverter;
+    await wasmInit('/wasm/vtracer/vtracer_webapp_bg.wasm');
+    wasmReady = true;
+}
+
+export function isVectorizerAvailable(): boolean {
+    return true; // WASM is always available (lazy-loaded)
 }
 
 // ---------------------------------------------------------------------------
-// Image utilities
+// Value transformations (UI -> WASM)
 // ---------------------------------------------------------------------------
 
-/**
- * Convert a Base64 PNG image to ImageData.
- * Uses OffscreenCanvas if available, falls back to regular canvas.
- */
-async function base64ToImageData(base64: string): Promise<ImageData> {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
+function deg2rad(deg: number): number {
+    return deg / 180 * Math.PI;
+}
 
-        img.onload = () => {
-            let canvas: HTMLCanvasElement | OffscreenCanvas;
-            let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-
-            if (typeof OffscreenCanvas !== 'undefined') {
-                canvas = new OffscreenCanvas(img.width, img.height);
-                ctx = canvas.getContext('2d');
-            } else {
-                canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx = canvas.getContext('2d');
-            }
-
-            if (!ctx) {
-                reject(new Error('Failed to get canvas 2D context'));
-                return;
-            }
-
-            ctx.drawImage(img, 0, 0);
-            resolve(ctx.getImageData(0, 0, img.width, img.height));
-        };
-
-        img.onerror = () => reject(new Error('Failed to load image from Base64'));
-        img.src = base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+function buildWasmParams(canvasId: string, svgId: string, config: Required<VectorizerConfig>): string {
+    return JSON.stringify({
+        canvas_id: canvasId,
+        svg_id: svgId,
+        mode: config.mode,
+        hierarchical: config.hierarchical,
+        corner_threshold: deg2rad(config.cornerThreshold),
+        length_threshold: config.lengthThreshold,
+        max_iterations: config.maxIterations,
+        splice_threshold: deg2rad(config.spliceThreshold),
+        filter_speckle: config.filterSpeckle * config.filterSpeckle,
+        color_precision: 8 - config.colorPrecision,
+        layer_difference: config.layerDifference,
+        path_precision: config.pathPrecision,
     });
 }
 
-/**
- * Downscale a Base64 PNG so neither dimension exceeds maxDim.
- * Returns the original string unchanged if already within bounds.
- * Prevents OOM panics in WASM when processing large bitmaps.
- */
+// ---------------------------------------------------------------------------
+// Image utilities (kept from original)
+// ---------------------------------------------------------------------------
+
 async function downscaleBitmapIfNeeded(base64: string, maxDim = 1024): Promise<string> {
     return new Promise((resolve, reject) => {
         const img = new Image();
@@ -203,500 +173,222 @@ async function downscaleBitmapIfNeeded(base64: string, maxDim = 1024): Promise<s
 }
 
 // ---------------------------------------------------------------------------
-// Color utilities
+// Core conversion (tick loop with batched frames)
 // ---------------------------------------------------------------------------
 
-/** Quantize a channel value to the nearest multiple of `step` */
-function quantizeChannel(c: number, step = 32): number {
-    return Math.min(255, Math.round(c / step) * step);
+interface ConversionResult {
+    warnings: string[];
 }
 
-function toHex(r: number, g: number, b: number): string {
-    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
+async function runConversion(
+    canvasId: string,
+    svgId: string,
+    config: Required<VectorizerConfig>,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+): Promise<ConversionResult> {
+    await ensureWasm();
 
-interface ColorLayer {
-    hex: string;
-    r: number;
-    g: number;
-    b: number;
-    count: number; // pixel count — used to filter JPEG artifacts
-}
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-/**
- * Minimum pixel count for a quantized color to be considered a real layer.
- * JPEG artifacts at color boundaries appear in very few pixels.
- * Real pictogram colors (fills, outlines) cover hundreds to thousands of pixels.
- * 100px ≈ 0.016% of an 800×800 image — safely keeps even thin lines.
- */
-const MIN_LAYER_PIXELS = 100;
+    const params = buildWasmParams(canvasId, svgId, config);
+    const isBw = config.colorMode === 'bw';
 
-/** Euclidean color distance between two RGB triples */
-function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number {
-    return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
-}
+    const converter = isBw
+        ? BinaryImageConverterClass!.new_with_string(params)
+        : ColorImageConverterClass!.new_with_string(params);
 
-/**
- * Find unique foreground color layers in the image, applying:
- * 1. Pixel-level skips: transparent + near-white original pixels.
- * 2. Quantized near-white skip: quantized values all ≥ 224 are invisible on white bg.
- * 3. Pixel count filter: removes JPEG artifact colors (< MIN_LAYER_PIXELS pixels).
- * 4. Gradient-step merge: merges color layers closer than `gradientStep`
- *    (Euclidean distance) — mirrors vtracer's --gradient_step / layer_difference.
- *
- * @param colorPrecision - bits per RGB channel (1–8, default 4 → step 16)
- * @param gradientStep   - min color distance between kept layers (default 16)
- */
-function extractColorLayers(
-    imageData: ImageData,
-    colorPrecision: number = 4,
-    gradientStep: number = 16,
-    colorStep?: number
-): Map<string, ColorLayer> {
-    const step = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
-    const { data } = imageData;
-    const colorMap = new Map<string, ColorLayer>();
-
-    for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-        if (a < 32) continue;                         // Skip transparent
-        if (r > 230 && g > 230 && b > 230) continue; // Skip near-white background
-
-        const qr = quantizeChannel(r, step);
-        const qg = quantizeChannel(g, step);
-        const qb = quantizeChannel(b, step);
-
-        // Skip quantized near-white — invisible on white backgrounds
-        if (qr >= 224 && qg >= 224 && qb >= 224) continue;
-
-        const key = `${qr},${qg},${qb}`;
-        const existing = colorMap.get(key);
-        if (existing) {
-            existing.count++;
-        } else {
-            colorMap.set(key, { hex: toHex(qr, qg, qb), r: qr, g: qg, b: qb, count: 1 });
-        }
-    }
-
-    // Pass 1: remove sparse artifact colors
-    for (const [key, layer] of colorMap) {
-        if (layer.count < MIN_LAYER_PIXELS) {
-            colorMap.delete(key);
-        }
-    }
-
-    // Pass 2: gradient-step merge — mirrors vtracer's layer_difference.
-    // Sort layers by descending pixel count (dominant colors first).
-    // For each layer, if it's within `gradientStep` distance of a larger layer, discard it.
-    if (gradientStep > 0) {
-        const sorted = Array.from(colorMap.values()).sort((a, b) => b.count - a.count);
-        const kept: ColorLayer[] = [];
-        for (const layer of sorted) {
-            const tooClose = kept.some(k =>
-                colorDistance(layer.r, layer.g, layer.b, k.r, k.g, k.b) < gradientStep
-            );
-            if (!tooClose) kept.push(layer);
-        }
-        // Rebuild map with only kept layers
-        colorMap.clear();
-        for (const layer of kept) {
-            colorMap.set(`${layer.r},${layer.g},${layer.b}`, layer);
-        }
-    }
-
-    return colorMap;
-}
-
-/**
- * Build a binary ImageData mask where pixels belonging to the target
- * (quantized) color are black and everything else is white.
- * @param colorPrecision - Must match the value used in extractColorLayers.
- * @param gradientStep   - Pixels within this Euclidean distance of the target
- *   are also treated as the target, capturing JPEG boundary artifacts that
- *   didn't get their own layer.
- */
-function createBinaryMask(
-    imageData: ImageData,
-    targetR: number, targetG: number, targetB: number,
-    colorPrecision: number = 4,
-    gradientStep: number = 16,
-    colorStep?: number
-): ImageData {
-    const step = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
-    const { data, width, height } = imageData;
-    const maskData = new Uint8ClampedArray(width * height * 4);
-
-    for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-
-        let isTarget = false;
-        if (a >= 32 && !(r > 230 && g > 230 && b > 230)) {
-            const qr = quantizeChannel(r, step);
-            const qg = quantizeChannel(g, step);
-            const qb = quantizeChannel(b, step);
-            // Exact match on the quantized bucket, OR within gradientStep distance
-            // of the target — captures boundary artifacts that belong to this layer.
-            isTarget = (qr === targetR && qg === targetG && qb === targetB)
-                    || colorDistance(r, g, b, targetR, targetG, targetB) < gradientStep;
-        }
-
-        const v = isTarget ? 0 : 255;
-        maskData[i] = v; maskData[i + 1] = v; maskData[i + 2] = v;
-        maskData[i + 3] = 255;
-    }
-
-    return new ImageData(maskData, width, height);
-}
-
-/**
- * Extract <path> elements from an SVG string using DOM parsing.
- *
- * vtracer formats paths across multiple lines, which breaks naive regex
- * matching. DOMParser handles this correctly.
- */
-function extractPathElements(svgString: string): string[] {
-    try {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(svgString, 'image/svg+xml');
-        const svgEl = doc.querySelector('svg');
-        if (!svgEl) return [];
-
-        const paths = svgEl.querySelectorAll('path');
-        if (paths.length === 0) return [];
-
-        const serializer = new XMLSerializer();
-        return Array.from(paths).map(p => {
-            // XMLSerializer adds redundant xmlns on child elements — strip it
-            return serializer.serializeToString(p).replace(/ xmlns="[^"]*"/g, '');
-        });
-    } catch {
-        return [];
-    }
-}
-
-/**
- * Inject a viewBox attribute into an SVG string if one is not already present.
- * vtracer does not set viewBox; paths use translate() transforms positioned in
- * pixel coordinates matching the source image dimensions.
- */
-function ensureViewBox(svgString: string, width: number, height: number): string {
-    if (svgString.includes('viewBox')) return svgString;
-    return svgString.replace(/(<svg\b[^>]*)>/, `$1 viewBox="0 0 ${width} ${height}">`);
-}
-
-// ---------------------------------------------------------------------------
-// Single-layer tracer (binary)
-// ---------------------------------------------------------------------------
-
-async function traceLayer(
-    maskImageData: ImageData,
-    hexColor: string,
-    config: VectorizerConfig
-): Promise<string> {
-    const converterParams: BinaryImageConverterParams = {
-        debug: false,
-        mode: config.mode,
-        filterSpeckle: config.filterSpeckle,
-        cornerThreshold: config.cornerThreshold,
-        lengthThreshold: config.lengthThreshold,
-        maxIterations: config.maxIterations,
-        spliceThreshold: config.spliceThreshold,
-        pathPrecision: config.pathPrecision,
-    };
-
-    const svgOptions: Options = {
-        invert: false,
-        pathFill: hexColor,
-        backgroundColor: undefined,
-        attributes: undefined,
-        scale: 1,
-    };
-
-    const converter = new BinaryImageConverter(maskImageData, converterParams, svgOptions);
+    converter.init();
 
     return new Promise((resolve, reject) => {
-        try {
-            converter.init();
-            const tick = () => {
-                try {
-                    let done: boolean;
-                    try {
-                        done = converter.tick();
-                    } catch (tickErr) {
-                        // Catch WASM unreachable traps (e.g. "parallel lines" spline panic)
-                        // and rethrow with a recognizable prefix so callers can fallback.
-                        const msg = tickErr instanceof Error ? tickErr.message : String(tickErr);
-                        throw new Error(`WASM_PARALLEL_PANIC: ${msg}`);
-                    }
-                    if (!done) {
-                        setTimeout(tick, 0);
-                    } else {
-                        const result = converter.getResult();
-                        try { converter.free(); } catch (e) { console.warn('Free error:', e); }
-                        resolve(result);
-                    }
-                } catch (err) {
-                    try { converter.free(); } catch { /* ignore */ }
-                    reject(err);
+        const warnings: string[] = [];
+
+        function tick() {
+            // Check abort before each tick batch
+            if (signal?.aborted) {
+                try { converter.free(); } catch { /* ignore */ }
+                reject(new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            try {
+                let done = false;
+                const startTick = performance.now();
+                // Batch multiple ticks within 25ms frames for smooth progress
+                while (!(done = converter.tick()) && performance.now() - startTick < 25) {
+                    // keep ticking
                 }
-            };
-            setTimeout(tick, 0);
-        } catch (err) {
-            reject(err);
+                const progress = converter.progress();
+                onProgress?.(progress);
+
+                if (!done) {
+                    setTimeout(tick, 1);
+                } else {
+                    converter.free();
+                    resolve({ warnings });
+                }
+            } catch (err) {
+                try { converter.free(); } catch { /* ignore */ }
+                reject(err);
+            }
         }
+
+        setTimeout(tick, 1);
     });
 }
 
 // ---------------------------------------------------------------------------
-// Internal single-color (binary) tracer — kept as fallback
-// ---------------------------------------------------------------------------
-
-async function vectorizeBitmapInternal(
-    base64Png: string,
-    config: VectorizerConfig,
-    onProgress?: (progress: number) => void
-): Promise<InternalResult> {
-    const imageData = await base64ToImageData(base64Png);
-    const { width, height } = imageData;
-
-    const converterParams: BinaryImageConverterParams = {
-        debug: config.debug,
-        mode: config.mode,
-        filterSpeckle: config.filterSpeckle,
-        cornerThreshold: config.cornerThreshold,
-        lengthThreshold: config.lengthThreshold,
-        maxIterations: config.maxIterations,
-        spliceThreshold: config.spliceThreshold,
-        pathPrecision: config.pathPrecision,
-    };
-
-    const svgOptions: Options = {
-        invert: false,
-        pathFill: '#000000',
-        backgroundColor: undefined,
-        attributes: undefined,
-        scale: 1,
-    };
-
-    const converter = new BinaryImageConverter(imageData, converterParams, svgOptions);
-
-    return new Promise((resolve, reject) => {
-        try {
-            converter.init();
-            const tick = () => {
-                try {
-                    let done: boolean;
-                    try {
-                        done = converter.tick();
-                    } catch (tickErr) {
-                        const msg = tickErr instanceof Error ? tickErr.message : String(tickErr);
-                        throw new Error(`WASM_PARALLEL_PANIC: ${msg}`);
-                    }
-                    if (onProgress) onProgress(Math.round(converter.progress() * 100));
-                    if (!done) {
-                        setTimeout(tick, 0);
-                    } else {
-                        const result = converter.getResult();
-                        try { converter.free(); } catch (e) { console.warn('Free error:', e); }
-                        // vtracer does not set viewBox — inject it from image dimensions
-                        resolve({ svg: ensureViewBox(result, width, height), warnings: [], layersTraced: 1, layersTotal: 1 });
-                    }
-                } catch (err) {
-                    try { converter.free(); } catch { /* ignore */ }
-                    reject(err);
-                }
-            };
-            setTimeout(tick, 0);
-        } catch (err) {
-            reject(err);
-        }
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Multicolor tracer
+// Interactive API (for VectorizerModal — uses visible DOM elements)
 // ---------------------------------------------------------------------------
 
 /**
- * Vectorize a bitmap using per-color-layer tracing so the output SVG
- * preserves the original flat colors.
- *
- * Algorithm:
- * 1. Detect unique foreground colors (skipping transparent + near-white bg).
- * 2. For each color, build a binary mask and run BinaryImageConverter.
- * 3. Extract <path> elements (via DOMParser, handles multi-line XML).
- * 4. Assemble final SVG with viewBox="0 0 {w} {h}" matching the input bitmap.
- *
- * Falls back to single-layer (black) tracing when:
- * - 0 foreground colors (all-white / all-transparent input).
- * - >MAX_COLOR_LAYERS colors (photo-like input, too expensive to layer-trace).
- * - Extracted path count is 0 (unexpected vtracer output format).
+ * Trace using visible canvas/svg elements in the VectorizerModal.
+ * The WASM writes paths progressively to the SVG element.
+ * After completion, caller serializes the SVG from the DOM.
  */
-const MAX_COLOR_LAYERS = 7;
-
-async function vectorizeBitmapMulticolor(
-    base64Png: string,
-    config: VectorizerConfig,
-    onProgress?: (progress: number) => void
-): Promise<InternalResult> {
-    const imageData = await base64ToImageData(base64Png);
-    const { width, height } = imageData;
-
-    const colorPrecision = config.colorPrecision ?? 4;
-    const gradientStep   = config.gradientStep   ?? 16;
-    const colorStep      = config.colorStep;
-    const effectiveStep  = colorStep ?? Math.round(256 / Math.pow(2, colorPrecision));
-    const colorLayers = extractColorLayers(imageData, colorPrecision, gradientStep, colorStep);
-
-    console.info(
-        `[vtracer] ${colorLayers.size} color layer(s) detected`,
-        `(step=${effectiveStep}, gradientStep=${gradientStep}, image=${width}×${height})`,
-        Array.from(colorLayers.values()).map(c => `${c.hex}(${c.count}px)`)
-    );
-
-    if (colorLayers.size === 0 || colorLayers.size > MAX_COLOR_LAYERS) {
-        console.info(
-            colorLayers.size === 0
-                ? '[vtracer] No foreground colors — falling back to binary trace.'
-                : `[vtracer] ${colorLayers.size} colors (>${MAX_COLOR_LAYERS}) — falling back to binary trace.`
-        );
-        return vectorizeBitmapInternal(base64Png, config, onProgress);
-    }
-
-    const colors = Array.from(colorLayers.values());
-    const allPaths: string[] = [];
-    const warnings: string[] = [];
-    let layersTraced = 0;
-
-    for (let ci = 0; ci < colors.length; ci++) {
-        const { hex, r, g, b } = colors[ci];
-
-        try {
-            const mask = createBinaryMask(imageData, r, g, b, colorPrecision, gradientStep, colorStep);
-            const layerSvg = await traceLayer(mask, hex, config);
-            const paths = extractPathElements(layerSvg);
-            allPaths.push(...paths);
-            layersTraced++;
-        } catch (err) {
-            const msg = `Layer ${hex} skipped: ${err instanceof Error ? err.message : String(err)}`;
-            console.warn(`[vtracer] ${msg}`);
-            warnings.push(msg);
-        }
-
-        if (onProgress) onProgress(Math.round(((ci + 1) / colors.length) * 100));
-    }
-
-    // If no paths were extracted, fall back to binary trace
-    if (allPaths.length === 0) {
-        console.warn('[vtracer] No paths extracted from color layers — falling back to binary trace.');
-        return vectorizeBitmapInternal(base64Png, config, onProgress);
-    }
-
-    // viewBox exactly matches the source bitmap pixel dimensions
-    const svg = [
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
-        ...allPaths,
-        '</svg>',
-    ].join('\n');
-    return { svg, warnings, layersTraced, layersTotal: colors.length };
+export async function traceInteractive(
+    canvasId: string,
+    svgId: string,
+    config: Partial<VectorizerConfig>,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+): Promise<ConversionResult> {
+    const finalConfig = { ...DEFAULT_CONFIG, ...config } as Required<VectorizerConfig>;
+    return runConversion(canvasId, svgId, finalConfig, onProgress, signal);
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// One-shot API (creates hidden DOM elements, returns SVG string)
 // ---------------------------------------------------------------------------
 
+let hiddenCounter = 0;
+
 /**
- * Convert a bitmap image (Base64 PNG) to a color SVG using vtracer WASM.
+ * Convert a bitmap (base64 PNG) to SVG using the official vtracer WASM.
+ * Creates temporary hidden DOM elements for the WASM to operate on.
  *
- * Automatically downscales bitmaps larger than 1024px to prevent WASM OOM panics.
- * Implements a 3-tier fallback chain:
- *   1. Try with requested config
- *   2. On WASM panic → retry with colorMode:'bw' (single layer)
- *   3. On still failing → retry with colorMode:'bw', filterSpeckle:16, mode:'polygon'
- *
- * @param base64Png  - Base64 PNG (with or without data URL prefix)
- * @param config     - Optional vectorization configuration
- * @param onProgress - Optional progress callback (0-100)
+ * With fallback: if spline mode fails, retries with polygon mode.
  */
 export async function vectorizeBitmap(
     base64Png: string,
     config: Partial<VectorizerConfig> = {},
-    onProgress?: (progress: number) => void
+    onProgress?: (percent: number) => void,
 ): Promise<VectorizerResult> {
-    const finalConfig: VectorizerConfig = { ...DEFAULT_CONFIG, ...config };
-
-    // Downscale large images to prevent WASM OOM panics
     const safeBase64 = await downscaleBitmapIfNeeded(base64Png);
+    const finalConfig = { ...DEFAULT_CONFIG, ...config } as Required<VectorizerConfig>;
 
-    const traceFn = finalConfig.colorMode === 'bw'
-        ? vectorizeBitmapInternal
-        : vectorizeBitmapMulticolor;
+    const id = ++hiddenCounter;
+    const canvasId = `__vtracer_canvas_${id}`;
+    const svgId = `__vtracer_svg_${id}`;
 
-    // Tier 1: Try requested config
-    let tier1Error: unknown;
+    // Create hidden canvas and SVG elements
+    const container = document.createElement('div');
+    container.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;pointer-events:none;';
+
+    const canvas = document.createElement('canvas');
+    canvas.id = canvasId;
+    container.appendChild(canvas);
+
+    const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svgEl.id = svgId;
+    container.appendChild(svgEl);
+
+    document.body.appendChild(container);
+
     try {
-        const result = await traceFn(safeBase64, finalConfig, onProgress);
-        return { ...result, tiersUsed: 1, usedConfig: finalConfig };
-    } catch (error) {
-        tier1Error = error;
-        const msg = error instanceof Error ? error.message : String(error);
-        console.warn('[vtracer] Tier 1 failed:', msg);
-    }
-
-    // Tier 2: if WASM_PARALLEL_PANIC or spline mode → retry with polygon (same colorMode)
-    const isParallelPanic = tier1Error instanceof Error && tier1Error.message.includes('WASM_PARALLEL_PANIC');
-    const wasSpline = finalConfig.mode === 'spline';
-    if (isParallelPanic || wasSpline) {
-        const tier2Config: VectorizerConfig = { ...finalConfig, mode: 'polygon' };
-        try {
-            if (onProgress) onProgress(0);
-            console.warn('[vtracer] Tier 2: retrying with mode:polygon');
-            const result = await traceFn(safeBase64, tier2Config, onProgress);
-            return {
-                ...result,
-                tiersUsed: 2,
-                usedConfig: tier2Config,
-                warnings: [...result.warnings, 'Tier 1 failed (parallel lines) — fell back to polygon mode'],
+        // Draw bitmap to canvas
+        const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) { reject(new Error('No 2d context')); return; }
+                ctx.drawImage(img, 0, 0);
+                resolve({ width: img.naturalWidth, height: img.naturalHeight });
             };
-        } catch (error) {
-            console.warn('[vtracer] Tier 2 failed:', error instanceof Error ? error.message : error);
+            img.onerror = () => reject(new Error('Failed to load bitmap'));
+            img.src = safeBase64.startsWith('data:') ? safeBase64 : `data:image/png;base64,${safeBase64}`;
+        });
+
+        svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+        // Try with requested config
+        let result: ConversionResult;
+        let tiersUsed = 1;
+        let usedConfig = finalConfig;
+
+        try {
+            result = await runConversion(canvasId, svgId, finalConfig, onProgress);
+        } catch (err) {
+            // Fallback: retry with polygon mode
+            console.warn('[vtracer] Tier 1 failed, retrying with polygon:', err);
+            usedConfig = { ...finalConfig, mode: 'polygon' };
+            tiersUsed = 2;
+
+            // Clear SVG and redraw canvas
+            while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            await new Promise<void>((resolve) => {
+                img.onload = () => {
+                    ctx!.drawImage(img, 0, 0);
+                    resolve();
+                };
+                img.src = safeBase64.startsWith('data:') ? safeBase64 : `data:image/png;base64,${safeBase64}`;
+            });
+            onProgress?.(0);
+            result = await runConversion(canvasId, svgId, usedConfig, onProgress);
+            result.warnings.push('Tier 1 failed — fell back to polygon mode');
         }
-    }
 
-    // Tier 3: Coarsest settings — polygon + bw + coarse speckle filter
-    const tier3Config: VectorizerConfig = { ...finalConfig, mode: 'polygon', colorMode: 'bw', filterSpeckle: 16 };
-    if (onProgress) onProgress(0);
-    console.warn('[vtracer] Tier 3: retrying with polygon + B&W + filterSpeckle:16');
-    const result = await vectorizeBitmapInternal(safeBase64, tier3Config, onProgress);
-    return {
-        ...result,
-        tiersUsed: 3,
-        usedConfig: tier3Config,
-        warnings: [...result.warnings, 'Tiers 1 & 2 failed — fell back to coarse B&W polygon mode'],
-    };
+        // Serialize SVG from DOM
+        const svg = new XMLSerializer().serializeToString(svgEl);
+        const pathCount = svgEl.querySelectorAll('path').length;
+
+        return {
+            svg,
+            warnings: result.warnings,
+            layersTraced: pathCount,
+            layersTotal: pathCount,
+            tiersUsed,
+            usedConfig,
+        };
+    } finally {
+        document.body.removeChild(container);
+    }
 }
 
 /**
- * Vectorize with a simple preset for pictograms
+ * Draw a base64 image onto a canvas element by ID.
+ * Used by VectorizerModal to prepare the canvas for WASM.
  */
-export async function vectorizePictogram(base64Png: string): Promise<string> {
-    const result = await vectorizeBitmap(base64Png, {
-        mode: 'polygon',
-        filterSpeckle: 6,
-        cornerThreshold: 45,
-        lengthThreshold: 3.0,
-        pathPrecision: 2,
+export async function drawBitmapToCanvas(
+    base64: string,
+    canvasId: string,
+): Promise<{ width: number; height: number }> {
+    const safeBase64 = await downscaleBitmapIfNeeded(base64);
+    const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
+    if (!canvas) throw new Error(`Canvas #${canvasId} not found`);
+
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error('No 2d context')); return; }
+            ctx.drawImage(img, 0, 0);
+            resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        };
+        img.onerror = () => reject(new Error('Failed to load bitmap'));
+        img.src = safeBase64.startsWith('data:') ? safeBase64 : `data:image/png;base64,${safeBase64}`;
     });
-    return result.svg;
 }
 
 /**
- * Check if vectortracer is available
+ * Prepare the WASM module (can be called ahead of time to avoid latency).
  */
-export function isVectorizerAvailable(): boolean {
-    try {
-        return typeof BinaryImageConverter !== 'undefined';
-    } catch {
-        return false;
-    }
+export async function preloadWasm(): Promise<void> {
+    return ensureWasm();
 }
