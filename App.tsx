@@ -6,7 +6,8 @@ import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
   Play, BookOpen, Search, FileDown, Square, Sliders,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
-  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit
+  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -363,7 +364,11 @@ const App: React.FC = () => {
     if (!openRowId || scrollToRowRef.current !== openRowId) return;
     scrollToRowRef.current = null;
     const el = document.getElementById(`picto-row-${openRowId}`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) {
+      const headerHeight = document.getElementById('toolbar')?.offsetHeight ?? 80;
+      const top = el.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
   }, [openRowId]);
 
   // Auto-cascade: when a new row with real text is added, start the pipeline
@@ -1356,6 +1361,7 @@ const App: React.FC = () => {
           onLog={addLog}
           onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
+          onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
         />
       )}
 
@@ -2275,6 +2281,8 @@ const Badge: React.FC<{ label: string; status: StepStatus }> = ({ label, status 
   return <div className={`px-2.5 py-0.5 text-[8px] font-medium uppercase tracking-widest border transition-all ${styles[status]}`}>{label}</div>;
 };
 
+const FOCUS_STEPS = ['nlu', 'visual', 'bitmap', 'eval'] as const;
+
 const FocusViewModal: React.FC<{
   mode: 'nlu' | 'visual' | 'bitmap' | 'eval';
   row: RowData;
@@ -2287,12 +2295,31 @@ const FocusViewModal: React.FC<{
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   onOpenEditor?: () => void;
   onOpenVectorizer?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer }) => {
+  onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'eval') => void;
+}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
   const [elementsManuallyEdited, setElementsManuallyEdited] = useState(false);
   const [isRegeneratingPrompt, setIsRegeneratingPrompt] = useState(false);
+
+  const currentIndex = FOCUS_STEPS.indexOf(mode);
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < FOCUS_STEPS.length - 1;
+  const goToPrev = () => { if (hasPrev) onModeChange(FOCUS_STEPS[currentIndex - 1]); };
+  const goToNext = () => { if (hasNext) onModeChange(FOCUS_STEPS[currentIndex + 1]); };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrev(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); goToNext(); }
+      else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentIndex]);
 
   const handleCopy = () => {
     let contentToCopy: string = '';
@@ -2315,7 +2342,8 @@ const FocusViewModal: React.FC<{
   const titleMap: Record<string, string> = {
     nlu: t('pipeline.understand'),
     visual: t('pipeline.compose'),
-    bitmap: t('pipeline.produce')
+    bitmap: t('pipeline.produce'),
+    eval: t('pipeline.evaluate')
   };
 
   const renderContent = () => {
@@ -2442,12 +2470,30 @@ const FocusViewModal: React.FC<{
   return (
     <div className="focus-modal-backdrop animate-in fade-in duration-300" onClick={onClose}>
       <div className="focus-modal-content animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-        <header className="p-4 border-b bg-white flex justify-between items-center">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider">{titleMap[mode]}</h2>
-            <p className="text-xs text-slate-400 truncate max-w-md">{row.UTTERANCE}</p>
+        <header className="p-4 border-b bg-white flex items-center gap-3">
+          <button onClick={goToPrev} className={`p-2 hover:bg-slate-100 transition-opacity ${hasPrev ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Previous step">
+            <ChevronLeft size={18} />
+          </button>
+          <div className="flex-1 text-center min-w-0">
+            <div className="flex items-center justify-center gap-3">
+              <h2 className="text-sm font-bold uppercase tracking-wider">{titleMap[mode]}</h2>
+              <div className="flex items-center gap-1.5">
+                {FOCUS_STEPS.map((step, i) => (
+                  <button
+                    key={step}
+                    onClick={() => onModeChange(step)}
+                    className={`w-2 h-2 rounded-full transition-all ${i === currentIndex ? 'bg-violet-600 scale-125' : 'bg-slate-300 hover:bg-slate-400'}`}
+                    aria-label={titleMap[step]}
+                  />
+                ))}
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 truncate">{row.UTTERANCE}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100"><X size={18} /></button>
+          <button onClick={goToNext} className={`p-2 hover:bg-slate-100 transition-opacity ${hasNext ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Next step">
+            <ChevronRight size={18} />
+          </button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 ml-1"><X size={18} /></button>
         </header>
         <main className="flex-1 p-6 overflow-auto bg-slate-50">{renderContent()}</main>
         <footer className="p-4 border-t bg-white flex justify-end gap-3">
