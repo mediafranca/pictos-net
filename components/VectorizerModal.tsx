@@ -314,16 +314,16 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         setErrorMsg('');
         setResultSvgHtml('');
 
-        // Clear previous paths from the hidden SVG
+        // Clear previous paths from the hidden SVG (viewBox attribute is preserved)
         const hiddenSvg = document.getElementById(HIDDEN_SVG_ID);
         if (hiddenSvg) {
             while (hiddenSvg.firstChild) hiddenSvg.removeChild(hiddenSvg.firstChild);
         }
 
-        // Redraw canvas (WASM reads from it)
-        try {
-            await drawBitmapToCanvas(bitmap, CANVAS_ID);
-        } catch { /* canvas already drawn */ }
+        // Canvas already has valid pixel data from the initial draw.
+        // Do NOT call drawBitmapToCanvas here — it resets canvas.width which
+        // clears pixel data; if the subsequent image reload fails the WASM
+        // reads an empty canvas and produces 0 paths.
 
         if (controller.signal.aborted) return;
 
@@ -373,7 +373,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
 
         activeTraceRef.current = tracePromise;
         await tracePromise;
-    }, [bitmap]);
+    }, []);
 
     const handleApply = () => {
         if (result) { onApply(result); onClose(); }
