@@ -93,7 +93,7 @@ pictos-net/
 | ReactDOM | ^19.2.3 | DOM rendering |
 | @google/genai | ^1.38.0 | Google Gemini AI API |
 | lucide-react | ^0.562.0 | Icon library |
-| vectortracer | Latest | WASM bitmap→SVG vectorization |
+| vtracer-webapp (local WASM) | 0.4.0 | WASM bitmap→SVG vectorization (visioncortex) |
 
 ### Development Dependencies
 
@@ -177,12 +177,13 @@ Utterance → NLU → Visual Topology → Bitmap → Evaluation
 ##### Step 5a: Trace (Vectorization)
 
 - **Input**: Bitmap PNG (Base64)
-- **Engine**: VTracer WASM (`vectortracer` package)
-- **Process**: Raster-to-vector conversion
-  - Automatic path tracing with spline curve fitting
-  - Fallback to polygon mode if spline fails
-  - Noise removal (filter speckle)
-  - Path optimization
+- **Engine**: vtracer-webapp WASM (visioncortex, local)
+- **Process**: Raster-to-vector conversion via hierarchical color clustering
+  - Native `ColorImageConverter` for multi-color images (stacked/cutout modes)
+  - `BinaryImageConverter` for B&W line art
+  - Spline curve fitting with polygon fallback
+  - Configurable presets: B&W, Pictogram, Poster, Photo
+  - Desynchronized UI: parameter adjustment without auto-retrace
 - **Output**: Raw SVG with unstructured paths
 
 ##### Step 5b: Format (Semantic Structuring)
@@ -881,33 +882,36 @@ The ICAP-50 corpus contains 50 communicative intent phrases loaded dynamically f
 
 ### 8.2 VTracer Service (vtracerService.ts)
 
-**Purpose**: Bitmap to vector conversion using WebAssembly
+**Purpose**: Bitmap to vector conversion using the official vtracer-webapp WASM (visioncortex)
+
+**Architecture**: The WASM is DOM-coupled -- it reads pixels from a `<canvas>` element and writes `<path>` elements to an `<svg>` element, both referenced by ID. The WASM binary loads lazily on first use from `public/wasm/vtracer/`.
 
 **Key Functions:**
 
-#### vectorizeBitmap(base64Png: string, config?: VectorizerConfig): Promise
+#### vectorizeBitmap(base64, config?, onProgress?): Promise<VectorizerResult>
 
-**Purpose**: Convert bitmap image to SVG paths
+One-shot API: creates hidden DOM elements, runs conversion, returns SVG string. Used for programmatic vectorization.
 
-**Input**: Base64 PNG image (with or without data URL prefix)
+#### traceInteractive(canvasId, svgId, config, onProgress?): Promise
 
-**Processing**:
+Interactive API for VectorizerModal: uses visible DOM elements for progressive rendering (paths appear as WASM processes).
 
-- Convert Base64 to ImageData using canvas
-- Initialize BinaryImageConverter (WASM)
-- Process with spline curve fitting (default) or polygon fallback
-- Progress tracking via callbacks
-- Automatic retry with polygon mode if spline fails
+#### drawBitmapToCanvas(base64, canvasId): Promise<{width, height}>
 
-**Output**: Raw SVG string with vectorized paths
+Draws a base64 image onto a canvas element, applying automatic downscaling for images >1024px.
 
-**Configuration Options**:
+**Configuration (VectorizerConfig)**:
 
-- `mode`: 'spline' (smooth curves) or 'polygon' (sharp corners)
-- `filterSpeckle`: Remove noise smaller than N pixels (default: 4)
-- `cornerThreshold`: Minimum angle to detect corners (default: 60°)
-- `lengthThreshold`: Minimum segment length (default: 4.0)
-- `pathPrecision`: Decimal places for coordinates (default: 3)
+- `mode`: 'spline' | 'polygon' | 'none' (default: 'spline')
+- `colorMode`: 'color' | 'bw' (default: 'color')
+- `hierarchical`: 'stacked' | 'cutout' (default: 'stacked', color mode only)
+- `colorPrecision`: 1-8, significant bits per RGB channel (default: 6)
+- `layerDifference`: 0-255, min color distance between layers (default: 16)
+- `filterSpeckle`: 0-16, noise removal threshold (default: 4)
+- `cornerThreshold`: 0-180 degrees (default: 60)
+- `pathPrecision`: 1-8, decimal places for coordinates (default: 8)
+
+**Presets**: B&W, Pictogram, Poster, Photo
 
 ### 8.3 SVG Structure Service (svgStructureService.ts)
 

@@ -1,8 +1,6 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import wasm from 'vite-plugin-wasm';
-import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
@@ -15,8 +13,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
-      wasm(),
-      topLevelAwait()
     ],
     // SECURITY WARNING: These API keys are being exposed to client-side code
     // and will be visible in the browser. For production environments,
@@ -33,9 +29,8 @@ export default defineConfig(({ mode }) => {
         '@schema': path.resolve(__dirname, './lib/mf-schema')
       }
     },
-    // Exclude vector tracer from optimizations if needed, though plugins should handle it
     optimizeDeps: {
-      exclude: ['vectortracer']
+      exclude: []
     }
   };
 });
