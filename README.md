@@ -26,7 +26,7 @@ El sistema implementa un pipeline de tres fases automáticas más dos de post-pr
 
 **③ Producir** (Gemini Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. Resultado: bitmap JPEG 800×800.
 
-**④ Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante trazado binario por capas de color. Proceso local, sin API. Resultado: SVG crudo sin semántica.
+**④ Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante clustering jerarquico de color (ColorImageConverter nativo de visioncortex). Proceso local, sin API. Resultado: SVG crudo sin semantica.
 
 **⑤ Estructurar** (Gemini 3 Pro, multimodal) — Reorganiza los paths del SVG crudo en grupos semánticos según la jerarquía de elementos, embebiendo metadatos de accesibilidad según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema).
 
