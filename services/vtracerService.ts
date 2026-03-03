@@ -185,8 +185,11 @@ async function runConversion(
     svgId: string,
     config: Required<VectorizerConfig>,
     onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
 ): Promise<ConversionResult> {
     await ensureWasm();
+
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     const params = buildWasmParams(canvasId, svgId, config);
     const isBw = config.colorMode === 'bw';
@@ -201,6 +204,12 @@ async function runConversion(
         const warnings: string[] = [];
 
         function tick() {
+            // Check abort before each tick batch
+            if (signal?.aborted) {
+                try { converter.free(); } catch { /* ignore */ }
+                reject(new DOMException('Aborted', 'AbortError'));
+                return;
+            }
             try {
                 let done = false;
                 const startTick = performance.now();
@@ -241,9 +250,10 @@ export async function traceInteractive(
     svgId: string,
     config: Partial<VectorizerConfig>,
     onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
 ): Promise<ConversionResult> {
     const finalConfig = { ...DEFAULT_CONFIG, ...config } as Required<VectorizerConfig>;
-    return runConversion(canvasId, svgId, finalConfig, onProgress);
+    return runConversion(canvasId, svgId, finalConfig, onProgress, signal);
 }
 
 // ---------------------------------------------------------------------------

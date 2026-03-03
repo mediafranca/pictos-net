@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
-import { Trash2, Check, RotateCcw, X, Plus } from 'lucide-react';
+import { Trash2, Check, RotateCcw, X, Plus, Ungroup, AlertTriangle, Sparkles } from 'lucide-react';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { StylePickerModal } from './StylePickerModal';
@@ -209,9 +209,191 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
     );
 };
 
+// ── InlineAttrsPanel — displays presentation attrs for raw SVG elements ──────
+const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
+    const { t } = useTranslation();
+    const { svgDocument, updateElementAttributes, stripInlineStyles } = useSVGEditorStore();
+    const [confirming, setConfirming] = useState(false);
+
+    if (!svgDocument) return null;
+
+    const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+    const el = doc.getElementById(elementId);
+    if (!el) return null;
+
+    const fill = el.getAttribute('fill');
+    const stroke = el.getAttribute('stroke');
+    const opacity = el.getAttribute('opacity');
+    const strokeWidth = el.getAttribute('stroke-width');
+
+    const attrs = [
+        fill && { label: t('svgEditor.inlineFill'), prop: 'fill', value: fill },
+        stroke && { label: t('svgEditor.inlineStroke'), prop: 'stroke', value: stroke },
+        strokeWidth && { label: t('svgEditor.strokeWidth'), prop: 'stroke-width', value: strokeWidth },
+        opacity && { label: t('svgEditor.inlineOpacity'), prop: 'opacity', value: opacity },
+    ].filter(Boolean) as { label: string; prop: string; value: string }[];
+
+    if (attrs.length === 0) return null;
+
+    return (
+        <div className="px-4 py-3 space-y-2">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                {t('svgEditor.presentationAttrs')}
+            </label>
+            <div className="space-y-1.5">
+                {attrs.map(a => (
+                    <PropertyRow
+                        key={a.prop}
+                        label={a.label}
+                        property={a.prop}
+                        value={a.value}
+                        onChange={(prop, val) => updateElementAttributes(elementId, { [prop]: val })}
+                    />
+                ))}
+            </div>
+            {confirming ? (
+                <div className="space-y-2 mt-2">
+                    <p className="text-[10px] text-amber-600 flex items-start gap-1">
+                        <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                        {t('svgEditor.removeInlineStylesWarning')}
+                    </p>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setConfirming(false)}
+                            className="flex-1 py-1 text-[10px] border border-slate-200 rounded hover:bg-slate-100 transition-colors"
+                        >
+                            {t('actions.cancel')}
+                        </button>
+                        <button
+                            onClick={() => { stripInlineStyles(elementId); setConfirming(false); }}
+                            className="flex-1 py-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
+                        >
+                            {t('svgEditor.removeInlineStyles')}
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <button
+                    onClick={() => setConfirming(true)}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
+                >
+                    {t('svgEditor.removeInlineStyles')}
+                </button>
+            )}
+        </div>
+    );
+};
+
+// ── GroupPanel — actions for <g> elements ─────────────────────────────────────
+const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> = ({ elementId, styleDefs }) => {
+    const { t } = useTranslation();
+    const { ungroupElement, addClassToElement, stripInlineStyles, svgDocument } = useSVGEditorStore();
+    const [showClassPicker, setShowClassPicker] = useState(false);
+    const [confirmStrip, setConfirmStrip] = useState(false);
+
+    const availableClasses: string[] = Array.from(
+        new Set<string>(
+            styleDefs.flatMap(s =>
+                s.selectors
+                    .filter(sel => sel.startsWith('.'))
+                    .map(sel => sel.slice(1))
+            )
+        )
+    );
+
+    // Check if element is a <g>
+    if (!svgDocument) return null;
+    const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+    const el = doc.getElementById(elementId);
+    if (!el || el.tagName.toLowerCase() !== 'g') return null;
+
+    return (
+        <div className="px-4 py-3 space-y-2 border-b border-slate-100">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                {t('svgEditor.groupName')}
+            </label>
+
+            {/* Apply class */}
+            <div className="relative">
+                <button
+                    onClick={() => setShowClassPicker(!showClassPicker)}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+                >
+                    <Plus size={10} />
+                    {t('svgEditor.applyClass')}
+                </button>
+                {showClassPicker && availableClasses.length > 0 && (
+                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg py-1 max-h-40 overflow-y-auto z-10">
+                        {availableClasses.map(cls => (
+                            <button
+                                key={cls}
+                                onClick={() => { addClassToElement(elementId, cls); setShowClassPicker(false); }}
+                                className="w-full text-left px-3 py-1.5 text-[10px] font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
+                            >
+                                .{cls}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Strip inline styles with warning */}
+            {confirmStrip ? (
+                <div className="space-y-2">
+                    <p className="text-[10px] text-amber-600 flex items-start gap-1">
+                        <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                        {t('svgEditor.removeInlineStylesWarning')}
+                    </p>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setConfirmStrip(false)}
+                            className="flex-1 py-1 text-[10px] border border-slate-200 rounded hover:bg-slate-100 transition-colors"
+                        >
+                            {t('actions.cancel')}
+                        </button>
+                        <button
+                            onClick={() => { stripInlineStyles(elementId); setConfirmStrip(false); }}
+                            className="flex-1 py-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
+                        >
+                            {t('svgEditor.removeInlineStyles')}
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <button
+                    onClick={() => setConfirmStrip(true)}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
+                >
+                    {t('svgEditor.removeInlineStyles')}
+                </button>
+            )}
+
+            {/* Animation placeholder */}
+            <button
+                disabled
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-400 border border-slate-200 rounded cursor-not-allowed opacity-50"
+                title={t('svgEditor.animationComingSoon')}
+            >
+                <Sparkles size={10} />
+                {t('svgEditor.animationComingSoon')}
+            </button>
+
+            {/* Ungroup */}
+            <button
+                onClick={() => ungroupElement(elementId)}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-600 hover:bg-slate-100 border border-slate-200 rounded transition-colors"
+            >
+                <Ungroup size={12} />
+                {t('svgEditor.ungroup')}
+            </button>
+        </div>
+    );
+};
+
 // ── StylePanel ────────────────────────────────────────────────────────────────
 interface StylePanelProps {
     styleDefs?: StyleDefinition[];
+    svgSource?: 'raw' | 'structured' | null;
 }
 
 /**
@@ -224,7 +406,7 @@ interface StylePanelProps {
  *   - Level 2 (local overrides): CitedClassEditor rows below
  * @see CSS_STYLING_ARCHITECTURE.md
  */
-export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
+export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSource = null }) => {
     const { t } = useTranslation();
     const {
         selectedElementId,
@@ -239,6 +421,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
 
     const [currentClasses, setCurrentClasses] = useState<string[]>([]);
     const [isPickerOpen, setIsPickerOpen] = useState(false);
+    const isRaw = svgSource === 'raw';
 
     // Sync currentClasses from svgDocument whenever element or document changes
     useEffect(() => {
@@ -280,11 +463,17 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
 
             <div className="flex-1 overflow-y-auto">
 
+                {/* Group-specific panel */}
+                <GroupPanel elementId={selectedElementId} styleDefs={styleDefs} />
+
+                {/* Inline presentation attributes (shown for raw SVGs or when attrs exist) */}
+                <InlineAttrsPanel elementId={selectedElementId} />
+
                 {/* ── Cited classes with local override editors ── */}
                 <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
                     <div className="flex items-center justify-between">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            {t('svgEditor.localOverride')}
+                            {isRaw ? t('svgEditor.applyClass') : t('svgEditor.localOverride')}
                         </label>
                         <button
                             onClick={() => setIsPickerOpen(true)}
@@ -322,8 +511,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [] }) => {
                     )}
                 </div>
 
-                {/* From-inline rules (not linked to a library class) */}
-                {(() => {
+                {/* From-inline rules (not linked to a library class) — only for structured */}
+                {!isRaw && (() => {
                     const fromInline = overrideMap.get(selectedElementId)?.get('from-inline');
                     if (!fromInline || Object.keys(fromInline).length === 0) return null;
                     return (

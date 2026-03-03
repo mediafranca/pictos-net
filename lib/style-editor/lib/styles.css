@@ -1,6 +1,10 @@
 /**
  * Style Editor - Global CSS
  * Este archivo contiene las animaciones y estilos base necesarios para los pictogramas SVG
+ *
+ * IMPORTANT: All keyframes use individual CSS transform properties (translate, rotate, scale)
+ * instead of the `transform` shorthand. This prevents animations from overriding the SVG
+ * `transform` attribute that positions elements within the pictogram.
  */
 
 /* Animaciones para accesibilidad cognitiva */
@@ -15,96 +19,96 @@
 
 @keyframes kf-beat {
   0%, 100% {
-    transform: scale(1);
+    scale: 1;
   }
   50% {
-    transform: scale(var(--kf-beat-scale, 1.15));
+    scale: var(--kf-beat-scale, 1.15);
   }
 }
 
 @keyframes kf-swing {
   20% {
-    transform: rotate(calc(var(--kf-swing-angle, 15) * 1deg));
+    rotate: calc(var(--kf-swing-angle, 15) * 1deg);
   }
   40% {
-    transform: rotate(calc(var(--kf-swing-angle, 15) * -0.667deg));
+    rotate: calc(var(--kf-swing-angle, 15) * -0.667deg);
   }
   60% {
-    transform: rotate(calc(var(--kf-swing-angle, 15) * 0.333deg));
+    rotate: calc(var(--kf-swing-angle, 15) * 0.333deg);
   }
   80% {
-    transform: rotate(calc(var(--kf-swing-angle, 15) * -0.333deg));
+    rotate: calc(var(--kf-swing-angle, 15) * -0.333deg);
   }
   100% {
-    transform: rotate(0deg);
+    rotate: 0deg;
   }
 }
 
 @keyframes kf-slide-r {
   0%, 100% {
-    transform: translateX(0);
+    translate: 0 0;
   }
   50% {
-    transform: translateX(calc(var(--kf-slide-r-dist, 15) * 1px));
+    translate: calc(var(--kf-slide-r-dist, 15) * 1px) 0;
   }
 }
 
 @keyframes kf-slide-u {
   0%, 100% {
-    transform: translateY(0);
+    translate: 0 0;
   }
   50% {
-    transform: translateY(calc(var(--kf-slide-u-dist, 15) * -1px));
+    translate: 0 calc(var(--kf-slide-u-dist, 15) * -1px);
   }
 }
 
 /* Rotations */
 @keyframes kf-spin-cw {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% { rotate: 0deg; }
+  100% { rotate: 360deg; }
 }
 
 @keyframes kf-spin-ccw {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(-360deg); }
+  0% { rotate: 0deg; }
+  100% { rotate: -360deg; }
 }
 
 @keyframes kf-rock {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(calc(var(--kf-rock-angle, 25) * 1deg)); }
-  75% { transform: rotate(calc(var(--kf-rock-angle, 25) * -1deg)); }
+  0%, 100% { rotate: 0deg; }
+  25% { rotate: calc(var(--kf-rock-angle, 25) * 1deg); }
+  75% { rotate: calc(var(--kf-rock-angle, 25) * -1deg); }
 }
 
 /* Directional gestures */
 @keyframes kf-gesture-r {
-  0% { transform: translateX(0); opacity: 1; }
-  60% { transform: translateX(calc(var(--kf-gesture-r-dist, 30) * 1px)); opacity: 1; }
-  100% { transform: translateX(calc(var(--kf-gesture-r-dist, 30) * 1.667px)); opacity: 0; }
+  0% { translate: 0 0; opacity: 1; }
+  60% { translate: calc(var(--kf-gesture-r-dist, 30) * 1px) 0; opacity: 1; }
+  100% { translate: calc(var(--kf-gesture-r-dist, 30) * 1.667px) 0; opacity: 0; }
 }
 
 @keyframes kf-gesture-l {
-  0% { transform: translateX(0); opacity: 1; }
-  60% { transform: translateX(calc(var(--kf-gesture-l-dist, 30) * -1px)); opacity: 1; }
-  100% { transform: translateX(calc(var(--kf-gesture-l-dist, 30) * -1.667px)); opacity: 0; }
+  0% { translate: 0 0; opacity: 1; }
+  60% { translate: calc(var(--kf-gesture-l-dist, 30) * -1px) 0; opacity: 1; }
+  100% { translate: calc(var(--kf-gesture-l-dist, 30) * -1.667px) 0; opacity: 0; }
 }
 
 @keyframes kf-gesture-d {
-  0% { transform: translateY(0); opacity: 1; }
-  50% { transform: translateY(calc(var(--kf-gesture-d-dist, 25) * 1px)); opacity: 1; }
-  100% { transform: translateY(calc(var(--kf-gesture-d-dist, 25) * 1.8px)); opacity: 0; }
+  0% { translate: 0 0; opacity: 1; }
+  50% { translate: 0 calc(var(--kf-gesture-d-dist, 25) * 1px); opacity: 1; }
+  100% { translate: 0 calc(var(--kf-gesture-d-dist, 25) * 1.8px); opacity: 0; }
 }
 
 /* Scale & presence */
 @keyframes kf-inflate-rise {
-  0% { transform: scale(1) translateY(0); }
-  50% { transform: scale(var(--kf-inflate-scale, 1.3)) translateY(calc(var(--kf-inflate-rise, 15) * -1px)); }
-  100% { transform: scale(1) translateY(0); }
+  0% { scale: 1; translate: 0 0; }
+  50% { scale: var(--kf-inflate-scale, 1.3); translate: 0 calc(var(--kf-inflate-rise, 15) * -1px); }
+  100% { scale: 1; translate: 0 0; }
 }
 
 @keyframes kf-pop-in {
-  0% { transform: scale(0); opacity: 0; }
-  70% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
+  0% { scale: 0; opacity: 0; }
+  70% { scale: 1.15; opacity: 1; }
+  100% { scale: 1; opacity: 1; }
 }
 
 @keyframes kf-pulse {
@@ -114,46 +118,46 @@
 
 /* Agitation & emphasis */
 @keyframes kf-shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(calc(var(--kf-shake-amp, 8) * -1px)); }
-  40% { transform: translateX(calc(var(--kf-shake-amp, 8) * 1px)); }
-  60% { transform: translateX(calc(var(--kf-shake-amp, 8) * -0.75px)); }
-  80% { transform: translateX(calc(var(--kf-shake-amp, 8) * 0.625px)); }
+  0%, 100% { translate: 0 0; }
+  20% { translate: calc(var(--kf-shake-amp, 8) * -1px) 0; }
+  40% { translate: calc(var(--kf-shake-amp, 8) * 1px) 0; }
+  60% { translate: calc(var(--kf-shake-amp, 8) * -0.75px) 0; }
+  80% { translate: calc(var(--kf-shake-amp, 8) * 0.625px) 0; }
 }
 
 @keyframes kf-tremble {
-  0% { transform: translate(0, 0); }
-  25% { transform: translate(calc(var(--kf-tremble-amp, 3) * -1px), calc(var(--kf-tremble-amp, 3) * 0.667px)); }
-  50% { transform: translate(calc(var(--kf-tremble-amp, 3) * 1px), calc(var(--kf-tremble-amp, 3) * -0.667px)); }
-  75% { transform: translate(calc(var(--kf-tremble-amp, 3) * -0.667px), calc(var(--kf-tremble-amp, 3) * -1px)); }
-  100% { transform: translate(calc(var(--kf-tremble-amp, 3) * 0.667px), calc(var(--kf-tremble-amp, 3) * 1px)); }
+  0% { translate: 0 0; }
+  25% { translate: calc(var(--kf-tremble-amp, 3) * -1px) calc(var(--kf-tremble-amp, 3) * 0.667px); }
+  50% { translate: calc(var(--kf-tremble-amp, 3) * 1px) calc(var(--kf-tremble-amp, 3) * -0.667px); }
+  75% { translate: calc(var(--kf-tremble-amp, 3) * -0.667px) calc(var(--kf-tremble-amp, 3) * -1px); }
+  100% { translate: calc(var(--kf-tremble-amp, 3) * 0.667px) calc(var(--kf-tremble-amp, 3) * 1px); }
 }
 
 @keyframes kf-bounce {
-  0%, 100% { transform: translateY(0) scaleY(1); }
-  30% { transform: translateY(calc(var(--kf-bounce-h, 25) * -1px)) scaleY(1.08); }
-  50% { transform: translateY(0) scaleY(0.92); }
-  65% { transform: translateY(calc(var(--kf-bounce-h, 25) * -0.4px)) scaleY(1.04); }
-  80% { transform: translateY(0) scaleY(0.97); }
+  0%, 100% { translate: 0 0; scale: 1 1; }
+  30% { translate: 0 calc(var(--kf-bounce-h, 25) * -1px); scale: 1 1.08; }
+  50% { translate: 0 0; scale: 1 0.92; }
+  65% { translate: 0 calc(var(--kf-bounce-h, 25) * -0.4px); scale: 1 1.04; }
+  80% { translate: 0 0; scale: 1 0.97; }
 }
 
 @keyframes kf-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(calc(var(--kf-float-h, 14) * -1px)); }
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 calc(var(--kf-float-h, 14) * -1px); }
 }
 
 /* Communicative gestures */
 @keyframes kf-nod-yes {
-  0%, 100% { transform: translateY(0); }
-  25% { transform: translateY(calc(var(--kf-nod-yes-d, 8) * 1px)); }
-  55% { transform: translateY(calc(var(--kf-nod-yes-d, 8) * 1px)); }
-  80% { transform: translateY(0); }
+  0%, 100% { translate: 0 0; }
+  25% { translate: 0 calc(var(--kf-nod-yes-d, 8) * 1px); }
+  55% { translate: 0 calc(var(--kf-nod-yes-d, 8) * 1px); }
+  80% { translate: 0 0; }
 }
 
 @keyframes kf-nod-no {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(calc(var(--kf-nod-no-d, 8) * -1px)); }
-  75% { transform: translateX(calc(var(--kf-nod-no-d, 8) * 1px)); }
+  0%, 100% { translate: 0 0; }
+  25% { translate: calc(var(--kf-nod-no-d, 8) * -1px) 0; }
+  75% { translate: calc(var(--kf-nod-no-d, 8) * 1px) 0; }
 }
 
 /* Transitions */
