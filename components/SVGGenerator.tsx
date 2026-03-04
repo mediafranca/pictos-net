@@ -334,9 +334,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             <div className="flex flex-col h-full">
                 <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/svg-preview">
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-xs px-2 py-1 rounded pointer-events-none z-10 font-medium">
+                    {/* <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-xs px-2 py-1 rounded pointer-events-none z-10 font-medium">
                         Click parts to cycle through styles
-                    </div>
+                    </div> */}
                     <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.structureLabel')}
                     </div>
@@ -383,9 +383,11 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     )}
 
-                    {/* Re-trace: open vectorizer and clear local raw SVG state */}
+                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace */}
                     <button
                         onClick={() => {
+                            removeSVGByRowId(row.id);
+                            onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
                             onOpenVectorizer?.();
                         }}

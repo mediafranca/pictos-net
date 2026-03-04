@@ -223,20 +223,20 @@ const App: React.FC = () => {
   const [loadingLibraryName, setLoadingLibraryName] = useState('');
   const [svgEditorState, setSvgEditorState] = useState<{
     isOpen: boolean;
-    rowIndex: number | null;
+    rowId: string | null;
     svg: string | null;
     svgSource: 'raw' | 'structured' | null;
   }>({
     isOpen: false,
-    rowIndex: null,
+    rowId: null,
     svg: null,
     svgSource: null,
   });
 
   const [vectorizerState, setVectorizerState] = useState<{
     isOpen: boolean;
-    rowIndex: number | null;
-  }>({ isOpen: false, rowIndex: null });
+    rowId: string | null;
+  }>({ isOpen: false, rowId: null });
 
   const closeConfirmDialog = useCallback(() => setConfirmDialog(prev => ({ ...prev, isOpen: false })), []);
   const { dialogProps: confirmDialogProps } = useDialogA11y({ isOpen: confirmDialog.isOpen, onClose: closeConfirmDialog, label: confirmDialog.title || 'Confirm' });
@@ -634,6 +634,12 @@ const App: React.FC = () => {
     });
   };
 
+  // ID-based update: immune to array index shifts and stale closures.
+  // Use this for callbacks passed to components with async operations.
+  const updateRowById = (id: string, updates: Partial<RowData>) => {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  };
+
   const regeneratePrompt = async (index: number): Promise<boolean> => {
     const row = rows[index];
     if (!row || !row.NLU || !row.elements) {
@@ -897,8 +903,9 @@ const App: React.FC = () => {
     }
   };
 
-  const openSVGEditor = (index: number) => {
-    const row = rows[index];
+  const openSVGEditor = (rowId: string) => {
+    const row = rows.find(r => r.id === rowId);
+    if (!row) return;
     const svgToEdit = row.structuredSvg || row.rawSvg;
     const source = row.structuredSvg ? 'structured' : 'raw';
 
@@ -909,7 +916,7 @@ const App: React.FC = () => {
 
     setSvgEditorState({
       isOpen: true,
-      rowIndex: index,
+      rowId: rowId,
       svg: svgToEdit,
       svgSource: source,
     });
@@ -917,7 +924,7 @@ const App: React.FC = () => {
   };
 
   const handleSVGEditorSave = (updatedSvg: string) => {
-    if (svgEditorState.rowIndex === null) return;
+    if (!svgEditorState.rowId) return;
     const source = svgEditorState.svgSource;
 
     // Write only to the origin field — do not promote rawSvg to structuredSvg
@@ -925,11 +932,11 @@ const App: React.FC = () => {
       ? { structuredSvg: updatedSvg }
       : { rawSvg: updatedSvg };
 
-    updateRow(svgEditorState.rowIndex, update);
+    updateRowById(svgEditorState.rowId, update);
 
     // Only update the SVG Library for structured SVGs (the "official" pictogram)
     if (source === 'structured') {
-      const savedRow = rows[svgEditorState.rowIndex];
+      const savedRow = rows.find(r => r.id === svgEditorState.rowId);
       if (savedRow) {
         addSVG({
           id: savedRow.id,
@@ -944,18 +951,19 @@ const App: React.FC = () => {
       }
     }
 
-    addLog('success', `SVG actualizado correctamente para: ${rows[svgEditorState.rowIndex]?.UTTERANCE}`);
-    setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null });
+    const savedRow = rows.find(r => r.id === svgEditorState.rowId);
+    addLog('success', `SVG actualizado correctamente para: ${savedRow?.UTTERANCE}`);
+    setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
   };
 
   const handleVectorizerApply = (result: VectorizerResult) => {
-    if (vectorizerState.rowIndex === null) return;
-    updateRow(vectorizerState.rowIndex, { rawSvg: result.svg });
+    if (!vectorizerState.rowId) return;
+    updateRowById(vectorizerState.rowId, { rawSvg: result.svg });
     addLog('success', `Vectorizado: ${result.layersTraced}/${result.layersTotal} capas (tier ${result.tiersUsed})`);
     if (result.warnings.length > 0) {
       result.warnings.forEach(w => addLog('info', w));
     }
-    setVectorizerState({ isOpen: false, rowIndex: null });
+    setVectorizerState({ isOpen: false, rowId: null });
   };
 
   const filteredRows = useMemo(() => {
@@ -1368,7 +1376,7 @@ const App: React.FC = () => {
               return (
                 <RowComponent
                   key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { setOpenRowId(v ? row.id : null); if (v) setShowConfig(false); }}
-                  onUpdate={u => updateRow(globalIndex, u)} onProcess={s => processStep(globalIndex, s)}
+                  onUpdate={u => updateRowById(row.id, u)} onProcess={s => processStep(globalIndex, s)}
                   onRegeneratePrompt={() => regeneratePrompt(globalIndex)}
                   onStop={() => {
                     stopFlags.current[row.id] = true;
@@ -1395,8 +1403,8 @@ const App: React.FC = () => {
                   onLog={addLog}
                   config={config}
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
-                  onOpenEditor={() => openSVGEditor(globalIndex)}
-                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: globalIndex })}
+                  onOpenEditor={() => openSVGEditor(row.id)}
+                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                 />
               );
             })}
@@ -1425,14 +1433,14 @@ const App: React.FC = () => {
           mode={focusMode.step}
           row={focusedRowData}
           onClose={() => setFocusMode(null)}
-          onUpdate={updates => updateRow(rows.findIndex(r => r.id === focusMode.rowId), updates)}
+          onUpdate={updates => updateRowById(focusMode.rowId, updates)}
           onShare={() => sharePictogram(rows.findIndex(r => r.id === focusMode.rowId))}
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
           onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
-          onOpenEditor={() => openSVGEditor(rows.findIndex(r => r.id === focusMode!.rowId))}
-          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowIndex: rows.findIndex(r => r.id === focusMode!.rowId) })}
+          onOpenEditor={() => openSVGEditor(focusMode!.rowId)}
+          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
         />
       )}
@@ -1446,12 +1454,12 @@ const App: React.FC = () => {
       )}
 
       {/* SVG Editor Modal */}
-      {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowIndex !== null && (
+      {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowId !== null && (
         <SVGEditorModal
           isOpen={svgEditorState.isOpen}
-          onClose={() => setSvgEditorState({ isOpen: false, rowIndex: null, svg: null, svgSource: null })}
+          onClose={() => setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null })}
           initialSvg={svgEditorState.svg}
-          utterance={rows[svgEditorState.rowIndex]?.UTTERANCE || ''}
+          utterance={rows.find(r => r.id === svgEditorState.rowId)?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
           styleDefs={config.svgStyleDefs ?? []}
           svgSource={svgEditorState.svgSource}
@@ -1459,15 +1467,18 @@ const App: React.FC = () => {
       )}
 
       {/* Vectorizer Modal */}
-      {vectorizerState.isOpen && vectorizerState.rowIndex !== null && (
-        <VectorizerModal
-          isOpen={vectorizerState.isOpen}
-          bitmap={rows[vectorizerState.rowIndex]?.bitmap || ''}
-          utterance={rows[vectorizerState.rowIndex]?.UTTERANCE || ''}
-          onClose={() => setVectorizerState({ isOpen: false, rowIndex: null })}
-          onApply={handleVectorizerApply}
-        />
-      )}
+      {vectorizerState.isOpen && vectorizerState.rowId && (() => {
+        const vRow = rows.find(r => r.id === vectorizerState.rowId);
+        return vRow ? (
+          <VectorizerModal
+            isOpen={vectorizerState.isOpen}
+            bitmap={vRow.bitmap || ''}
+            utterance={vRow.UTTERANCE || ''}
+            onClose={() => setVectorizerState({ isOpen: false, rowId: null })}
+            onApply={handleVectorizerApply}
+          />
+        ) : null;
+      })()}
 
       {/* Confirmation Dialog Modal */}
       {confirmDialog.isOpen && (
@@ -1684,7 +1695,7 @@ const RowComponent: React.FC<{
             </button>
           )}
         </div>
-        <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className={`text-slate-300 transition-transform duration-500 cursor-pointer ${isOpen ? 'rotate-180 text-violet-950' : ''}`} />
+        <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className={`text-slate-500 transition-transform duration-500 cursor-pointer ${isOpen ? 'rotate-180 text-violet-950' : ''}`} />
       </div>
 
       {isOpen && (
@@ -1797,11 +1808,11 @@ const RowComponent: React.FC<{
               <div className="flex flex-col h-full gap-4">
                 <div
                   id="bitmap-preview"
-                  className="relative flex-1 border border-slate-200 flex items-center justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px] bg-neutral-200"
+                  className="relative border border-slate-200 flex items-start justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px]"
                 >
                   {row.bitmap ? (
                     <>
-                      <img src={row.bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
+                      <img src={row.bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
                       <button
                         onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
                         className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
@@ -2538,18 +2549,18 @@ const FocusViewModal: React.FC<{
       case 'eval':
         return (
           <div className="flex h-full bg-slate-50 gap-0">
-            {/* Left: Bitmap */}
-            <div className="w-1/2 bg-white border-r border-slate-200 flex items-center justify-center p-8 relative">
+            {/* Left: Bitmap (top-aligned, compact) */}
+            <div className="w-5/12 bg-white border-r border-slate-200 flex items-start justify-center p-8 relative">
               <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
               {row.bitmap ? (
                 <img src={row.bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain shadow-lg" />
               ) : (
-                <div className="text-slate-300 font-mono text-xs">{t('editor.noBitmapReference')}</div>
+                <div className="text-slate-500 font-mono text-xs">{t('editor.noBitmapReference')}</div>
               )}
             </div>
 
-            {/* Right: SVG Generator + Share */}
-            <div className="w-1/2 p-6 bg-slate-50 flex flex-col">
+            {/* Right: SVG Generator + Share (stretches to fill) */}
+            <div className="w-7/12 p-6 bg-slate-50 flex flex-col">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
                 {(() => {
@@ -2605,7 +2616,7 @@ const FocusViewModal: React.FC<{
           <button onClick={goToNext} className={`p-2 hover:bg-slate-100 transition-opacity ${hasNext ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Next step">
             <ChevronRight size={18} />
           </button>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 ml-1"><X size={18} /></button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 ml-1" aria-label={t('actions.close')}><X size={18} aria-hidden="true" /></button>
         </header>
         <main className="flex-1 p-6 overflow-auto bg-slate-50">{renderContent()}</main>
         <footer className="p-4 border-t bg-white flex justify-between gap-3">

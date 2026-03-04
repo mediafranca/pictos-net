@@ -1,141 +1,132 @@
-# WCAG Compliance Roadmap
+# Conformidad WCAG 2.1 AA
 
-## Estado Actual
+PICTOS.NET es una herramienta para profesionales de accesibilidad cognitiva que crean pictogramas para jovenes autistas. Es contradictorio que la propia herramienta no cumpla con estandares de accesibilidad web. Este documento registra el estado de conformidad WCAG 2.1 nivel AA.
 
-PICTOS.NET es una herramienta para profesionales de accesibilidad cognitiva que crean pictogramas para jovenes autistas. Es contradictorio que la propia herramienta no cumpla con estandares de accesibilidad web. Este documento establece la hoja de ruta para alcanzar conformidad WCAG 2.1 nivel AA.
+## Estado general
 
-### Problemas identificados
+Todas las prioridades criticas (P1) y estructurales (P2) estan implementadas. Quedan items de experiencia avanzada (P3) parcialmente implementados.
 
-- Contraste de texto insuficiente en labels y texto secundario
-- Tamanos de fuente fijos sub-12px que no escalan con preferencias del usuario
-- Animaciones sin respetar `prefers-reduced-motion`
-- Botones de solo icono sin labels accesibles para screen readers
-- Iconos decorativos que generan lectura duplicada en screen readers
-- Falta de landmarks y estructura semantica en algunos paneles
-- Sin soporte de navegacion por teclado en areas interactivas complejas
-
-## Objetivo
-
-Conformidad WCAG 2.1 nivel AA en todas las interfaces de usuario.
-
-## Prioridad 1: Fundamentos (critico)
-
-Fixes que afectan a todos los usuarios y son requisito minimo de accesibilidad.
+## P1: Fundamentos (implementado)
 
 ### 1.1 `prefers-reduced-motion` (WCAG 2.3.3)
 
-- Desactivar animaciones CSS cuando el usuario tiene activada la preferencia de movimiento reducido
-- Minimizar duracion de transiciones a valores imperceptibles
-- Afecta: `animate-spectral`, `animate-pulse`, `animate-spin`, todas las transiciones
+Implementado en `index.html` via media query `@media (prefers-reduced-motion: reduce)`:
+
+- Desactiva `.animate-spectral`, `.animate-pulse`, `.animate-spin`
+- Reduce transiciones a `0.01ms`
+- Clase `.reduce-motion` como toggle a nivel de aplicacion
 
 ### 1.2 Contraste minimo de texto (WCAG 1.4.3)
 
-- Ratio minimo 4.5:1 para texto normal, 3:1 para texto grande (18px+ o 14px bold)
-- Reemplazar `text-slate-300` y `text-slate-400` por `text-slate-500` (#64748b)
+- `text-slate-300` y `text-slate-400` reemplazados por `text-slate-500` (#64748b) en fondos claros
 - `slate-500` sobre blanco = ~4.6:1 (cumple AA)
-- `slate-500` sobre slate-50 = ~4.5:1 (cumple AA limite)
+- Instancias sobre fondos oscuros (`bg-slate-800`) conservan `text-slate-300/400` porque el contraste ya supera 4.5:1
+- Modo alto contraste definido en `index.html` con overrides forzados
 
 ### 1.3 Tamanos de texto escalables (WCAG 1.4.4)
 
-- Eliminar tamanos fijos en pixeles menores a 12px
-- Usar unidades relativas (rem) para que el texto escale con las preferencias del navegador
-- Tamano minimo efectivo: 12px (0.75rem / `text-xs` en Tailwind)
+- Todos los tamanos usan unidades relativas de Tailwind (`text-xs` = 0.75rem, `text-sm` = 0.875rem)
+- Ningun tamano fijo en pixeles menor a 12px
+- Texto escala con preferencias del navegador
 
 ### 1.4 Labels accesibles en botones de icono (WCAG 1.1.1, 4.1.2)
 
-- Todo boton interactivo debe tener un nombre accesible
-- Agregar `aria-label` a botones que contienen solo iconos
-- Mantener `title` para tooltip visual
+- Todos los botones de solo icono tienen `aria-label`
+- `title` mantenido para tooltip visual donde corresponde
 
 ### 1.5 Iconos decorativos ocultos (WCAG 1.1.1)
 
-- Agregar `aria-hidden="true"` a iconos que acompanan texto
-- Evita lectura duplicada en screen readers (ej: "download icon download")
+- `aria-hidden="true"` en todos los iconos que acompanan texto
+- Evita lectura duplicada en screen readers
 
-### Checklist de verificacion
+### Verificacion P1
 
-- [ ] `prefers-reduced-motion: reduce` desactiva todas las animaciones
-- [ ] Transiciones reducidas a 0.01ms con motion reduce
-- [ ] Ningun texto tiene contraste menor a 4.5:1 sobre su fondo
-- [ ] No existen tamanos de fuente fijos menores a 12px
-- [ ] Todos los tamanos de fuente usan unidades rem
-- [ ] Todos los botones de solo icono tienen `aria-label`
-- [ ] Todos los iconos decorativos tienen `aria-hidden="true"`
-- [ ] `npm run build` compila sin errores
+- [x] `prefers-reduced-motion: reduce` desactiva todas las animaciones
+- [x] Transiciones reducidas a 0.01ms con motion reduce
+- [x] Ningun texto tiene contraste menor a 4.5:1 sobre su fondo
+- [x] No existen tamanos de fuente fijos menores a 12px
+- [x] Todos los tamanos de fuente usan unidades rem
+- [x] Todos los botones de solo icono tienen `aria-label`
+- [x] Todos los iconos decorativos tienen `aria-hidden="true"`
+- [x] `npm run build` compila sin errores
 
-## Prioridad 2: Navegacion y estructura
-
-Mejoras de navegacion por teclado y estructura semantica.
+## P2: Navegacion y estructura (implementado)
 
 ### 2.1 Navegacion por teclado (WCAG 2.1.1, 2.1.2)
 
-- Asegurar que todos los controles interactivos son alcanzables via Tab
-- Agregar `tabindex` donde sea necesario en controles custom
-- Implementar trampas de foco (focus trap) en modales
-- Soporte de Escape para cerrar modales y paneles
+- Todos los controles interactivos alcanzables via Tab
+- `useDialogA11y` hook implementa focus trap en todos los modales
+- Escape cierra modales y paneles
 
 ### 2.2 Indicadores de foco visibles (WCAG 2.4.7)
 
-- Anillos de foco visibles en todos los elementos interactivos
-- No eliminar outline sin reemplazo accesible
-- Usar `focus-visible` para evitar anillos en clicks de mouse
+- `*:focus-visible` con outline de 2px solido definido en `index.html`
+- Box-shadow fallback en inputs
+- `focus-visible` evita anillos en clicks de mouse
 
 ### 2.3 Landmarks y roles ARIA (WCAG 1.3.1)
 
-- Agregar `role="main"`, `role="navigation"`, `role="complementary"` segun corresponda
-- Usar `<main>`, `<nav>`, `<aside>` donde sea posible en lugar de divs genericos
-- Labels para regiones con `aria-labelledby` o `aria-label`
+- `<main id="mainContent">` para contenido principal
+- `<nav id="header-actions" aria-label="Acciones principales">` para navegacion
+- `<aside>` en paneles laterales del editor SVG
+- `role="region"` con `aria-label` en secciones principales
+- `role="img"` con `aria-label` en visualizaciones SVG
 
 ### 2.4 Jerarquia de headings (WCAG 1.3.1, 2.4.6)
 
-- Asegurar orden logico de h1-h6 sin saltos
-- Cada seccion principal debe tener un heading identificable
+- Progresion logica h1 > h2 > h3 > h4 sin saltos
+- Cada seccion principal tiene heading identificable
 
-### Checklist de verificacion
+### Verificacion P2
 
-- [ ] Todos los controles interactivos son alcanzables via teclado
-- [ ] Modales implementan focus trap y se cierran con Escape
-- [ ] Indicadores de foco visibles en todos los elementos interactivos
-- [ ] Landmarks semanticos en la estructura principal
-- [ ] Jerarquia de headings correcta y sin saltos
+- [x] Todos los controles interactivos son alcanzables via teclado
+- [x] Modales implementan focus trap y se cierran con Escape
+- [x] Indicadores de foco visibles en todos los elementos interactivos
+- [x] Landmarks semanticos en la estructura principal
+- [x] Jerarquia de headings correcta y sin saltos
 
-## Prioridad 3: Experiencia avanzada
-
-Mejoras que optimizan la experiencia para usuarios de tecnologias asistivas.
+## P3: Experiencia avanzada (parcial)
 
 ### 3.1 Live regions para feedback dinamico (WCAG 4.1.3)
 
-- `aria-live="polite"` para mensajes de estado (generacion completada, errores)
-- `aria-live="assertive"` para errores criticos
-- Anunciar cambios de estado en el pipeline de generacion
+**Parcial.** Infraestructura `aria-live="polite"` presente en la vista de foco, pero no se utiliza activamente para anunciar cambios de estado del pipeline (generacion completada, errores).
+
+Pendiente:
+- [ ] Poblar la live region con mensajes de estado del pipeline
+- [ ] `aria-live="assertive"` para errores criticos
 
 ### 3.2 Descripciones contextuales (WCAG 1.1.1)
 
-- `aria-describedby` para controles complejos que necesitan instrucciones adicionales
-- Textos de ayuda asociados a inputs y selectores
+Pendiente:
+- [ ] `aria-describedby` para controles complejos
+- [ ] Textos de ayuda asociados a inputs y selectores
 
 ### 3.3 Skip links (WCAG 2.4.1)
 
-- Link "Saltar al contenido principal" al inicio de la pagina
-- Links de salto para secciones dentro de modales complejos
+**Implementado.** Link "Saltar al contenido principal" visible con `focus:not-sr-only`, apunta a `#mainContent`.
+
+- [x] Skip link funcional al inicio de la pagina
 
 ### 3.4 Preferencias de color y alto contraste (WCAG 1.4.11)
 
-- Soporte basico para `prefers-contrast: more`
-- Verificar que la interfaz funciona en modo de alto contraste de Windows
+**Implementado.** CSS para `prefers-contrast: more` definido en `index.html` con overrides forzados de color.
+
+- [x] Interfaz usable en modo alto contraste
 
 ### 3.5 Alternativas de texto para contenido generado (WCAG 1.1.1)
 
-- Los pictogramas generados deben tener alt text descriptivo basado en la utterance original
-- Los SVG en la biblioteca deben tener `<title>` y `<desc>` semanticos
+**Implementado.** Utilidad `injectSvgA11y()` en `utils/svgAccessibility.ts` inyecta `<title>`, `<desc>` y `role="img"` en todos los SVG renderizados, basado en la utterance y el prompt.
 
-### Checklist de verificacion
+- [x] Pictogramas generados tienen alt text descriptivo
 
-- [ ] Mensajes de estado se anuncian via aria-live
-- [ ] Controles complejos tienen descripciones contextuales
-- [ ] Skip link funcional al inicio de la pagina
-- [ ] Interfaz usable en modo alto contraste
-- [ ] Pictogramas generados tienen alt text descriptivo
+## Implementacion tecnica
+
+| Archivo | Rol |
+|---------|-----|
+| `index.html` | `prefers-reduced-motion`, `prefers-contrast`, `focus-visible`, alto contraste |
+| `hooks/useDialogA11y.ts` | Focus trap, Escape, restauracion de foco en modales |
+| `utils/svgAccessibility.ts` | Inyeccion de `<title>`, `<desc>`, `role="img"` en SVG |
+| `App.tsx` | Skip link, landmarks, aria-labels, aria-live region |
 
 ## Referencias
 
