@@ -71,7 +71,7 @@
     "understand": "Comprender",
     "compose": "Componer",
     "produce": "Producir",
-    "evaluate": "Formatear y Ajustar"
+    "format": "Formatear y Ajustar"
   },
   "editor": {
     "hierarchicalElements": "Elementos Jerárquicos",
@@ -377,6 +377,9 @@
     "redo": "Rehacer (Ctrl+Y)",
     "group": "Agrupar",
     "ungroup": "Desagrupar",
+    "duplicate": "Duplicar",
+    "bringForward": "Mover adelante",
+    "sendBackward": "Mover atras",
     "applyClass": "Aplicar clase",
     "removeInlineStyles": "Limpiar estilos inline",
     "removeInlineStylesWarning": "Los colores del trazado seran reemplazados por los de la clase CSS",

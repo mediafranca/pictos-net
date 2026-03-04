@@ -71,7 +71,7 @@
     "understand": "Understand",
     "compose": "Compose",
     "produce": "Produce",
-    "evaluate": "Format & Adjust"
+    "format": "Format & Adjust"
   },
   "editor": {
     "hierarchicalElements": "Hierarchical Elements",
@@ -377,6 +377,9 @@
     "redo": "Redo (Ctrl+Y)",
     "group": "Group",
     "ungroup": "Ungroup",
+    "duplicate": "Duplicate",
+    "bringForward": "Bring forward",
+    "sendBackward": "Send backward",
     "applyClass": "Apply class",
     "removeInlineStyles": "Strip inline styles",
     "removeInlineStylesWarning": "Traced colours will be replaced by CSS class values",

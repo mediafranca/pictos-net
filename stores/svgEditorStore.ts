@@ -26,6 +26,34 @@ export interface SVGElement {
     parentId?: string;
 }
 
+export interface Viewport {
+    zoom: number;        // 0.1 .. 8
+    panX: number;        // px translate
+    panY: number;
+    fitMode: boolean;
+    canvasWidth: number;   // natural SVG dimensions (set once on load)
+    canvasHeight: number;
+}
+
+const ZOOM_STEP = 1.1;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 8;
+const LEFT_PANEL = 288;
+const RIGHT_PANEL = 320;
+const HEADER_HEIGHT = 64;
+const FIT_PADDING = 40;
+
+const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+
+const DEFAULT_VIEWPORT: Viewport = {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    fitMode: true,
+    canvasWidth: 0,
+    canvasHeight: 0,
+};
+
 export interface EditorState {
     // SVG Document
     svgDocument: string | null;
@@ -47,6 +75,9 @@ export interface EditorState {
     // @see CSS_STYLING_ARCHITECTURE.md
     overrideMap: OverrideMap;
     libraryValues: Map<string, Record<string, string>>;
+
+    // Viewport state (excluded from undo/redo)
+    viewport: Viewport;
 
     // History
     history: string[];
@@ -92,6 +123,18 @@ export interface EditorState {
     restoreClassToLibrary: (elementId: string, className: string) => void;
     getResolvedClassValues: (elementId: string, className: string) => Record<string, string>;
     cleanupInlineAttrs: (elementId: string) => void;
+
+    // Viewport actions (not in undo/redo)
+    setViewport: (partial: Partial<Viewport>) => void;
+    zoomIn: () => void;
+    zoomOut: () => void;
+    zoomToFit: (windowW: number, windowH: number) => void;
+    zoomToPoint: (factor: number, clientX: number, clientY: number, stageRect: DOMRect) => void;
+
+    // Element manipulation actions
+    duplicateElement: (id: string) => void;
+    bringForward: (id: string) => void;
+    sendBackward: (id: string) => void;
 
     undo: () => void;
     redo: () => void;
@@ -273,6 +316,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         stylesVersion: 0,
         overrideMap: new Map(),
         libraryValues: new Map(),
+        viewport: { ...DEFAULT_VIEWPORT },
         history: [],
         historyIndex: -1,
         onSvgChange: undefined,
@@ -770,6 +814,114 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             commitSvg(svg);
         },
 
+        // ── Viewport actions (not in undo/redo) ─────────────────────────────
+
+        setViewport: (partial) => {
+            set({ viewport: { ...get().viewport, ...partial } });
+        },
+
+        zoomIn: () => {
+            const { zoom } = get().viewport;
+            set({ viewport: { ...get().viewport, zoom: clampZoom(zoom * ZOOM_STEP), fitMode: false } });
+        },
+
+        zoomOut: () => {
+            const { zoom } = get().viewport;
+            set({ viewport: { ...get().viewport, zoom: clampZoom(zoom / ZOOM_STEP), fitMode: false } });
+        },
+
+        zoomToFit: (windowW, windowH) => {
+            const { canvasWidth, canvasHeight } = get().viewport;
+            if (!canvasWidth || !canvasHeight) return;
+            const availW = Math.max(1, windowW - LEFT_PANEL - RIGHT_PANEL - FIT_PADDING * 2);
+            const availH = Math.max(1, windowH - HEADER_HEIGHT - FIT_PADDING * 2);
+            const scale = clampZoom(Math.min(availW / canvasWidth, availH / canvasHeight));
+            const panX = LEFT_PANEL + (availW - canvasWidth * scale) / 2 + FIT_PADDING;
+            const panY = HEADER_HEIGHT + (availH - canvasHeight * scale) / 2 + FIT_PADDING;
+            set({ viewport: { ...get().viewport, zoom: scale, panX, panY, fitMode: true } });
+        },
+
+        zoomToPoint: (factor, cx, cy, stageRect) => {
+            const { zoom, panX, panY } = get().viewport;
+            const mx = cx - stageRect.left;
+            const my = cy - stageRect.top;
+            const worldX = (mx - panX) / zoom;
+            const worldY = (my - panY) / zoom;
+            const newZoom = clampZoom(zoom * factor);
+            set({ viewport: { ...get().viewport,
+                zoom: newZoom,
+                panX: mx - worldX * newZoom,
+                panY: my - worldY * newZoom,
+                fitMode: false,
+            }});
+        },
+
+        // ── Element manipulation actions ──────────────────────────────────────
+
+        duplicateElement: (id) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+            const element = doc.querySelector(`#${CSS.escape(id)}`);
+            if (!element || !element.parentNode) return;
+
+            const clone = element.cloneNode(true) as Element;
+            const newId = 'el-' + Math.random().toString(36).substr(2, 9);
+            clone.id = newId;
+
+            // Offset the clone slightly
+            if (clone instanceof SVGGraphicsElement) {
+                const existing = clone.getAttribute('transform') || '';
+                clone.setAttribute('transform', `${existing} translate(10, 10)`.trim());
+            }
+
+            element.parentNode.insertBefore(clone, element.nextSibling);
+
+            const serialized = new XMLSerializer().serializeToString(doc);
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
+                serialized, get().styleDefinitions, get().keyframes
+            );
+            commitSvg(nextSvg);
+            set({ selectedElementId: newId, selectedElementIds: new Set([newId]) });
+        },
+
+        bringForward: (id) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+            const element = doc.querySelector(`#${CSS.escape(id)}`);
+            if (!element || !element.parentNode) return;
+
+            const next = element.nextElementSibling;
+            if (next) {
+                element.parentNode.insertBefore(element, next.nextSibling);
+                const serialized = new XMLSerializer().serializeToString(doc);
+                commitSvg(serialized);
+            }
+        },
+
+        sendBackward: (id) => {
+            const svgDocument = get().svgDocument;
+            if (!svgDocument) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
+            const element = doc.querySelector(`#${CSS.escape(id)}`);
+            if (!element || !element.parentNode) return;
+
+            const prev = element.previousElementSibling;
+            if (prev) {
+                element.parentNode.insertBefore(element, prev);
+                const serialized = new XMLSerializer().serializeToString(doc);
+                commitSvg(serialized);
+            }
+        },
+
         undo: () => {
             const { history, historyIndex } = get();
             if (historyIndex > 0) {
@@ -847,6 +999,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
                 stylesVersion: 0,
                 overrideMap: new Map(),
                 libraryValues: new Map(),
+                viewport: { ...DEFAULT_VIEWPORT },
                 history: [],
                 historyIndex: -1,
                 onSvgChange: undefined,

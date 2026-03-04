@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
-  ChevronLeft, ChevronRight, ArrowUp
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -182,7 +182,7 @@ const App: React.FC = () => {
     svgStyleDefs: INITIAL_STYLES,
     svgKeyframes: INITIAL_KEYFRAMES,
   });
-  const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'eval', rowId: string } | null>(null);
+  const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(() => {
     const stored = localStorage.getItem('pictonet_reduce_motion');
@@ -1659,7 +1659,7 @@ const RowComponent: React.FC<{
   onUpdate: (u: any) => void; onProcess: (s: any) => Promise<boolean>;
   onRegeneratePrompt: () => void;
   onStop: () => void; onCascade: () => void; onDelete: () => void;
-  onFocus: (step: 'nlu' | 'visual' | 'bitmap' | 'eval') => void;
+  onFocus: (step: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
   onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
@@ -1825,7 +1825,7 @@ const RowComponent: React.FC<{
                 </div>
               </div>
             </StepBox>
-            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('eval')} duration={row.bitmapDuration}
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('format')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
                 <div
@@ -2429,10 +2429,10 @@ const Badge: React.FC<{ step: number; label: string; status: StepStatus }> = ({ 
   );
 };
 
-const FOCUS_STEPS = ['nlu', 'visual', 'bitmap', 'eval'] as const;
+const FOCUS_STEPS = ['nlu', 'visual', 'bitmap', 'format'] as const;
 
 const FocusViewModal: React.FC<{
-  mode: 'nlu' | 'visual' | 'bitmap' | 'eval';
+  mode: 'nlu' | 'visual' | 'bitmap' | 'format';
   row: RowData;
   onClose: () => void;
   onUpdate: (updates: Partial<RowData>) => void;
@@ -2443,7 +2443,7 @@ const FocusViewModal: React.FC<{
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   onOpenEditor?: () => void;
   onOpenVectorizer?: () => void;
-  onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'eval') => void;
+  onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
 }> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
@@ -2491,7 +2491,7 @@ const FocusViewModal: React.FC<{
     nlu: t('pipeline.understand'),
     visual: t('pipeline.compose'),
     bitmap: t('pipeline.produce'),
-    eval: t('pipeline.evaluate')
+    format: t('pipeline.format')
   };
 
   const renderContent = () => {
@@ -2568,46 +2568,62 @@ const FocusViewModal: React.FC<{
             )}
           </div>
         );
-      case 'eval':
-        return (
-          <div className="flex h-full bg-slate-50 gap-0">
-            {/* Left: Bitmap (top-aligned, compact) */}
-            <div className="w-5/12 bg-white border-r border-slate-200 flex items-start justify-center p-8 relative">
-              <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-              {row.bitmap ? (
-                <img src={row.bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain shadow-lg" />
-              ) : (
-                <div className="text-slate-500 font-mono text-xs">{t('editor.noBitmapReference')}</div>
-              )}
-            </div>
+      case 'format': {
+        const hasRaw = !!row.rawSvg;
+        const hasStructured = !!row.structuredSvg;
 
-            {/* Right: SVG Generator + Share (stretches to fill) */}
-            <div className="w-7/12 p-6 bg-slate-50 flex flex-col">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
-                {(() => {
-                  const isShared = row.shared;
-                  return (
-                    <button
-                      onClick={onShare}
-                      disabled={isShared}
-                      className={`p-2 transition-all shadow-sm ${isShared
-                        ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                        : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
-                        }`}
-                      title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
-                    >
-                      {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
-                    </button>
-                  );
-                })()}
+        // Nothing: show trace + structure buttons
+        if (!hasRaw && !hasStructured) {
+          return (
+            <div className="flex flex-col items-center justify-center h-full gap-4 bg-slate-50">
+              <FileCode size={40} className="text-slate-400" />
+              <p className="text-sm text-slate-500">{t('svg.traceConverts')}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => onOpenVectorizer?.()}
+                  className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg"
+                >
+                  {t('svg.traceSvg')}
+                </button>
+                <button
+                  disabled
+                  className="flex items-center gap-2 bg-slate-200 text-slate-400 px-6 py-3 font-bold uppercase text-xs tracking-widest cursor-not-allowed"
+                >
+                  <Layers size={14} /> {t('svg.formatGemini')}
+                </button>
               </div>
-              <div className="flex-1 overflow-hidden">
-                <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
-              </div>
+            </div>
+          );
+        }
+
+        // Has SVG(s): show SVGGenerator (handles both raw+structured internally) + share
+        return (
+          <div className="flex flex-col h-full bg-slate-50 p-6">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
+              {(() => {
+                const isShared = row.shared;
+                return (
+                  <button
+                    onClick={onShare}
+                    disabled={isShared}
+                    className={`p-2 transition-all shadow-sm ${isShared
+                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                      : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
+                      }`}
+                    title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
+                  >
+                    {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
+                  </button>
+                );
+              })()}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
             </div>
           </div>
         );
+      }
       default: return null;
     }
   }
@@ -2620,8 +2636,9 @@ const FocusViewModal: React.FC<{
             <ChevronLeft size={18} />
           </button>
           <div className="flex-1 text-center min-w-0">
-            <div className="flex items-center justify-center gap-3">
-              <h2 className="text-sm font-bold uppercase tracking-wider">{titleMap[mode]}</h2>
+            <h2 className="text-base font-semibold text-slate-800 truncate">{row.UTTERANCE}</h2>
+            <div className="flex items-center justify-center gap-3 mt-1">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">{titleMap[mode]}</span>
               <div className="flex items-center gap-1.5">
                 {FOCUS_STEPS.map((step, i) => (
                   <button
@@ -2633,7 +2650,6 @@ const FocusViewModal: React.FC<{
                 ))}
               </div>
             </div>
-            <p className="text-xs text-slate-500 truncate">{row.UTTERANCE}</p>
           </div>
           <button onClick={goToNext} className={`p-2 hover:bg-slate-100 transition-opacity ${hasNext ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Next step">
             <ChevronRight size={18} />
@@ -2644,7 +2660,7 @@ const FocusViewModal: React.FC<{
         <footer className="p-4 border-t bg-white flex justify-between gap-3">
           {/* Left actions */}
           <div className="flex gap-3">
-            {(mode === 'bitmap' || mode === 'eval') && row.bitmap && (
+            {(mode === 'bitmap' || mode === 'format') && row.bitmap && (
               <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                 <Download size={14} /> PNG
               </button>
@@ -2652,12 +2668,12 @@ const FocusViewModal: React.FC<{
           </div>
           {/* Right actions */}
           <div className="flex gap-3">
-            {mode === 'eval' && (row.structuredSvg || row.rawSvg) && onOpenEditor && (
+            {mode === 'format' && (row.structuredSvg || row.rawSvg) && onOpenEditor && (
               <button onClick={onOpenEditor} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                 <Edit size={14} /> Editar SVG
               </button>
             )}
-            {mode === 'eval' && (row.structuredSvg || row.rawSvg) && (
+            {mode === 'format' && (row.structuredSvg || row.rawSvg) && (
               <button onClick={() => { const svg = row.structuredSvg || row.rawSvg!; const blob = new Blob([svg], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                 <Download size={14} /> SVG
               </button>

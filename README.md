@@ -24,7 +24,7 @@ El sistema implementa un pipeline de tres fases automáticas más dos de post-pr
 
 **② Componer** (Gemini 2.5 Flash) — Traduce el análisis NLU a una jerarquía de elementos visuales (`elements`) y una descripción de articulación espacial (`prompt`). Si el usuario edita los elementos, puede regenerar solo el prompt sin repetir toda la composición.
 
-**③ Producir** (Gemini Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. Resultado: bitmap JPEG 800×800.
+**③ Producir** (Gemini Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. Resultado: bitmap PNG lossless, máximo 1024×1024px. La compresión a JPEG (q=0.75) ocurre únicamente en la capa de persistencia (IndexedDB), no en el pipeline.
 
 **④ Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante clustering jerarquico de color (ColorImageConverter nativo de visioncortex). Proceso local, sin API. Resultado: SVG crudo sin semantica.
 
@@ -81,7 +81,7 @@ flowchart TD
         direction TB
         f3_merge["<b>fullPrompt</b> combina:<br>utterance + NLU context<br>+ domain + elements + prompt<br>+ visualStylePrompt"]
         f3_gen["flash-image | pro-image<br>sin texto · flat design<br>fondo blanco"]
-        f3_post["resize 800×800 · JPEG q=0.70"]
+        f3_post["resize max 1024px · PNG lossless<br><i>JPEG q=0.75 solo en IndexedDB</i>"]
         f3_out["<b>bitmap</b><br>base64 data URL"]
     end
 
@@ -330,10 +330,9 @@ Ver [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) para instrucciones completas,
 | Documento | Descripción |
 |---|---|
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitectura técnica, modelos de datos, servicios |
-| [docs/PIPELINE.md](./docs/PIPELINE.md) | Pipeline de generación paso a paso |
 | [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) | Guía de desarrollo, submodules, i18n, deployment |
 | [docs/SECURITY.md](./docs/SECURITY.md) | Gestión de API keys, consideraciones de seguridad |
-| [docs/PROMPT_MAESTRO.md](./docs/PROMPT_MAESTRO.md) | Prompt principal de Gemini documentado |
+| [docs/PROMPT_MAESTRO.md](./docs/PROMPT_MAESTRO.md) | Prompt maestro para sesiones de diseño con Claude Code |
 
 ### Interfaz de usuario
 
@@ -341,7 +340,8 @@ Ver [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) para instrucciones completas,
 |---|---|
 | [docs/UI_MAP.md](./docs/UI_MAP.md) | Mapa estructural de la UI: todos los IDs semánticos |
 | [docs/UI_CONVENTIONS.md](./docs/UI_CONVENTIONS.md) | Convenciones de diseño: colores, tipografía, z-index |
-| [docs/TUTORIAL.md](./docs/TUTORIAL.md) | Tutorial de uso paso a paso |
+| [docs/CSS_STYLING_ARCHITECTURE.md](./docs/CSS_STYLING_ARCHITECTURE.md) | Modelo de dos niveles para estilos SVG (clases + overrides locales) |
+| [docs/WCAG_ROADMAP.md](./docs/WCAG_ROADMAP.md) | Estado de conformidad WCAG 2.1 AA y roadmap de accesibilidad |
 
 ---
 
