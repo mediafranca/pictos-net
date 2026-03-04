@@ -20,7 +20,7 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
   const hasVisualFill = ruleMap.has('fill') && ruleMap.get('fill')!.trim().toLowerCase() !== 'none';
   const hasVisualStroke = ruleMap.has('stroke') &&
     !['none', 'transparent', ''].includes(ruleMap.get('stroke')!.trim().toLowerCase());
-  const useHatch = !hasVisualFill && !hasVisualStroke;
+  const useHatch = !hasVisualFill;
 
   // className applies the CSS class (animations, transitions, colors when in scope).
   // Inline SVG presentation attributes (fill, stroke) have LOWER specificity than

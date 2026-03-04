@@ -145,17 +145,44 @@ export const clearAllRows = async (): Promise<void> => {
 // ─── Bitmaps ─────────────────────────────────────────────────────────────────
 
 /**
- * Save all bitmaps atomically in a single transaction (much faster than
- * calling saveBitmap() individually for large libraries).
+ * Compress a PNG data-URL to JPEG for storage.
+ * Skips if the bitmap is already JPEG.
+ */
+const compressForStorage = (dataUrl: string, quality = 0.75): Promise<string> => {
+  if (dataUrl.startsWith('data:image/jpeg')) return Promise.resolve(dataUrl);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUrl); return; }
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+};
+
+/**
+ * Save all bitmaps atomically in a single transaction.
+ * Compresses PNG bitmaps to JPEG 0.75 before writing to save storage space.
  */
 export const saveBitmapsBatch = async (entries: { id: string; bitmap: string }[]): Promise<void> => {
   if (entries.length === 0) return;
+  const compressed = await Promise.all(
+    entries.map(async ({ id, bitmap }) => ({ id, bitmap: await compressForStorage(bitmap) }))
+  );
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_BITMAPS], 'readwrite');
     const store = transaction.objectStore(STORE_BITMAPS);
     const now = Date.now();
-    entries.forEach(({ id, bitmap }) => {
+    compressed.forEach(({ id, bitmap }) => {
       store.put({ id, bitmap, timestamp: now } as BitmapEntry);
     });
     transaction.oncomplete = () => resolve();
@@ -164,11 +191,12 @@ export const saveBitmapsBatch = async (entries: { id: string; bitmap: string }[]
 };
 
 export const saveBitmap = async (id: string, bitmap: string): Promise<void> => {
+  const compressed = await compressForStorage(bitmap);
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_BITMAPS], 'readwrite');
     const store = transaction.objectStore(STORE_BITMAPS);
-    const request = store.put({ id, bitmap, timestamp: Date.now() } as BitmapEntry);
+    const request = store.put({ id, bitmap: compressed, timestamp: Date.now() } as BitmapEntry);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });

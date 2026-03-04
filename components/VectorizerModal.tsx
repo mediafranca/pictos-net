@@ -251,8 +251,12 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 const dims = await drawBitmapToCanvas(bitmap, CANVAS_ID);
                 if (!isMounted.current) return;
                 setImageDims(dims);
-                // Set viewBox on the hidden SVG so paths render correctly
+                // Set viewBox AND explicit width/height on the hidden SVG.
+                // The WASM reads .width/.height to determine the output coordinate space.
                 hiddenSvg.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
+                hiddenSvg.setAttribute('width', String(dims.width));
+                hiddenSvg.setAttribute('height', String(dims.height));
+                console.debug('[VectorizerModal] canvas dims:', dims.width, 'x', dims.height);
                 setCanvasReady(true);
             } catch (err) {
                 console.error('[VectorizerModal] Failed to draw bitmap:', err);
@@ -348,6 +352,14 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     controller.signal,
                 );
                 if (!isMounted.current || controller.signal.aborted) return;
+
+                // Ensure the SVG has correct dimensions after WASM may have modified them
+                if (hiddenSvg) {
+                    const vb = hiddenSvg.getAttribute('viewBox');
+                    console.debug('[VectorizerModal] post-trace viewBox:', vb,
+                        'width:', hiddenSvg.getAttribute('width'),
+                        'height:', hiddenSvg.getAttribute('height'));
+                }
 
                 // Serialize the hidden SVG and store for display
                 const svg = hiddenSvg ? new XMLSerializer().serializeToString(hiddenSvg) : '';
@@ -645,8 +657,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
                                 {resultSvgHtml ? (
                                     <div
-                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-full [&>svg]:h-full"
-                                        style={{ width: '100%', height: '100%' }}
+                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto"
                                         dangerouslySetInnerHTML={{ __html: resultSvgHtml }}
                                     />
                                 ) : traceState === 'idle' ? (

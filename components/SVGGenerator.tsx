@@ -303,7 +303,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             onUpdate({ structuredSvg: result.svg });
 
             setStatus('completed');
-            setRawSvg(null); // Clear local raw SVG state
             const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
             onLog('success', `Proceso SVG finalizado. Tiempo total: ${totalTime}s`);
 
@@ -332,15 +331,35 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     if (status === 'completed' && structuredSvgEntry) {
         return (
             <div className="flex flex-col h-full">
-                <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/svg-preview">
-                    <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-xs px-2 py-1 rounded pointer-events-none z-10 font-medium">
-                        Click parts to cycle through styles
+                {/* Raw traced SVG — compact preview (only when rawSvg exists) */}
+                {rawSvg && (
+                    <div className="bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact mb-2" style={{ flex: '2 1 0%', minHeight: 80 }}>
+                        <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
+                        <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                            {t('svg.traceSvg')}
+                        </div>
+                        <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
+                            <button
+                                onClick={downloadRawSvg}
+                                className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                                title="Download raw SVG"
+                            >
+                                <Download size={12} />
+                            </button>
+                        </div>
+                        <div
+                            dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
+                            className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+                        />
                     </div>
+                )}
+
+                {/* Structured SVG — main preview */}
+                <div className="bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview mb-3" style={{ flex: '3 1 0%', minHeight: 120 }}>
+                    <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                     <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.structureLabel')}
                     </div>
-                    {/* Download & Edit overlay — bottom-right */}
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
                         {onOpenEditor && (
                             <button
@@ -383,9 +402,11 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     )}
 
-                    {/* Re-trace: open vectorizer and clear local raw SVG state */}
+                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace */}
                     <button
                         onClick={() => {
+                            removeSVGByRowId(row.id);
+                            onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
                             onOpenVectorizer?.();
                         }}
@@ -494,12 +515,21 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             ) : (
                 <>
                     <FileCode size={32} className="text-slate-500 group-hover:text-violet-500 mb-3 transition-colors" />
-                    <button
-                        onClick={() => onOpenVectorizer?.()}
-                        className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
-                    >
-                        {t('svg.traceSvg')}
-                    </button>
+                    <div className="flex flex-col gap-2 items-center">
+                        <button
+                            onClick={() => onOpenVectorizer?.()}
+                            className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
+                        >
+                            {t('svg.traceSvg')}
+                        </button>
+                        <button
+                            disabled
+                            className="bg-slate-100 border-2 border-slate-200 text-slate-400 px-6 py-2 font-bold uppercase text-xs tracking-widest rounded-full cursor-not-allowed"
+                            title={t('svg.structureTooltip')}
+                        >
+                            <Layers size={14} className="inline mr-1.5" aria-hidden="true" />{t('svg.formatGemini')}
+                        </button>
+                    </div>
                     <p className="text-xs text-slate-500 mt-2 text-center max-w-[200px]">
                         {t('svg.traceConverts')}
                     </p>

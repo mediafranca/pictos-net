@@ -311,6 +311,8 @@ export async function vectorizeBitmap(
         });
 
         svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svgEl.setAttribute('width', String(width));
+        svgEl.setAttribute('height', String(height));
         svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 
         // Try with requested config
