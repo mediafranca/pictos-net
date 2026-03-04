@@ -113,9 +113,9 @@ export const GeoAutocomplete: React.FC<GeoAutocompleteProps> = ({ value, onChang
     <div className="relative" ref={dropdownRef}>
       <div className="flex items-center gap-2 border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
         {isSearching ? (
-          <Loader2 size={14} className="text-slate-400 animate-spin" />
+          <Loader2 size={14} className="text-slate-500 animate-spin" />
         ) : (
-          <Search size={14} className="text-slate-400" />
+          <Search size={14} className="text-slate-500" />
         )}
         <input
           ref={inputRef}
@@ -134,7 +134,7 @@ export const GeoAutocomplete: React.FC<GeoAutocompleteProps> = ({ value, onChang
         {value.region && (
           <button
             onClick={handleClear}
-            className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+            className="text-slate-500 hover:text-slate-600 text-xs font-bold"
             title="Clear location"
           >
             ×
@@ -144,7 +144,7 @@ export const GeoAutocomplete: React.FC<GeoAutocompleteProps> = ({ value, onChang
 
       {/* Current selection display */}
       {value.region && !showDropdown && (
-        <div className="mt-2 p-2 bg-violet-50 border border-violet-200 rounded text-[10px] flex items-start gap-2">
+        <div className="mt-2 p-2 bg-violet-50 border border-violet-200 rounded text-xs flex items-start gap-2">
           <MapPin size={12} className="text-violet-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="font-bold text-violet-900 truncate">{value.region}</div>
@@ -172,12 +172,12 @@ export const GeoAutocomplete: React.FC<GeoAutocompleteProps> = ({ value, onChang
               <MapPin
                 size={12}
                 className={`mt-0.5 flex-shrink-0 ${
-                  index === selectedIndex ? 'text-violet-600' : 'text-slate-400'
+                  index === selectedIndex ? 'text-violet-600' : 'text-slate-500'
                 }`}
               />
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{result.label}</div>
-                <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                <div className="text-xs text-slate-500 font-mono mt-0.5">
                   {parseFloat(result.lat).toFixed(4)}°, {parseFloat(result.lng).toFixed(4)}°
                 </div>
               </div>
@@ -188,7 +188,7 @@ export const GeoAutocomplete: React.FC<GeoAutocompleteProps> = ({ value, onChang
 
       {/* No results message */}
       {showDropdown && !isSearching && results.length === 0 && query.trim().length >= 2 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 shadow-xl p-4 text-center text-xs text-slate-400">
+        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 shadow-xl p-4 text-center text-xs text-slate-500">
           {t('config.geoNoResults')}
         </div>
       )}

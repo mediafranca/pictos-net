@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom';
 import JSZip from 'jszip';
 import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
-  Play, BookOpen, Search, FileDown, Square, Sliders,
+  Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
   ChevronLeft, ChevronRight
@@ -15,6 +15,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole } from './types';
 import * as Gemini from './services/geminiService';
 import { useTranslation } from './hooks/useTranslation';
+import { useDialogA11y } from './hooks/useDialogA11y';
 import type { Locale } from './locales';
 import { SVGGenerator } from './components/SVGGenerator';
 import useSVGLibrary from './hooks/useSVGLibrary';
@@ -27,6 +28,7 @@ import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import { VectorizerModal } from './components/VectorizerModal';
 import type { VectorizerResult } from './services/vtracerService';
+import { injectSvgA11y } from './utils/svgAccessibility';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -100,7 +102,7 @@ const SearchComponent: React.FC<{
   return (
     <div className="relative">
       <div className={`flex items-center bg-slate-100 px-4 py-2 border-2 transition-all ${isFocused ? 'border-violet-950 bg-white shadow-lg' : 'border-transparent'}`}>
-        <Search size={18} className="text-slate-400" />
+        <Search size={18} className="text-slate-500" />
         <input
           value={searchValue}
           onFocus={() => setIsFocused(true)}
@@ -140,11 +142,11 @@ const SearchComponent: React.FC<{
 
 
 const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
-  <label className="text-[10px] font-medium uppercase text-slate-400 mb-2 flex items-center gap-1">
+  <label className="text-xs font-medium uppercase text-slate-500 mb-2 flex items-center gap-1">
     {label}
     <div className="group/tooltip relative">
-      <HelpCircle size={10} className="text-slate-300 hover:text-violet-600 cursor-help" />
-      <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-[10px] p-2 rounded shadow-lg z-[56] leading-relaxed">
+      <HelpCircle size={10} className="text-slate-500 hover:text-violet-600 cursor-help" />
+      <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-xs p-2 rounded shadow-lg z-[56] leading-relaxed">
         {tooltip}
       </div>
     </div>
@@ -182,6 +184,28 @@ const App: React.FC = () => {
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'eval', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(() => {
+    const stored = localStorage.getItem('pictonet_reduce_motion');
+    return stored === null ? true : stored === 'true';
+  });
+  const [highContrast, setHighContrast] = useState(() => {
+    return localStorage.getItem('pictonet_high_contrast') === 'true';
+  });
+  const [statusAnnouncement, setStatusAnnouncement] = useState('');
+
+  const announce = useCallback((msg: string) => {
+    setStatusAnnouncement(msg);
+    setTimeout(() => setStatusAnnouncement(''), 5000);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('pictonet_reduce_motion', String(reduceMotion));
+    document.documentElement.classList.toggle('reduce-motion', reduceMotion);
+  }, [reduceMotion]);
+  useEffect(() => {
+    localStorage.setItem('pictonet_high_contrast', String(highContrast));
+    document.documentElement.classList.toggle('high-contrast', highContrast);
+  }, [highContrast]);
   const [isInitialized, setIsInitialized] = useState(false);
   const [availableLibraries, setAvailableLibraries] = useState<LibraryMetadata[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -214,6 +238,8 @@ const App: React.FC = () => {
     rowIndex: number | null;
   }>({ isOpen: false, rowIndex: null });
 
+  const closeConfirmDialog = useCallback(() => setConfirmDialog(prev => ({ ...prev, isOpen: false })), []);
+  const { dialogProps: confirmDialogProps } = useDialogA11y({ isOpen: confirmDialog.isOpen, onClose: closeConfirmDialog, label: confirmDialog.title || 'Confirm' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -363,12 +389,15 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!openRowId || scrollToRowRef.current !== openRowId) return;
     scrollToRowRef.current = null;
-    const el = document.getElementById(`picto-row-${openRowId}`);
-    if (el) {
-      const headerHeight = document.getElementById('toolbar')?.offsetHeight ?? 80;
-      const top = el.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
-      window.scrollTo({ top, behavior: 'smooth' });
-    }
+    // Delay to let the row DOM render (including expanded content)
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`picto-row-${openRowId}`);
+      if (el) {
+        const headerHeight = document.getElementById('toolbar')?.offsetHeight ?? 80;
+        const top = el.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+    });
   }, [openRowId]);
 
   // Auto-cascade: when a new row with real text is added, start the pipeline
@@ -383,6 +412,7 @@ const App: React.FC = () => {
 
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
+    if (type === 'success' || type === 'error') announce(message);
   };
 
   const processPhrases = (text: string) => {
@@ -959,12 +989,15 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm">
+      <a href="#mainContent" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:bg-violet-950 focus:text-white focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:rounded">
+        Saltar al contenido principal
+      </a>
+      <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm" aria-label="Barra de herramientas">
         <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewMode('home'); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
-            <span id="tagline" className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
+            <span id="tagline" className="text-xs text-slate-500 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
           </div>
         </div>
 
@@ -979,7 +1012,7 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div id="header-actions" className="flex gap-2 items-center">
+        <nav id="header-actions" aria-label="Acciones principales" className="flex gap-2 items-center">
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
           <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
 
@@ -1009,17 +1042,18 @@ const App: React.FC = () => {
             </button>
             <button
               onClick={handleLibraryMenuToggle}
-              className={`p-1.5 hover:bg-slate-50 text-slate-400 border-l border-transparent hover:text-violet-950 transition-colors ${showLibraryMenu ? 'bg-slate-50 text-violet-950' : ''}`}
+              className={`p-1.5 hover:bg-slate-50 text-slate-500 border-l border-transparent hover:text-violet-950 transition-colors ${showLibraryMenu ? 'bg-slate-50 text-violet-950' : ''}`}
+              aria-label={t('header.libraryTooltip')}
             >
-              <ChevronDown size={14} />
+              <ChevronDown size={14} aria-hidden="true" />
             </button>
           </div>
 
           <div className="w-px h-8 bg-slate-200 mx-2"></div>
 
-          <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')}><Sliders size={18} /></button>
-          <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')}><Terminal size={18} /></button>
-        </div>
+          <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')} aria-label={t('header.settingsTooltip')}><Settings size={18} aria-hidden="true" /></button>
+          <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')} aria-label={t('header.consoleTooltip')}><Terminal size={18} aria-hidden="true" /></button>
+        </nav>
       </header>
 
       {showConfig && (
@@ -1086,7 +1120,7 @@ const App: React.FC = () => {
                 <div className="flex flex-col gap-2">
                   <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
                     <div className="flex items-center gap-2">
-                      <Globe size={14} className="text-slate-400" />
+                      <Globe size={14} className="text-slate-500" />
                       <select
                         value={config.lang}
                         onChange={(e) => {
@@ -1174,8 +1208,46 @@ const App: React.FC = () => {
                   onClick={() => setShowStyleEditor(true)}
                   className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors flex items-center justify-center gap-2"
                 >
-                  <Palette size={14} /> Abrir editor
+                  <Palette size={14} aria-hidden="true" /> Abrir editor
                 </button>
+              </div>
+
+              {/* field-reduce-motion */}
+              <div id="field-reduce-motion">
+                <FieldLabel
+                  label="Animaciones"
+                  tooltip="Desactivar animaciones y transiciones en la interfaz. Recomendado para accesibilidad (WCAG 2.3.3)."
+                />
+                <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={!reduceMotion}
+                    onChange={e => setReduceMotion(!e.target.checked)}
+                    className="w-4 h-4 accent-violet-600"
+                  />
+                  <span className="text-xs font-medium text-slate-700">
+                    {reduceMotion ? 'Animaciones desactivadas' : 'Animaciones activadas'}
+                  </span>
+                </label>
+              </div>
+
+              {/* field-high-contrast */}
+              <div id="field-high-contrast">
+                <FieldLabel
+                  label="Alto contraste"
+                  tooltip="Activar modo de alto contraste: bordes reforzados, texto mas oscuro y fondos blancos puros. Recomendado para accesibilidad (WCAG 1.4.11)."
+                />
+                <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={highContrast}
+                    onChange={e => setHighContrast(e.target.checked)}
+                    className="w-4 h-4 accent-violet-600"
+                  />
+                  <span className="text-xs font-medium text-slate-700">
+                    {highContrast ? 'Alto contraste activado' : 'Alto contraste desactivado'}
+                  </span>
+                </label>
               </div>
             </div>
 
@@ -1187,16 +1259,16 @@ const App: React.FC = () => {
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
           <div id="sort-controls" className="mb-6 flex justify-end gap-2">
-            <span className="text-[10px] font-medium uppercase text-slate-400 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
+            <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
             <button
               onClick={() => setSortBy('alphabetical')}
-              className={`px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
             >
               {t('library.alphabetical')}
             </button>
             <button
               onClick={() => setSortBy('completeness')}
-              className={`px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
             >
               {t('library.completeness')}
             </button>
@@ -1205,11 +1277,11 @@ const App: React.FC = () => {
         {viewMode === 'home' ? (
           <div id="home-view" className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
             <div id="hero-area" className="space-y-4">
-              <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
+              <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-xs font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
                 <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
               </div>
-              <h2 className="text-8xl font-black tracking-tighter text-slate-900 leading-none">{config.author}</h2>
-              <p className="text-slate-400 text-xl font-medium max-w-2xl mx-auto leading-relaxed">
+              <p className="text-8xl font-black tracking-tighter text-slate-900 leading-none" aria-hidden="true">{config.author}</p>
+              <p className="text-slate-500 text-xl font-medium max-w-2xl mx-auto leading-relaxed">
                 {t('home.description')}
               </p>
             </div>
@@ -1218,8 +1290,8 @@ const App: React.FC = () => {
               <div id="import-card" onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md">
                 <div className="text-white group-hover:scale-110 transition-transform"><FileText size={40} /></div>
                 <div>
-                  <h3 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h3>
-                  <div className="text-[10px] text-violet-400 font-mono mt-1">{t('home.importNamespace')}</div>
+                  <h2 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h2>
+                  <div className="text-xs text-violet-400 font-mono mt-1">{t('home.importNamespace')}</div>
                 </div>
                 <p className="text-xs text-violet-300 leading-relaxed font-medium">{t('home.importDescription')}</p>
                 <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
@@ -1230,7 +1302,7 @@ const App: React.FC = () => {
             {availableLibraries.length > 0 && (
               <div className="max-w-2xl mx-auto space-y-6">
                 <div className="text-center space-y-2">
-                  <h3 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.exampleLibraries')}</h3>
+                  <h2 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.exampleLibraries')}</h2>
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
@@ -1246,7 +1318,7 @@ const App: React.FC = () => {
                           <Library size={24} />
                         </div>
                         <div className="flex gap-1">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5">
                             {library.language}
                           </span>
                         </div>
@@ -1254,7 +1326,7 @@ const App: React.FC = () => {
 
                       <div>
                         <h4 className="font-bold text-sm uppercase tracking-wide text-slate-900">{library.name}</h4>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{library.location}</div>
+                        <div className="text-xs text-slate-500 font-mono mt-0.5">{library.location}</div>
                       </div>
 
                       {/* {library.description && (
@@ -1262,11 +1334,11 @@ const App: React.FC = () => {
                     )} */}
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                        <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
+                        <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">
                           {t('home.loadLibrary')}
                         </span>
                         {library.items && (
-                          <span className="text-[10px] text-violet-600 font-bold">
+                          <span className="text-xs text-violet-600 font-bold">
                             {library.items} {t('home.items')}
                           </span>
                         )}
@@ -1282,7 +1354,7 @@ const App: React.FC = () => {
                 href="https://github.com/hspencer/pictos-net#readme"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium"
+                className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-600 transition-colors font-medium"
               >
                 <ExternalLink size={14} />
                 {t('home.aboutProject')}
@@ -1333,7 +1405,7 @@ const App: React.FC = () => {
       </main>
 
       {showConsole && (
-        <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-400 mono text-[10px] p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
+        <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-500 mono text-xs p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
             <span className="flex items-center gap-3"><Terminal size={14} /> PICTOS Console</span>
             <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush</button>
@@ -1399,8 +1471,8 @@ const App: React.FC = () => {
 
       {/* Confirmation Dialog Modal */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] animate-in fade-in duration-200" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}>
-          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full mx-4 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] animate-in fade-in duration-200" onClick={closeConfirmDialog}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full mx-4 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} {...confirmDialogProps}>
             <div className="p-6 border-b border-slate-200">
               <h3 className="text-lg font-bold text-slate-900">{confirmDialog.title}</h3>
             </div>
@@ -1409,7 +1481,7 @@ const App: React.FC = () => {
             </div>
             <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
               <button
-                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                onClick={closeConfirmDialog}
                 className="px-6 py-2.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all rounded-md"
               >
                 {t('actions.cancel')}
@@ -1439,7 +1511,7 @@ const App: React.FC = () => {
             className="fixed w-56 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
             style={{ top: libraryMenuPos.top, left: libraryMenuPos.left }}
           >
-            <div className="px-4 py-2 border-b border-slate-100 text-[10px] font-bold text-slate-400 tracking-wider tabular-nums">
+            <div className="px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500 tracking-wider tabular-nums">
               {rows.length} {rows.length === 1 ? 'elemento' : 'elementos'}
             </div>
             <button
@@ -1519,7 +1591,7 @@ const App: React.FC = () => {
             <button
               onClick={clearAll}
               disabled={rows.length === 0}
-              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:text-slate-400"
+              className="w-full text-left px-4 py-3 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:text-slate-500"
             >
               <Trash2 size={14} className="text-rose-600" /> {t('actions.deleteAll')}
             </button>
@@ -1540,6 +1612,11 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Live region for screen reader announcements (WCAG 4.1.3) */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusAnnouncement}
+      </div>
     </div>
   );
 };
@@ -1567,14 +1644,18 @@ const RowComponent: React.FC<{
   return (
     <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
       <div id={`row-header-${row.id}`} className="p-6 flex items-center gap-8 group">
-        <input
-          type="text" value={row.UTTERANCE} onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
-          className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light truncate"
+        <textarea
+          value={row.UTTERANCE}
+          onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
+          rows={1}
+          onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }}
+          className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light resize-none overflow-hidden hover:bg-amber-50 hover:cursor-text focus:bg-amber-50 transition-colors rounded"
+          style={{ maxHeight: '4.2em', lineHeight: '1.4em' }}
         />
-        <div id={`pipeline-badges-${row.id}`} className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
-          <Badge label={t('pipeline.understand').toUpperCase()} status={row.nluStatus} />
-          <Badge label={t('pipeline.compose').toUpperCase()} status={row.visualStatus} />
-          <Badge label={t('pipeline.produce').toUpperCase()} status={row.bitmapStatus} />
+        <div id={`pipeline-badges-${row.id}`} className="flex gap-1.5 cursor-pointer" aria-label="Estado del pipeline" onClick={() => setIsOpen(!isOpen)}>
+          <Badge step={1} label={t('pipeline.understand')} status={row.nluStatus} />
+          <Badge step={2} label={t('pipeline.compose')} status={row.visualStatus} />
+          <Badge step={3} label={t('pipeline.produce')} status={row.bitmapStatus} />
         </div>
         <div
           id={`picto-thumbnail-${row.id}`}
@@ -1583,23 +1664,23 @@ const RowComponent: React.FC<{
         >
           {(row.structuredSvg || row.rawSvg) ? (
             <div
-              dangerouslySetInnerHTML={{ __html: row.structuredSvg || row.rawSvg! }}
+              dangerouslySetInnerHTML={{ __html: injectSvgA11y(row.structuredSvg || row.rawSvg!, row.UTTERANCE, row.prompt) }}
               className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
             />
           ) : row.bitmap ? (
-            <img src={row.bitmap} alt="Miniature" className="w-full h-full object-contain" />
+            <img src={row.bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain" />
           ) : (
             <div className="text-slate-200"><ImageIcon size={20} /></div>
           )}
         </div>
         <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
           {row.status === 'processing' ? (
-            <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title="Detener proceso">
-              <Square size={18} />
+            <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title="Detener proceso" aria-label="Detener proceso">
+              <Square size={18} aria-hidden="true" />
             </button>
           ) : (
-            <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full bg-white shadow-sm" title="Ejecutar pipeline completo">
-              <Play size={18} />
+            <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full bg-white shadow-sm" title="Ejecutar pipeline completo" aria-label="Ejecutar pipeline completo">
+              <Play size={18} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -1633,7 +1714,7 @@ const RowComponent: React.FC<{
               <div className="flex flex-col h-full">
                 <div className="flex-1 flex flex-col gap-6 overflow-y-auto">
                   <div id="hierarchical-elements">
-                    <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
+                    <label className="text-xs font-medium uppercase text-slate-500 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
                     <ElementsEditor elements={row.elements || []} onUpdate={val => {
                       onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
                       setElementsManuallyEdited(true);
@@ -1650,7 +1731,7 @@ const RowComponent: React.FC<{
                           setPromptManuallyEdited(false);
                         }}
                         disabled={isRegeneratingPrompt}
-                        className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-[10px] font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
+                        className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-xs font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
                         title={t('actions.regeneratePrompt')}
                       >
                         {isRegeneratingPrompt ? (
@@ -1668,7 +1749,7 @@ const RowComponent: React.FC<{
                     )}
                   </div>
                   <div id="spatial-prompt" className="flex-1 mt-6 border-t pt-6 border-slate-200 flex flex-col gap-3">
-                    <label className="text-[10px] font-medium uppercase text-slate-400 block tracking-widest">{t('editor.spatialLogic')}</label>
+                    <label className="text-xs font-medium uppercase text-slate-500 block tracking-widest">{t('editor.spatialLogic')}</label>
                     {isPromptEditing ? (
                       <textarea
                         value={row.prompt || ""}
@@ -1688,7 +1769,7 @@ const RowComponent: React.FC<{
                         {row.prompt && row.elements && row.elements.length > 0 ? (
                           <PromptRenderer prompt={row.prompt} elements={row.elements} />
                         ) : (
-                          <div className="text-slate-400">{row.prompt || ""}</div>
+                          <div className="text-slate-500">{row.prompt || ""}</div>
                         )}
                       </div>
                     )}
@@ -1700,7 +1781,7 @@ const RowComponent: React.FC<{
                           onProcess('bitmap');
                           setPromptManuallyEdited(false);
                         }}
-                        className="mt-3 w-full py-2 px-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-widest shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
+                        className="mt-3 w-full py-2 px-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-widest shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
                         title={t('pipeline.produce')}
                       >
                         <Play size={12} />
@@ -1720,7 +1801,7 @@ const RowComponent: React.FC<{
                 >
                   {row.bitmap ? (
                     <>
-                      <img src={row.bitmap} alt="Generated Pictogram" className="w-full h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
+                      <img src={row.bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
                       <button
                         onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
                         className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
@@ -1730,7 +1811,7 @@ const RowComponent: React.FC<{
                       </button>
                     </>
                   ) : (
-                    <div className="text-[10px] text-slate-400 uppercase font-medium">{t('editor.noBitmapRender')}</div>
+                    <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
                   )}
                 </div>
 
@@ -1766,7 +1847,7 @@ const RowComponent: React.FC<{
                     onLog('error', t('actions.copyRowError', { error: err.message }));
                   });
               }}
-              className="p-2 border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all bg-white shadow-sm"
+              className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all bg-white shadow-sm"
               title={t('actions.copyRow')}
             >
               <Copy size={14} />
@@ -1776,7 +1857,7 @@ const RowComponent: React.FC<{
                 e.stopPropagation();
                 setShowDeleteConfirm(true);
               }}
-              className="p-2 border border-slate-200 hover:border-rose-600 text-slate-400 hover:text-rose-600 transition-all bg-white shadow-sm"
+              className="p-2 border border-slate-200 hover:border-rose-600 text-slate-500 hover:text-rose-600 transition-all bg-white shadow-sm"
               title={t('actions.deleteRow')}
             >
               <Trash2 size={14} />
@@ -1841,21 +1922,21 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
   const bg = status === 'processing' ? 'bg-orange-50/50' : status === 'completed' ? 'bg-white' : status === 'outdated' ? 'bg-amber-50/50' : 'bg-slate-50/50';
 
   return (
-    <div id={id} className={`flex flex-col gap-4 min-h-[500px] border p-6 transition-all shadow-sm ${bg}`}>
+    <div id={id} role="region" aria-label={label} className={`flex flex-col gap-4 min-h-[500px] border p-6 transition-all shadow-sm ${bg}`}>
       <div className="flex items-center justify-between border-b pb-4 border-slate-100">
-        <h3 className="text-[11px] font-medium uppercase tracking-wider text-slate-900">{label}</h3>
+        <h3 className="text-xs font-medium uppercase tracking-wider text-slate-900">{label}</h3>
         <div className="flex items-center gap-3">
           {status === 'processing' ? (
             <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono font-medium text-orange-600">{elapsed.toFixed(1)}s</span>
+              <span className="text-xs font-mono font-medium text-orange-600">{elapsed.toFixed(1)}s</span>
               <button onClick={onStop} className="p-2 bg-orange-600 text-white animate-spectral rounded-full"><Square size={14} /></button>
             </div>
           ) : (
             <div className="flex items-center gap-3">
-              {duration && <span className="text-[10px] text-slate-400 font-mono font-medium">{duration.toFixed(1)}s</span>}
+              {duration && <span className="text-xs text-slate-500 font-mono font-medium">{duration.toFixed(1)}s</span>}
               {actionNode}
-              <button onClick={onFocus} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full"><Maximize size={14} /></button>
-              <button onClick={onRegen} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full"><Play size={14} /></button>
+              <button onClick={onFocus} className="p-2 border hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full" aria-label="Focus view"><Maximize size={14} aria-hidden="true" /></button>
+              <button onClick={onRegen} className="p-2 border hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full" aria-label="Regenerate"><Play size={14} aria-hidden="true" /></button>
             </div>
           )}
         </div>
@@ -1949,7 +2030,7 @@ const SmartNLUEditor: React.FC<{
   return (
     <div className="space-y-4">
       {/* CONTEXTO section */}
-      <div id="nlu-context" className="border bg-white p-3 shadow-sm text-[10px] space-y-2">
+      <div id="nlu-context" className="border bg-white p-3 shadow-sm text-xs space-y-2">
         <span className="nlu-key uppercase">{t('editor.context')}</span>
         <div className="mt-2 space-y-2 pt-2 border-t">
           {/* Language selector */}
@@ -1988,10 +2069,10 @@ const SmartNLUEditor: React.FC<{
           <div className="grid grid-cols-3 gap-2 items-center">
             <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.region')}</label>
             <div className="col-span-2 flex items-center gap-1 text-xs">
-              <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-400 italic'}>
+              <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-500 italic'}>
                 {config.geoContext?.region || t('editor.regionNotConfigured')}
               </span>
-              <span className="text-slate-300 cursor-help" title={t('editor.regionTooltip')}>
+              <span className="text-slate-500 cursor-help" title={t('editor.regionTooltip')}>
                 <HelpCircle size={12} />
               </span>
             </div>
@@ -2000,7 +2081,7 @@ const SmartNLUEditor: React.FC<{
       </div>
 
       {/* METADATA CLASSIFICATION */}
-      <details className="border bg-white p-3 shadow-sm text-[10px]" open>
+      <details className="border bg-white p-3 shadow-sm text-xs" open>
         <summary className="nlu-key cursor-pointer uppercase">{t('editor.metadataClassification')}</summary>
         <div className="mt-3 space-y-2 pt-3 border-t">
           <div className="grid grid-cols-3 gap-2 items-center">
@@ -2030,21 +2111,21 @@ const SmartNLUEditor: React.FC<{
 
       {/* FRAMES */}
       {nlu.frames?.map((frame, fIdx) => (
-        <details key={fIdx} className="border bg-white p-3 shadow-sm text-[10px]" open>
+        <details key={fIdx} className="border bg-white p-3 shadow-sm text-xs" open>
           <summary className="nlu-key cursor-pointer uppercase">
             {frame.frame_label || frame.frame_name}
             {' '}<span className="font-mono lowercase text-violet-500" title={frame.frame_name}>({frame.lexical_unit})</span>
           </summary>
           <div className="mt-3 space-y-2 pt-3 border-t">
             {frame.frame_label && frame.frame_name !== frame.frame_label && (
-              <div className="text-[9px] text-slate-400 font-mono mb-1">FrameNet: {frame.frame_name}</div>
+              <div className="text-xs text-slate-500 font-mono mb-1">FrameNet: {frame.frame_name}</div>
             )}
             {Object.entries(frame.roles || {}).map(([role, rawData]) => {
               const data = rawData as NLUFrameRole;
               return (
                 <div key={role} className="flex gap-2">
                   <span className="font-medium w-20 text-slate-500 shrink-0">{role}:</span>
-                  <span className="text-slate-900 truncate">{data.surface} <span className="text-[9px] text-violet-400">[{data.type}]</span></span>
+                  <span className="text-slate-900 truncate">{data.surface} <span className="text-xs text-violet-400">[{data.type}]</span></span>
                 </div>
               )
             })}
@@ -2053,7 +2134,7 @@ const SmartNLUEditor: React.FC<{
       ))}
 
       {/* DETAILED LINGUISTIC ANALYSIS — expanded by default */}
-      <details className="border bg-white p-3 shadow-sm text-[10px]" open>
+      <details className="border bg-white p-3 shadow-sm text-xs" open>
         <summary className="nlu-key cursor-pointer">{t('editor.detailedAnalysis').toUpperCase()}</summary>
         <div className="mt-3 space-y-4 pt-3 border-t">
           <div>
@@ -2278,7 +2359,7 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
       </div>
       <button
         onClick={() => addElement(null)}
-        className="mt-4 pt-3 border-t border-slate-200 text-left text-[10px] font-bold text-violet-600 hover:text-violet-900 transition-colors w-full flex items-center gap-2 uppercase tracking-wider"
+        className="mt-4 pt-3 border-t border-slate-200 text-left text-xs font-bold text-violet-600 hover:text-violet-900 transition-colors w-full flex items-center gap-2 uppercase tracking-wider"
       >
         <Plus size={14} /> {t('editor.addRootElement')}
       </button>
@@ -2286,15 +2367,33 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
   );
 };
 
-const Badge: React.FC<{ label: string; status: StepStatus }> = ({ label, status }) => {
+const Badge: React.FC<{ step: number; label: string; status: StepStatus }> = ({ step, label, status }) => {
   const styles = {
-    idle: 'bg-slate-100 text-slate-300 border-slate-200',
+    idle: 'bg-slate-100 text-slate-500 border-slate-200',
     processing: 'bg-orange-600 text-white animate-pulse border-orange-500',
     completed: 'bg-emerald-50 text-emerald-700 border-emerald-300',
     outdated: 'bg-amber-50 text-amber-800 border-amber-300',
     error: 'bg-rose-50 text-rose-700 border-rose-300'
   };
-  return <div className={`px-2.5 py-0.5 text-[8px] font-medium uppercase tracking-widest border transition-all ${styles[status]}`}>{label}</div>;
+  const tooltipId = `badge-tip-${step}`;
+  return (
+    <div className="group/badge relative">
+      <div
+        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border transition-all cursor-default ${styles[status]}`}
+        aria-describedby={tooltipId}
+        tabIndex={0}
+      >
+        {step}
+      </div>
+      <div
+        id={tooltipId}
+        role="tooltip"
+        className="invisible group-hover/badge:visible group-focus-within/badge:visible absolute left-1/2 -translate-x-1/2 bottom-full mb-2 whitespace-nowrap bg-slate-900 text-white text-xs font-medium px-2.5 py-1 rounded shadow-lg z-50 pointer-events-none"
+      >
+        {label}
+      </div>
+    </div>
+  );
 };
 
 const FOCUS_STEPS = ['nlu', 'visual', 'bitmap', 'eval'] as const;
@@ -2314,6 +2413,7 @@ const FocusViewModal: React.FC<{
   onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'eval') => void;
 }> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
   const { t } = useTranslation();
+  const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
   const [elementsManuallyEdited, setElementsManuallyEdited] = useState(false);
@@ -2331,7 +2431,6 @@ const FocusViewModal: React.FC<{
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrev(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); goToNext(); }
-      else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -2368,7 +2467,7 @@ const FocusViewModal: React.FC<{
       case 'visual': return (
         <div className="flex flex-col h-full gap-6">
           <div>
-            <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
+            <label className="text-xs font-medium uppercase text-slate-500 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
             <ElementsEditor elements={row.elements || []} onUpdate={val => {
               onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
               setElementsManuallyEdited(true);
@@ -2384,7 +2483,7 @@ const FocusViewModal: React.FC<{
                   setElementsManuallyEdited(false);
                 }}
                 disabled={isRegeneratingPrompt}
-                className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-[10px] font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
+                className="mt-3 w-full py-2 px-3 bg-violet-950 hover:bg-black text-white transition-all flex items-center justify-end gap-2 text-xs font-bold uppercase tracking-widest shadow-lg disabled:opacity-50 disabled:cursor-not-allowed animate-in fade-in slide-in-from-top-2 duration-300"
                 title={t('actions.regeneratePrompt')}
               >
                 {isRegeneratingPrompt ? (
@@ -2402,7 +2501,7 @@ const FocusViewModal: React.FC<{
             )}
           </div>
           <div className="flex-1 mt-6 border-t pt-6 border-slate-200">
-            <label className="text-[10px] font-medium uppercase text-slate-400 block mb-3 tracking-widest">{t('editor.spatialLogic')}</label>
+            <label className="text-xs font-medium uppercase text-slate-500 block mb-3 tracking-widest">{t('editor.spatialLogic')}</label>
             {isPromptEditing ? (
               <textarea
                 value={row.prompt || ""}
@@ -2419,7 +2518,7 @@ const FocusViewModal: React.FC<{
                 {row.prompt && row.elements && row.elements.length > 0 ? (
                   <PromptRenderer prompt={row.prompt} elements={row.elements} />
                 ) : (
-                  <div className="text-slate-400">{row.prompt || ""}</div>
+                  <div className="text-slate-500">{row.prompt || ""}</div>
                 )}
               </div>
             )}
@@ -2430,51 +2529,48 @@ const FocusViewModal: React.FC<{
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
             {row.bitmap ? (
-              <img src={row.bitmap} className="max-w-full max-h-full object-contain shadow-2xl bg-white" alt="Full size render" />
+              <img src={row.bitmap} className="max-w-full max-h-full object-contain shadow-2xl bg-white" alt={row.UTTERANCE} />
             ) : (
-              <p className="text-slate-400 font-mono">No bitmap generated yet.</p>
+              <p className="text-slate-500 font-mono">No bitmap generated yet.</p>
             )}
           </div>
         );
       case 'eval':
         return (
           <div className="flex h-full bg-slate-50 gap-0">
-            {/* Left Column: Image Section + SVG Generator */}
-            <div className="w-5/12 bg-white border-r border-slate-200 flex flex-col">
-              {/* Top half: Bitmap */}
-              <div className="h-1/2 flex items-center justify-center p-8 relative border-b border-slate-100">
-                <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                {row.bitmap ? (
-                  <img src={row.bitmap} alt="Evaluation Context" className="max-w-full max-h-full object-contain shadow-lg" />
-                ) : (
-                  <div className="text-slate-300 font-mono text-xs">{t('editor.noBitmapReference')}</div>
-                )}
-              </div>
+            {/* Left: Bitmap */}
+            <div className="w-1/2 bg-white border-r border-slate-200 flex items-center justify-center p-8 relative">
+              <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
+              {row.bitmap ? (
+                <img src={row.bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain shadow-lg" />
+              ) : (
+                <div className="text-slate-300 font-mono text-xs">{t('editor.noBitmapReference')}</div>
+              )}
+            </div>
 
-              {/* Bottom half: SVG Generator + Share */}
-              <div className="h-1/2 p-6 bg-slate-50 flex flex-col">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">SVG Output (SSoT)</h3>
-                  {(() => {
-                    const isShared = row.shared;
-                    return (
-                      <button
-                        onClick={onShare}
-                        disabled={isShared}
-                        className={`p-2 transition-all shadow-sm ${isShared
-                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                          : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
-                          }`}
-                        title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
-                      >
-                        {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
-                      </button>
-                    );
-                  })()}
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
-                </div>
+            {/* Right: SVG Generator + Share */}
+            <div className="w-1/2 p-6 bg-slate-50 flex flex-col">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
+                {(() => {
+                  const isShared = row.shared;
+                  return (
+                    <button
+                      onClick={onShare}
+                      disabled={isShared}
+                      className={`p-2 transition-all shadow-sm ${isShared
+                        ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                        : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
+                        }`}
+                      title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
+                    >
+                      {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
+                    </button>
+                  );
+                })()}
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
               </div>
             </div>
           </div>
@@ -2485,7 +2581,7 @@ const FocusViewModal: React.FC<{
 
   return (
     <div className="focus-modal-backdrop animate-in fade-in duration-300" onClick={onClose}>
-      <div className="focus-modal-content animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+      <div className="focus-modal-content animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} {...focusDialogProps}>
         <header className="p-4 border-b bg-white flex items-center gap-3">
           <button onClick={goToPrev} className={`p-2 hover:bg-slate-100 transition-opacity ${hasPrev ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Previous step">
             <ChevronLeft size={18} />
@@ -2504,7 +2600,7 @@ const FocusViewModal: React.FC<{
                 ))}
               </div>
             </div>
-            <p className="text-xs text-slate-400 truncate">{row.UTTERANCE}</p>
+            <p className="text-xs text-slate-500 truncate">{row.UTTERANCE}</p>
           </div>
           <button onClick={goToNext} className={`p-2 hover:bg-slate-100 transition-opacity ${hasNext ? '' : 'opacity-20 pointer-events-none'}`} aria-label="Next step">
             <ChevronRight size={18} />
@@ -2512,15 +2608,31 @@ const FocusViewModal: React.FC<{
           <button onClick={onClose} className="p-2 hover:bg-slate-100 ml-1"><X size={18} /></button>
         </header>
         <main className="flex-1 p-6 overflow-auto bg-slate-50">{renderContent()}</main>
-        <footer className="p-4 border-t bg-white flex justify-end gap-3">
-          {mode === 'bitmap' && row.bitmap && (
-            <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = 'pictogram.png'; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">
-              <Download size={14} /> Download PNG
+        <footer className="p-4 border-t bg-white flex justify-between gap-3">
+          {/* Left actions */}
+          <div className="flex gap-3">
+            {(mode === 'bitmap' || mode === 'eval') && row.bitmap && (
+              <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                <Download size={14} /> PNG
+              </button>
+            )}
+          </div>
+          {/* Right actions */}
+          <div className="flex gap-3">
+            {mode === 'eval' && (row.structuredSvg || row.rawSvg) && onOpenEditor && (
+              <button onClick={onOpenEditor} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                <Edit size={14} /> Editar SVG
+              </button>
+            )}
+            {mode === 'eval' && (row.structuredSvg || row.rawSvg) && (
+              <button onClick={() => { const svg = row.structuredSvg || row.rawSvg!; const blob = new Blob([svg], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                <Download size={14} /> SVG
+              </button>
+            )}
+            <button onClick={handleCopy} className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg">
+              <Copy size={14} /> {copyStatus}
             </button>
-          )}
-          <button onClick={handleCopy} className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-[10px] tracking-widest hover:bg-black transition-all shadow-lg">
-            <Copy size={14} /> {copyStatus}
-          </button>
+          </div>
         </footer>
       </div>
     </div>

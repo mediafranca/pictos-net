@@ -55,7 +55,7 @@ const RenameField: React.FC<{ elementId: string }> = ({ elementId }) => {
                 />
                 {status === 'success' && <Check size={14} className="text-emerald-500 shrink-0" />}
             </div>
-            {status === 'error' && <p className="text-[10px] text-red-500">{errorMsg}</p>}
+            {status === 'error' && <p className="text-xs text-red-500">{errorMsg}</p>}
         </div>
     );
 };
@@ -89,7 +89,7 @@ const DeleteButton: React.FC<{ elementId: string }> = ({ elementId }) => {
             onClick={() => setConfirming(true)}
             className="w-full flex items-center justify-center gap-2 py-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded transition-colors"
         >
-            <Trash2 size={13} />
+            <Trash2 size={13} aria-hidden="true" />
             {t('svgEditor.deleteElement')}
         </button>
     );
@@ -109,7 +109,7 @@ const PropertyRow: React.FC<PropertyRowProps> = ({ label, property, value, libra
     const isColor = property === 'fill' || property === 'stroke';
 
     return (
-        <div className="flex items-center gap-1.5 text-[10px]">
+        <div className="flex items-center gap-1.5 text-xs">
             <span className={`w-16 shrink-0 font-mono text-slate-500 ${isOverridden ? 'text-amber-600' : ''}`}>
                 {label}
                 {isOverridden && <span className="ml-0.5 text-amber-500">*</span>}
@@ -128,7 +128,7 @@ const PropertyRow: React.FC<PropertyRowProps> = ({ label, property, value, libra
                 type="text"
                 value={value}
                 onChange={(e) => onChange(property, e.target.value)}
-                className="flex-1 min-w-0 font-mono border border-slate-200 rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-violet-400 bg-white"
+                className="flex-1 min-w-0 font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-violet-400 bg-white"
             />
         </div>
     );
@@ -164,12 +164,12 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
     return (
         <div className="border border-slate-200 rounded-lg overflow-hidden">
             <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-50 border-b border-slate-100">
-                <span className="text-[10px] font-mono text-violet-700 font-bold">.{className}</span>
+                <span className="text-xs font-mono text-violet-700 font-bold">.{className}</span>
                 <div className="flex items-center gap-1">
                     {hasOverrides && (
                         <button
                             onClick={onRestore}
-                            className="flex items-center gap-0.5 text-[9px] text-amber-600 hover:text-amber-800 hover:bg-amber-50 px-1.5 py-0.5 rounded transition-colors"
+                            className="flex items-center gap-0.5 text-xs text-amber-600 hover:text-amber-800 hover:bg-amber-50 px-1.5 py-0.5 rounded transition-colors"
                             title="Restore to library original"
                         >
                             <RotateCcw size={9} />
@@ -178,7 +178,7 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
                     )}
                     <button
                         onClick={onUncite}
-                        className="flex items-center gap-0.5 text-[9px] text-slate-400 hover:text-red-500 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors"
+                        className="flex items-center gap-0.5 text-xs text-slate-500 hover:text-red-500 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors"
                         title="Remove class from element"
                     >
                         <X size={9} />
@@ -197,10 +197,10 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
                         onChange={onOverrideChange}
                     />
                 )) : (
-                    <p className="text-[10px] text-slate-400 italic">sin propiedades visuales</p>
+                    <p className="text-xs text-slate-500 italic">sin propiedades visuales</p>
                 )}
                 {hasOverrides && (
-                    <p className="text-[9px] text-amber-500 mt-1">
+                    <p className="text-xs text-amber-500 mt-1">
                         * modificado — distinto del original de biblioteca
                     </p>
                 )}
@@ -237,7 +237,7 @@ const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
 
     return (
         <div className="px-4 py-3 space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 {t('svgEditor.presentationAttrs')}
             </label>
             <div className="space-y-1.5">
@@ -253,20 +253,20 @@ const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
             </div>
             {confirming ? (
                 <div className="space-y-2 mt-2">
-                    <p className="text-[10px] text-amber-600 flex items-start gap-1">
+                    <p className="text-xs text-amber-600 flex items-start gap-1">
                         <AlertTriangle size={11} className="shrink-0 mt-0.5" />
                         {t('svgEditor.removeInlineStylesWarning')}
                     </p>
                     <div className="flex gap-2">
                         <button
                             onClick={() => setConfirming(false)}
-                            className="flex-1 py-1 text-[10px] border border-slate-200 rounded hover:bg-slate-100 transition-colors"
+                            className="flex-1 py-1 text-xs border border-slate-200 rounded hover:bg-slate-100 transition-colors"
                         >
                             {t('actions.cancel')}
                         </button>
                         <button
                             onClick={() => { stripInlineStyles(elementId); setConfirming(false); }}
-                            className="flex-1 py-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
+                            className="flex-1 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
                         >
                             {t('svgEditor.removeInlineStyles')}
                         </button>
@@ -275,7 +275,7 @@ const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
             ) : (
                 <button
                     onClick={() => setConfirming(true)}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
                 >
                     {t('svgEditor.removeInlineStyles')}
                 </button>
@@ -309,7 +309,7 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
 
     return (
         <div className="px-4 py-3 space-y-2 border-b border-slate-100">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 {t('svgEditor.groupName')}
             </label>
 
@@ -317,9 +317,9 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
             <div className="relative">
                 <button
                     onClick={() => setShowClassPicker(!showClassPicker)}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
                 >
-                    <Plus size={10} />
+                    <Plus size={10} aria-hidden="true" />
                     {t('svgEditor.applyClass')}
                 </button>
                 {showClassPicker && availableClasses.length > 0 && (
@@ -328,7 +328,7 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
                             <button
                                 key={cls}
                                 onClick={() => { addClassToElement(elementId, cls); setShowClassPicker(false); }}
-                                className="w-full text-left px-3 py-1.5 text-[10px] font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
+                                className="w-full text-left px-3 py-1.5 text-xs font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
                             >
                                 .{cls}
                             </button>
@@ -340,20 +340,20 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
             {/* Strip inline styles with warning */}
             {confirmStrip ? (
                 <div className="space-y-2">
-                    <p className="text-[10px] text-amber-600 flex items-start gap-1">
+                    <p className="text-xs text-amber-600 flex items-start gap-1">
                         <AlertTriangle size={11} className="shrink-0 mt-0.5" />
                         {t('svgEditor.removeInlineStylesWarning')}
                     </p>
                     <div className="flex gap-2">
                         <button
                             onClick={() => setConfirmStrip(false)}
-                            className="flex-1 py-1 text-[10px] border border-slate-200 rounded hover:bg-slate-100 transition-colors"
+                            className="flex-1 py-1 text-xs border border-slate-200 rounded hover:bg-slate-100 transition-colors"
                         >
                             {t('actions.cancel')}
                         </button>
                         <button
                             onClick={() => { stripInlineStyles(elementId); setConfirmStrip(false); }}
-                            className="flex-1 py-1 text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
+                            className="flex-1 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
                         >
                             {t('svgEditor.removeInlineStyles')}
                         </button>
@@ -362,7 +362,7 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
             ) : (
                 <button
                     onClick={() => setConfirmStrip(true)}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-amber-600 hover:bg-amber-50 border border-amber-200 rounded transition-colors"
                 >
                     {t('svgEditor.removeInlineStyles')}
                 </button>
@@ -371,19 +371,19 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
             {/* Animation placeholder */}
             <button
                 disabled
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-400 border border-slate-200 rounded cursor-not-allowed opacity-50"
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-slate-500 border border-slate-200 rounded cursor-not-allowed opacity-50"
                 title={t('svgEditor.animationComingSoon')}
             >
-                <Sparkles size={10} />
+                <Sparkles size={10} aria-hidden="true" />
                 {t('svgEditor.animationComingSoon')}
             </button>
 
             {/* Ungroup */}
             <button
                 onClick={() => ungroupElement(elementId)}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-slate-600 hover:bg-slate-100 border border-slate-200 rounded transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100 border border-slate-200 rounded transition-colors"
             >
-                <Ungroup size={12} />
+                <Ungroup size={12} aria-hidden="true" />
                 {t('svgEditor.ungroup')}
             </button>
         </div>
@@ -440,7 +440,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
 
     if (!selectedElementId) {
         return (
-            <div id="svg-editor-props-empty" className="p-6 text-center text-slate-400 text-sm">
+            <div id="svg-editor-props-empty" className="p-6 text-center text-slate-500 text-sm">
                 <p>{t('svgEditor.selectElement')}</p>
             </div>
         );
@@ -457,7 +457,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
 
             {/* Header */}
             <div id="svg-editor-props-header" className="px-4 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{t('svgEditor.properties')}</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t('svgEditor.properties')}</p>
                 <p className="text-xs font-mono text-slate-700 mt-0.5 truncate">{selectedElementId}</p>
             </div>
 
@@ -472,21 +472,21 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
                 {/* ── Cited classes with local override editors ── */}
                 <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
                     <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                             {isRaw ? t('svgEditor.applyClass') : t('svgEditor.localOverride')}
                         </label>
                         <button
                             onClick={() => setIsPickerOpen(true)}
-                            className="flex items-center gap-1 text-[10px] text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-violet-200"
+                            className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-violet-200"
                         >
-                            <Plus size={10} />
+                            <Plus size={10} aria-hidden="true" />
                             {t('svgEditor.addStyle')}
                         </button>
                     </div>
 
                     {currentClasses.length === 0 ? (
                         <div className="py-6 text-center">
-                            <p className="text-xs text-slate-400 italic">{t('svgEditor.noStylesAssigned')}</p>
+                            <p className="text-xs text-slate-500 italic">{t('svgEditor.noStylesAssigned')}</p>
                         </div>
                     ) : (
                         currentClasses.map(cls => {
@@ -519,8 +519,8 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
                         <div className="px-4 pb-4">
                             <div className="border border-amber-200 rounded-lg overflow-hidden bg-amber-50">
                                 <div className="px-2.5 py-1.5 border-b border-amber-100 flex items-center justify-between">
-                                    <span className="text-[10px] font-mono text-amber-700 font-bold">from-inline</span>
-                                    <span className="text-[9px] text-amber-600">{t('svgEditor.fromInlineLabel')}</span>
+                                    <span className="text-xs font-mono text-amber-700 font-bold">from-inline</span>
+                                    <span className="text-xs text-amber-600">{t('svgEditor.fromInlineLabel')}</span>
                                 </div>
                                 <div className="px-2.5 py-2 space-y-1.5">
                                     {Object.entries(fromInline).map(([prop, val]) => (
@@ -541,7 +541,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
 
             {/* ── Identity ── */}
             <div id="svg-editor-props-identity" className="border-t border-slate-100 px-4 py-3 space-y-1.5 shrink-0">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                     {t('svgEditor.elementId')}
                 </label>
                 <RenameField elementId={selectedElementId} />

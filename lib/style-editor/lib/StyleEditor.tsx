@@ -243,7 +243,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
                 onClick={handleDownloadCss}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
               >
-                <Download size={16} /> <span className="hidden sm:inline">Export CSS</span>
+                <Download size={16} aria-hidden="true" /> <span className="hidden sm:inline">Export CSS</span>
               </button>
             )}
 
@@ -252,7 +252,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
                 onClick={handleCreateNew}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 rounded-lg transition-all shadow-md hover:shadow-lg"
               >
-                <Plus size={16} /> <span className="hidden sm:inline">New Style</span>
+                <Plus size={16} aria-hidden="true" /> <span className="hidden sm:inline">New Style</span>
               </button>
             )}
           </div>
@@ -270,8 +270,8 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
                 onClick={handleCreateNew}
                 className="group bg-slate-100 rounded-lg aspect-square flex flex-col items-center justify-center gap-1 cursor-pointer select-none border-2 border-dashed border-slate-300 hover:border-violet-400 hover:bg-violet-50 transition-colors"
               >
-                <Plus size={20} className="text-slate-400 group-hover:text-violet-500 transition-colors" />
-                <span className="text-[10px] font-mono text-slate-400 group-hover:text-violet-500 transition-colors">nuevo</span>
+                <Plus size={20} className="text-slate-500 group-hover:text-violet-500 transition-colors" />
+                <span className="text-xs font-mono text-slate-500 group-hover:text-violet-500 transition-colors">nuevo</span>
               </button>
             )}
             {styles.map(style => (
@@ -290,7 +290,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({
           <div id="style-editor-code-view" className="max-w-4xl mx-auto">
             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
-                <span className="text-xs font-mono text-gray-400">generated-styles.css</span>
+                <span className="text-xs font-mono text-gray-500">generated-styles.css</span>
                 <button
                   onClick={() => navigator.clipboard.writeText(generateCssString(styles, keyframes))}
                   className="text-xs text-blue-400 hover:text-blue-300 font-medium"

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Undo, Redo, Download } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 import SemanticTree from './SemanticTree';
 import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
@@ -91,6 +92,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     svgSource = null,
 }) => {
     const { t } = useTranslation();
+    const { dialogProps } = useDialogA11y({ isOpen, onClose, label: t('svg.editor') });
     const [currentSvg, setCurrentSvg] = useState(initialSvg);
     const loadSVG = useSVGEditorStore(state => state.loadSVG);
     const setStyles = useSVGEditorStore(state => state.setStyles);
@@ -162,12 +164,12 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
 
     return (
         <div id="svg-editor-modal" className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center animate-in fade-in duration-200">
-            <div id="svg-editor-container" className="bg-slate-900 w-full h-full flex flex-col">
+            <div id="svg-editor-container" className="bg-slate-900 w-full h-full flex flex-col" {...dialogProps}>
                 {/* Header */}
                 <header id="svg-editor-header" className="h-16 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-6">
                     <div className="flex items-center gap-4">
-                        <button onClick={onClose} className="text-white hover:text-slate-300">
-                            <X size={24} />
+                        <button onClick={onClose} className="text-white hover:text-slate-300" aria-label={t('actions.close')}>
+                            <X size={24} aria-hidden="true" />
                         </button>
                         <div>
                             <h2 className="text-lg font-bold text-white font-mono leading-none">
@@ -187,16 +189,18 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                                 disabled={!canUndo()}
                                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors border-r border-slate-700"
                                 title={t('svgEditor.undo')}
+                                aria-label={t('svgEditor.undo')}
                             >
-                                <Undo size={16} />
+                                <Undo size={16} aria-hidden="true" />
                             </button>
                             <button
                                 onClick={redo}
                                 disabled={!canRedo()}
                                 className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                                 title={t('svgEditor.redo')}
+                                aria-label={t('svgEditor.redo')}
                             >
-                                <Redo size={16} />
+                                <Redo size={16} aria-hidden="true" />
                             </button>
                         </div>
 
@@ -205,7 +209,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                             onClick={handleExport}
                             className="px-3 py-1.5 text-sm rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors flex items-center gap-2 mr-2"
                         >
-                            <Download size={14} />
+                            <Download size={14} aria-hidden="true" />
                             {t('svg.editorExport')}
                         </button>
 

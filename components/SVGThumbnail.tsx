@@ -71,13 +71,13 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
     const badgeLabel = type === 'raw' ? 'Raw' : 'Structured';
 
     return (
-        <div className="relative group flex flex-col items-center">
+        <div className="relative group flex flex-col items-center" role="img" aria-label={utterance}>
             {/* Thumbnail Preview */}
             <div className={`w-24 h-24 border-2 rounded bg-white flex items-center justify-center p-2 relative overflow-hidden transition-colors ${isProcessing ? 'border-violet-500 animate-pulse' : 'border-slate-200 hover:border-slate-300'}`}>
                 <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
 
                 {/* SVG Badge */}
-                <div className={`absolute top-1 left-1 text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${badgeStyles} tracking-wider z-10`}>
+                <div className={`absolute top-1 left-1 text-xs font-bold uppercase px-1.5 py-0.5 rounded ${badgeStyles} tracking-wider z-10`}>
                     {badgeLabel}
                 </div>
 
@@ -87,8 +87,9 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
                         onClick={() => setMenuOpen(!menuOpen)}
                         className="absolute top-1 right-1 p-1 bg-white/90 hover:bg-slate-100 rounded shadow-sm z-10 opacity-0 group-hover:opacity-100 transition-opacity"
                         title="Actions"
+                        aria-label="Actions"
                     >
-                        <MoreVertical size={12} className="text-slate-600" />
+                        <MoreVertical size={12} className="text-slate-600" aria-hidden="true" />
                     </button>
                 )}
 
@@ -121,7 +122,7 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors"
                     >
-                        <Download size={14} />
+                        <Download size={14} aria-hidden="true" />
                         <span>{t('svg.download')}</span>
                     </button>
 
@@ -133,7 +134,7 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition-colors"
                     >
-                        <RefreshCw size={14} />
+                        <RefreshCw size={14} aria-hidden="true" />
                         <span>Retrace</span>
                     </button>
 
@@ -146,7 +147,7 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
                             }}
                             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-violet-600 hover:bg-violet-50 transition-colors border-t border-slate-100"
                         >
-                            <FileCode size={14} />
+                            <FileCode size={14} aria-hidden="true" />
                             <span>Process</span>
                         </button>
                     )}
@@ -155,14 +156,14 @@ export const SVGThumbnail: React.FC<SVGThumbnailProps> = ({
 
             {/* Processing Status Message */}
             {isProcessing && processingStatus && (
-                <div className="mt-2 text-[9px] text-violet-600 font-medium text-center max-w-[120px] leading-tight">
+                <div className="mt-2 text-xs text-violet-600 font-medium text-center max-w-[120px] leading-tight">
                     {processingStatus}
                 </div>
             )}
 
             {/* Utterance Label (on hover) */}
             {!isProcessing && (
-                <div className="absolute -bottom-6 left-0 right-0 text-[9px] text-slate-400 truncate text-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute -bottom-6 left-0 right-0 text-xs text-slate-500 truncate text-center opacity-0 group-hover:opacity-100 transition-opacity">
                     {utterance}
                 </div>
             )}

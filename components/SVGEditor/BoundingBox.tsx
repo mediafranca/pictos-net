@@ -697,19 +697,29 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
 
         let updatedTarget = element;
 
-        /*
         if (element.tagName.toLowerCase() === 'g') {
-            const descendants = element.querySelectorAll<SVGGraphicsElement>(
-                'rect,circle,ellipse,line,polyline,polygon,path'
+            // Groups: compose an affine transform on the <g> itself so all
+            // children move/scale together, preserving spatial relationships.
+            const tx = newBBox.x - scaleX * elementBBox.x;
+            const ty = newBBox.y - scaleY * elementBBox.y;
+            const delta = new DOMMatrix([scaleX, 0, 0, scaleY, tx, ty]);
+
+            let existing = new DOMMatrix();
+            const baseVal = (element as SVGGraphicsElement).transform?.baseVal;
+            if (baseVal) {
+                for (let i = 0; i < baseVal.numberOfItems; i++) {
+                    const m = baseVal.getItem(i).matrix;
+                    existing = existing.multiply(new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]));
+                }
+            }
+
+            const composed = existing.multiply(delta);
+            element.setAttribute('transform',
+                `matrix(${composed.a},${composed.b},${composed.c},${composed.d},${composed.e},${composed.f})`
             );
-            descendants.forEach((child) => {
-                applyMapToElement(child);
-            });
         } else {
             updatedTarget = applyMapToElement(element);
         }
-        */
-        updatedTarget = applyMapToElement(element);
 
         if (updatedTarget !== element) {
             targetElementRef.current = updatedTarget;
@@ -840,19 +850,19 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
         let updatedTarget = element;
 
         if (element.tagName.toLowerCase() === 'g') {
-            const descendants = element.querySelectorAll<SVGGraphicsElement>('rect,circle,ellipse,line,polyline,polygon,path');
-            descendants.forEach((child) => {
-                applyRotateToElement(child);
-            });
+            // Groups: the drag preview (handleMouseMove) already set the
+            // correct composed transform on the <g> element:
+            //   originalTransform + " rotate(θ, cx, cy)"
+            // Nothing else to do — just serialize below.
         } else {
             updatedTarget = applyRotateToElement(element);
-        }
 
-        const originalTransform = rotation.originalTransform;
-        if (originalTransform) {
-            updatedTarget.setAttribute('transform', originalTransform);
-        } else {
-            updatedTarget.removeAttribute('transform');
+            const originalTransform = rotation.originalTransform;
+            if (originalTransform) {
+                updatedTarget.setAttribute('transform', originalTransform);
+            } else {
+                updatedTarget.removeAttribute('transform');
+            }
         }
 
         if (updatedTarget !== element) {

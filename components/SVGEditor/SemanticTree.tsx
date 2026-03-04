@@ -158,10 +158,11 @@ function TreeNode({
                     <button
                         onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
                         className="p-0.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-200 shrink-0"
+                        aria-label={isExpanded ? 'Collapse' : 'Expand'}
                     >
                         {isExpanded
-                            ? <ChevronDown className="w-3.5 h-3.5" />
-                            : <ChevronRight className="w-3.5 h-3.5" />}
+                            ? <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                            : <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />}
                     </button>
                 ) : (
                     <div className="w-5 shrink-0" />
@@ -212,7 +213,7 @@ function TreeNode({
                             {node.id}
                         </span>
                         {classText && (
-                            <span className="text-[10px] text-violet-500 truncate font-mono ml-1">{classText}</span>
+                            <span className="text-xs text-violet-500 truncate font-mono ml-1">{classText}</span>
                         )}
                         {/* Inline fill indicator for raw SVGs without classes */}
                         {!classText && styleInfo.inlineFill && (
@@ -276,18 +277,20 @@ function TreeNode({
                 {!isEditingId && !isConfirmingDelete && (
                     <>
                         <button
-                            className="p-1 rounded text-slate-400 opacity-0 group-hover:opacity-100 hover:text-slate-700 hover:bg-slate-200 transition-opacity shrink-0"
+                            className="p-1 rounded text-slate-500 opacity-0 group-hover:opacity-100 hover:text-slate-700 hover:bg-slate-200 transition-opacity shrink-0"
                             onClick={(e) => { e.stopPropagation(); setIsEditingId(true); }}
                             title={t('svgEditor.rename')}
+                            aria-label={t('svgEditor.rename')}
                         >
-                            <Edit2 className="w-3 h-3" />
+                            <Edit2 className="w-3 h-3" aria-hidden="true" />
                         </button>
                         <button
-                            className="p-1 rounded text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50 transition-opacity shrink-0"
+                            className="p-1 rounded text-slate-500 opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50 transition-opacity shrink-0"
                             onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }}
                             title={t('svgEditor.delete')}
+                            aria-label={t('svgEditor.delete')}
                         >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-3 h-3" aria-hidden="true" />
                         </button>
                     </>
                 )}
@@ -295,7 +298,7 @@ function TreeNode({
                 {/* Delete confirmation */}
                 {isConfirmingDelete && (
                     <div className="flex items-center gap-1 ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <span className="text-[10px] text-rose-600 font-medium whitespace-nowrap">
+                        <span className="text-xs text-rose-600 font-medium whitespace-nowrap">
                             {t('svgEditor.deleteConfirm')}
                         </span>
                         <button
@@ -417,7 +420,7 @@ export default function SemanticTree() {
         <div id="svg-editor-tree" className="py-1">
             {/* Multi-select badge */}
             {multiSelectCount > 1 && (
-                <div className="px-3 py-1.5 text-[10px] font-medium text-blue-700 bg-blue-50 border-b border-blue-100">
+                <div className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border-b border-blue-100">
                     {t('svgEditor.multipleSelected', { count: String(multiSelectCount) })}
                 </div>
             )}

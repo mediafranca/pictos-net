@@ -57,10 +57,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-white rounded-lg shadow-xl border border-slate-200 px-2 py-1.5">
             <button
                 onClick={handleGroup}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100 rounded transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded transition-colors"
                 title={t('svgEditor.group')}
             >
-                <Group size={13} />
+                <Group size={13} aria-hidden="true" />
                 {t('svgEditor.group')}
             </button>
 
@@ -69,10 +69,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
             <div className="relative">
                 <button
                     onClick={() => setShowClassPicker(!showClassPicker)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-slate-700 hover:bg-slate-100 rounded transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded transition-colors"
                     title={t('svgEditor.applyClass')}
                 >
-                    <Paintbrush size={13} />
+                    <Paintbrush size={13} aria-hidden="true" />
                     {t('svgEditor.applyClass')}
                 </button>
 
@@ -82,7 +82,7 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
                             <button
                                 key={cls}
                                 onClick={() => handleApplyClass(cls)}
-                                className="w-full text-left px-3 py-1.5 text-[10px] font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
+                                className="w-full text-left px-3 py-1.5 text-xs font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
                             >
                                 .{cls}
                             </button>
@@ -95,14 +95,14 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
 
             <button
                 onClick={handleDelete}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-red-500 hover:bg-red-50 rounded transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded transition-colors"
                 title={t('svgEditor.deleteSelected')}
             >
-                <Trash2 size={13} />
+                <Trash2 size={13} aria-hidden="true" />
                 {t('svgEditor.deleteSelected')}
             </button>
 
-            <div className="ml-1 text-[9px] text-slate-400 tabular-nums">
+            <div className="ml-1 text-xs text-slate-500 tabular-nums">
                 {ids.length}
             </div>
         </div>

@@ -5,6 +5,7 @@ import { INITIAL_STYLES } from '../../lib/style-editor/lib/constants';
 import { INITIAL_KEYFRAMES } from '../../lib/style-editor/lib/keyframeConstants';
 import { GlobalConfig } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 import { X, Download, RotateCcw, Square, Circle, Triangle, Slash, Activity, Heart } from 'lucide-react';
 import { generateCssString } from '../../lib/style-editor/lib/utils/cssGenerator';
 
@@ -22,6 +23,7 @@ const shapeIcons: Record<ShapeType, React.ComponentType<{ size?: number }>> = {
 
 export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig, onClose }) => {
     const { t } = useTranslation();
+    const { dialogProps } = useDialogA11y({ isOpen: true, onClose, label: t('styleEditor.title') });
     const [previewShape, setPreviewShape] = useState<ShapeType>('square');
 
     // Use new keyframes immediately — if stored keyframes lack var() syntax (old format),
@@ -75,12 +77,13 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig
                     id="style-editor-panel"
                     className="w-full h-full bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto animate-in fade-in zoom-in-95 duration-200"
                     onClick={e => e.stopPropagation()}
+                    {...dialogProps}
                 >
                     {/* Modal header */}
                     <header id="style-editor-modal-header" className="flex-none h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-20">
                         <div>
                             <h2 className="text-base font-bold text-gray-900 leading-none">{t('styleEditor.title')}</h2>
-                            <span className="text-[10px] text-gray-400">{t('styleEditor.subtitle')}</span>
+                            <span className="text-xs text-gray-500">{t('styleEditor.subtitle')}</span>
                         </div>
 
                         {/* Shape selector */}
@@ -91,7 +94,7 @@ export const StyleEditor: React.FC<StyleEditorProps> = ({ config, onUpdateConfig
                                     <button
                                         key={shape}
                                         onClick={() => setPreviewShape(shape)}
-                                        className={`p-1.5 rounded-md transition-all ${previewShape === shape ? 'bg-white shadow text-blue-600' : 'text-gray-400 hover:text-gray-700'}`}
+                                        className={`p-1.5 rounded-md transition-all ${previewShape === shape ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                                         title={shape}
                                     >
                                         <Icon size={16} />
