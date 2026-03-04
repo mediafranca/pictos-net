@@ -358,11 +358,18 @@ export default function SVGCanvas() {
         requestAnimationFrame(() => { marqueeActive.current = false; });
     }, [marquee, svgElement]);
 
+    const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        const target = event.target as Element;
+        if (target === canvasFrameRef.current || target === svgContainerRef.current) {
+            selectElement(null);
+        }
+    }, [selectElement]);
+
     if (!svgDocument) {
         return (
             <div className="h-full flex items-center justify-center">
                 <div className="text-center">
-                    <Upload className="w-16 h-16 mx-auto text-slate-400 mb-4" />
+                    <Upload className="w-16 h-16 mx-auto text-slate-500 mb-4" />
                     <h2 className="text-xl font-semibold mb-2 text-slate-900">Import SVG</h2>
                     <p className="text-sm text-slate-500 mb-4">
                         Upload a generative SVG to begin refining
@@ -395,9 +402,10 @@ export default function SVGCanvas() {
                 <button
                     onClick={handleZoomOut}
                     title="Zoom out"
+                    aria-label="Zoom out"
                     className="h-6 w-6 p-0 rounded flex items-center justify-center text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
                 >
-                    <ZoomOut className="h-4 w-4" />
+                    <ZoomOut className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <div className="min-w-[3.5rem] text-center tabular-nums text-slate-600 font-mono">
                     {Math.round(zoom * 100)}%
@@ -405,26 +413,29 @@ export default function SVGCanvas() {
                 <button
                     onClick={handleZoomIn}
                     title="Zoom in"
+                    aria-label="Zoom in"
                     className="h-6 w-6 p-0 rounded flex items-center justify-center text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
                 >
-                    <ZoomIn className="h-4 w-4" />
+                    <ZoomIn className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <button
                     onClick={handleZoomFit}
                     title={`Zoom to fit (${Math.round(fitZoom * 100)}%)`}
+                    aria-label="Zoom to fit"
                     className={`h-6 w-6 p-0 rounded flex items-center justify-center transition-colors
                         ${fitMode
                           ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
                           : 'text-slate-600 hover:bg-slate-200 hover:text-slate-900'
                         }`}
                 >
-                    <Maximize2 className="h-4 w-4" />
+                    <Maximize2 className="h-4 w-4" aria-hidden="true" />
                 </button>
             </div>
             <div
                 ref={svgContainerRef}
                 className="flex items-center justify-center p-8 min-h-full bg-slate-100/80"
                 style={{ position: 'relative' }}
+                onClick={handleCanvasClick}
             >
                 <div
                     ref={canvasFrameRef}
@@ -437,6 +448,7 @@ export default function SVGCanvas() {
                             }
                             : undefined
                     }
+                    onClick={handleCanvasClick}
                     onMouseDown={handleMarqueeMouseDown}
                     onMouseMove={handleMarqueeMouseMove}
                     onMouseUp={handleMarqueeMouseUp}

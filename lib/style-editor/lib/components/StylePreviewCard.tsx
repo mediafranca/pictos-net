@@ -11,20 +11,28 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
   const classNames = styleDef.selectors.map(s => s.replace('.', '')).join(' ');
   const hatchId = `hatch-${styleDef.id}`;
 
-  // A style is "visually empty" if it defines no fill (or fill:none) and no stroke (or stroke:none).
-  // Animation-only, filter-only, and transform-only classes fall into this bucket.
-  const hasVisualFill = styleDef.rules.some(r =>
-    r.property.toLowerCase() === 'fill' && r.value.trim().toLowerCase() !== 'none'
-  );
-  const hasVisualStroke = styleDef.rules.some(r =>
-    r.property.toLowerCase() === 'stroke' &&
-    !['none', 'transparent', ''].includes(r.value.trim().toLowerCase())
-  );
+  // Extract visual properties from rules for inline fallback attributes.
+  // The CSS class (via className) is the primary mechanism — it handles
+  // animations and any rule the dynamic stylesheet defines. The inline
+  // SVG attributes act as a fallback when the stylesheet hasn't loaded.
+  const ruleMap = new Map(styleDef.rules.map(r => [r.property.toLowerCase(), r.value]));
+
+  const hasVisualFill = ruleMap.has('fill') && ruleMap.get('fill')!.trim().toLowerCase() !== 'none';
+  const hasVisualStroke = ruleMap.has('stroke') &&
+    !['none', 'transparent', ''].includes(ruleMap.get('stroke')!.trim().toLowerCase());
   const useHatch = !hasVisualFill && !hasVisualStroke;
 
-  const shapeProps = {
+  // className applies the CSS class (animations, transitions, colors when in scope).
+  // Inline SVG presentation attributes (fill, stroke) have LOWER specificity than
+  // CSS classes, so when the dynamic stylesheet IS loaded, its rules win. When it
+  // is NOT loaded, the inline attributes provide a color fallback.
+  const shapeProps: Record<string, string | number | undefined> = {
     className: `transition-all duration-300 ${classNames}`,
-    ...(useHatch && { fill: `url(#${hatchId})`, stroke: '#9ca3af', strokeWidth: 2 })
+    fill: useHatch ? `url(#${hatchId})` : (ruleMap.get('fill') ?? undefined),
+    stroke: useHatch ? '#9ca3af' : (ruleMap.get('stroke') ?? undefined),
+    strokeWidth: useHatch ? 2 : (ruleMap.has('stroke-width') ? parseFloat(ruleMap.get('stroke-width')!) || 2 : undefined),
+    strokeDasharray: ruleMap.get('stroke-dasharray') ?? undefined,
+    opacity: ruleMap.get('opacity') ?? undefined,
   };
 
   const renderShape = () => {
@@ -64,7 +72,7 @@ const StylePreviewCard: React.FC<Props> = ({ styleDef, onClick, shape }) => {
         {styleDef.selectors.map(sel => (
           <span
             key={sel}
-            className="text-[10px] leading-tight font-mono text-gray-400 group-hover:text-gray-700 transition-colors"
+            className="text-xs leading-tight font-mono text-gray-500 group-hover:text-gray-700 transition-colors"
           >
             {sel}
           </span>

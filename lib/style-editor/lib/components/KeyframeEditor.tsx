@@ -186,7 +186,7 @@ const KeyframeEditor: React.FC<Props> = ({ keyframes, onUpdate }) => {
 
         {keyframes.length === 0 && (
           <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-xl">
-            <p className="text-gray-400 mb-4">No keyframes defined yet</p>
+            <p className="text-gray-500 mb-4">No keyframes defined yet</p>
             <button
               onClick={handleAdd}
               className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
