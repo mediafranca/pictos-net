@@ -450,36 +450,41 @@ export const generateImage = async (elements: VisualElement[], prompt: string, r
     throw new Error("No image generated.");
   }
 
-  // Resize to 800x800 immediately to reduce memory usage and improve performance
-  onLog?.('info', `[BITMAP] Redimensionando a 800x800...`);
-  const resizedImage = await resizeImage(base64Image, 800);
-  onLog?.('success', `[BITMAP] Imagen redimensionada a 800x800`);
+  // Resize to max 1024px PNG — lossless quality for vectorization.
+  // Compression to JPEG happens only at the persistence layer (IndexedDB).
+  onLog?.('info', `[BITMAP] Redimensionando a max 1024px PNG...`);
+  const resizedImage = await resizeImage(base64Image, 1024);
+  onLog?.('success', `[BITMAP] Imagen lista (PNG lossless)`);
 
   return resizedImage;
 };
 
-// Helper function to resize bitmap to target size
-// Uses JPEG format with quality 0.70 for better compression than PNG
+// Resize bitmap so its longest side equals targetSize, preserving aspect ratio.
+// Output is lossless PNG.
 const resizeImage = (dataUrl: string, targetSize: number): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = targetSize;
-      canvas.height = targetSize;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error('Could not get canvas context'));
+      const { naturalWidth: w, naturalHeight: h } = img;
+      if (w <= targetSize && h <= targetSize) {
+        resolve(dataUrl); // already small enough
         return;
       }
-      // Fill white background (JPEG doesn't support transparency)
+      const scale = targetSize / Math.max(w, h);
+      const newW = Math.round(w * scale);
+      const newH = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = newW;
+      canvas.height = newH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Could not get canvas context')); return; }
       ctx.fillStyle = 'white';
-      ctx.fillRect(0, 0, targetSize, targetSize);
-      ctx.drawImage(img, 0, 0, targetSize, targetSize);
-      // Use JPEG with quality 0.70 for better compression (smaller file size)
-      resolve(canvas.toDataURL('image/jpeg', 0.70));
+      ctx.fillRect(0, 0, newW, newH);
+      ctx.drawImage(img, 0, 0, newW, newH);
+      resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = dataUrl;
   });
 };
+

@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, ArrowUp
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -428,9 +428,9 @@ const App: React.FC = () => {
       }));
       setRows(prev => [...prev, ...newRows]);
       setViewMode('list');
-      addLog('success', `Importadas ${newRows.length} frases desde el archivo.`);
+      addLog('success', t('messages.importSuccess', { count: newRows.length }));
     } catch (e) {
-      addLog('error', 'Error al procesar el listado de frases.');
+      addLog('error', t('messages.processingError'));
     }
   };
 
@@ -470,7 +470,7 @@ const App: React.FC = () => {
     a.download = `${safeFilename}_graph_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    addLog('success', 'Proyecto exportado correctamente (imágenes incluidas).');
+    addLog('success', t('messages.exportSuccess'));
   };
 
   const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -478,7 +478,7 @@ const App: React.FC = () => {
     if (!file) return;
 
     // Warn user about replacement
-    if (!window.confirm("Advertencia: Al cargar una librería, se REEMPLAZARÁN todos los pictogramas actuales y la configuración (nombre, prompt, geolocalización, etc.). ¿Deseas continuar?")) {
+    if (!window.confirm(t('messages.libraryImportWarning'))) {
       e.target.value = ''; // Reset input
       return;
     }
@@ -491,7 +491,7 @@ const App: React.FC = () => {
         if (Array.isArray(parsed)) {
           const sanitized = parsed.map(sanitizeRow);
           setRows(sanitized);
-          addLog('success', `Importados ${sanitized.length} nodos (Formato Legacy).`);
+          addLog('success', t('messages.importLegacy', { count: sanitized.length }));
         }
         else if (parsed.rows && Array.isArray(parsed.rows)) {
           const sanitized = parsed.rows.map(sanitizeRow);
@@ -503,19 +503,19 @@ const App: React.FC = () => {
             if (!newConfig.credits) newConfig.credits = '';
             if (!newConfig.license) newConfig.license = 'cc-by';
             setConfig(newConfig);
-            addLog('info', 'Configuración global restaurada.');
+            addLog('info', t('messages.configRestored'));
           }
           if (parsed.svgs && Array.isArray(parsed.svgs)) {
             const count = importSVGs(parsed.svgs);
-            if (count > 0) addLog('success', `Biblioteca SVG restaurada: ${count} pictogramas.`);
+            if (count > 0) addLog('success', t('messages.svgLibraryRestored', { count }));
           }
-          addLog('success', `Grafo restaurado: ${sanitized.length} nodos.`);
+          addLog('success', t('messages.graphRestored', { count: sanitized.length }));
         } else {
-          throw new Error("Formato de archivo no reconocido");
+          throw new Error(t('messages.fileFormatError'));
         }
         setViewMode('list');
       } catch (err) {
-        addLog('error', 'Fallo al importar grafo. Verifique el formato.');
+        addLog('error', t('messages.importError'));
       }
     };
     reader.readAsText(file);
@@ -663,7 +663,7 @@ const App: React.FC = () => {
       const newPrompt = await Gemini.generateSpatialPrompt(nluObj as NLUData, ensureElementsArray(row.elements), config, addLog);
 
       if (stopFlags.current[row.id]) {
-        addLog('info', `🛑 Regeneración de prompt detenida por usuario`);
+        addLog('info', t('messages.promptRegenerationStopped'));
         updateRow(index, { visualStatus: 'completed' });
         return false;
       }
@@ -749,33 +749,34 @@ const App: React.FC = () => {
     if (!row) return;
 
     stopFlags.current[row.id] = false;
-    addLog('info', `Iniciando propagación en grafo para: ${row.UTTERANCE}`);
+    addLog('info', t('messages.cascadeStarted', { utterance: row.UTTERANCE }));
 
+    const stepNames = { nlu: t('pipeline.understand'), visual: t('pipeline.compose'), bitmap: t('pipeline.produce') };
     let finalUpdates: Partial<RowData> = { status: 'processing' };
 
     try {
       // --- NLU Step ---
-      addLog('info', `[CASCADA] Paso 1/3: COMPRENDER - Análisis semántico`);
+      addLog('info', t('messages.cascadeStep', { current: 1, total: 3, step: stepNames.nlu }));
       updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
       const nluStartTime = Date.now();
       const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       if (stopFlags.current[row.id]) {
-        addLog('info', `❌ [CASCADA] Detenida por usuario en paso COMPRENDER`);
+        addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.nlu }));
         updateRow(index, { nluStatus: 'idle', status: 'idle' });
         return;
       }
       finalUpdates.NLU = nluResult;
       finalUpdates.nluStatus = 'completed';
       finalUpdates.nluDuration = (Date.now() - nluStartTime) / 1000;
-      addLog('success', `✓ [CASCADA] Paso 1/3 completado en ${finalUpdates.nluDuration.toFixed(1)}s`);
+      addLog('success', t('messages.cascadeStepComplete', { current: 1, total: 3, duration: finalUpdates.nluDuration.toFixed(1) }));
 
       // --- Visual Step ---
-      addLog('info', `[CASCADA] Paso 2/3: COMPONER - Blueprint visual`);
+      addLog('info', t('messages.cascadeStep', { current: 2, total: 3, step: stepNames.visual }));
       updateRow(index, { nluStatus: 'completed', nluDuration: finalUpdates.nluDuration, NLU: nluResult, visualStatus: 'processing' });
       const visualStartTime = Date.now();
       const visualResult = await Gemini.generateVisualBlueprint(nluResult, config, addLog);
       if (stopFlags.current[row.id]) {
-        addLog('info', `❌ [CASCADA] Detenida por usuario en paso COMPONER`);
+        addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.visual }));
         updateRow(index, { visualStatus: 'idle' });
         return;
       }
@@ -783,29 +784,29 @@ const App: React.FC = () => {
       finalUpdates.prompt = visualResult.prompt;
       finalUpdates.visualStatus = 'completed';
       finalUpdates.visualDuration = (Date.now() - visualStartTime) / 1000;
-      addLog('success', `✓ [CASCADA] Paso 2/3 completado en ${finalUpdates.visualDuration.toFixed(1)}s`);
+      addLog('success', t('messages.cascadeStepComplete', { current: 2, total: 3, duration: finalUpdates.visualDuration.toFixed(1) }));
 
       // --- Bitmap Step (NanoBanana) ---
-      addLog('info', `[CASCADA] Paso 3/3: PRODUCIR - Renderizado de imagen`);
+      addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.bitmap }));
       updateRow(index, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
       const bitmapStartTime = Date.now();
       const bitmapResult = await Gemini.generateImage(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
-        addLog('info', `❌ [CASCADA] Detenida por usuario en paso PRODUCIR`);
+        addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.bitmap }));
         updateRow(index, { bitmapStatus: 'idle' });
         return;
       }
       finalUpdates.bitmap = bitmapResult;
       finalUpdates.bitmapStatus = 'completed';
       finalUpdates.bitmapDuration = (Date.now() - bitmapStartTime) / 1000;
-      addLog('success', `✓ [CASCADA] Paso 3/3 completado en ${finalUpdates.bitmapDuration.toFixed(1)}s`);
+      addLog('success', t('messages.cascadeStepComplete', { current: 3, total: 3, duration: finalUpdates.bitmapDuration.toFixed(1) }));
 
       finalUpdates.shared = false;
       finalUpdates.status = 'completed';
       updateRow(index, finalUpdates);
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
-      addLog('success', `✓ [CASCADA] Pipeline completo en ${totalTime.toFixed(1)}s total para "${row.UTTERANCE}"`);
+      addLog('success', t('messages.cascadeComplete', { duration: totalTime.toFixed(1), utterance: row.UTTERANCE }));
 
       requestAnimationFrame(() => {
         const rowEl = document.getElementById(`picto-row-${row.id}`);
@@ -818,9 +819,8 @@ const App: React.FC = () => {
       if (finalUpdates.nluStatus === 'completed' && finalUpdates.visualStatus !== 'completed') stepFailed = 'visual';
       else if (finalUpdates.visualStatus === 'completed') stepFailed = 'bitmap';
 
-      const stepNames = { nlu: 'COMPRENDER', visual: 'COMPONER', bitmap: 'PRODUCIR' };
       updateRow(index, { [`${stepFailed}Status`]: 'error', status: 'error' });
-      addLog('error', `❌ [CASCADA] Fallo en paso ${stepNames[stepFailed]}: ${err.message}`);
+      addLog('error', t('messages.cascadeFailed', { step: stepNames[stepFailed], error: err.message }));
     }
   };
 
@@ -838,7 +838,7 @@ const App: React.FC = () => {
     console.log('[SHARE] Iniciando proceso de compartir pictograma', { index, utterance: row?.UTTERANCE });
 
     if (!row) {
-      addLog('error', 'No se encontró la fila');
+      addLog('error', t('messages.rowNotFound'));
       return false;
     }
 
@@ -859,7 +859,7 @@ const App: React.FC = () => {
         NLU: row.NLU,
         elements: row.elements,
         prompt: row.prompt,
-        bitmap: row.bitmap, // Bitmap already resized to 800x800 at generation time
+        bitmap: row.bitmap, // 1024x1024 PNG in memory; compressed to JPEG on IndexedDB save
         nluStatus: row.nluStatus,
         visualStatus: row.visualStatus,
         bitmapStatus: row.bitmapStatus,
@@ -910,7 +910,7 @@ const App: React.FC = () => {
     const source = row.structuredSvg ? 'structured' : 'raw';
 
     if (!svgToEdit) {
-      addLog('error', 'No hay SVG para editar. Primero vectoriza la imagen.');
+      addLog('error', t('messages.noSvgToEdit'));
       return;
     }
 
@@ -920,7 +920,7 @@ const App: React.FC = () => {
       svg: svgToEdit,
       svgSource: source,
     });
-    addLog('info', `Abriendo editor SVG para: ${row.UTTERANCE}`);
+    addLog('info', t('messages.openingSvgEditor', { utterance: row.UTTERANCE }));
   };
 
   const handleSVGEditorSave = (updatedSvg: string) => {
@@ -952,14 +952,14 @@ const App: React.FC = () => {
     }
 
     const savedRow = rows.find(r => r.id === svgEditorState.rowId);
-    addLog('success', `SVG actualizado correctamente para: ${savedRow?.UTTERANCE}`);
+    addLog('success', t('messages.svgUpdatedSuccess', { utterance: savedRow?.UTTERANCE }));
     setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
   };
 
   const handleVectorizerApply = (result: VectorizerResult) => {
     if (!vectorizerState.rowId) return;
     updateRowById(vectorizerState.rowId, { rawSvg: result.svg });
-    addLog('success', `Vectorizado: ${result.layersTraced}/${result.layersTotal} capas (tier ${result.tiersUsed})`);
+    addLog('success', t('messages.vectorizationComplete', { traced: result.layersTraced, total: result.layersTotal, tier: result.tiersUsed }));
     if (result.warnings.length > 0) {
       result.warnings.forEach(w => addLog('info', w));
     }
@@ -1088,13 +1088,13 @@ const App: React.FC = () => {
               {/* field-credits */}
               <div id="field-credits">
                 <FieldLabel
-                  label="Créditos"
-                  tooltip="Personas o institución responsables de esta librería. Se incluye en los metadatos al compartir o exportar para garantizar la atribución correcta."
+                  label={t('config.credits')}
+                  tooltip={t('config.creditsTooltip')}
                 />
                 <textarea
                   value={config.credits || ''}
                   onChange={e => setConfig({ ...config, credits: e.target.value })}
-                  placeholder="Ej: Herbert Spencer — e[ad] PUCV / Núcleo de Accesibilidad e Inclusión"
+                  placeholder={t('config.creditsPlaceholder')}
                   className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
                 />
               </div>
@@ -1102,28 +1102,28 @@ const App: React.FC = () => {
               {/* field-license */}
               <div id="field-license">
                 <FieldLabel
-                  label="Licencia"
-                  tooltip="Licencia que aplica al trabajo derivado de esta librería. Los modelos Gemini no imponen restricciones sobre uso comercial si se respentan las condiciones de uso."
+                  label={t('config.license')}
+                  tooltip={t('config.licenseTooltip')}
                 />
                 <select
                   value={config.license}
                   onChange={e => setConfig({ ...config, license: e.target.value })}
                   className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
                 >
-                  <option value="copyright">© Copyright (todos los derechos reservados)</option>
-                  <option value="cc0">CC0 — Dominio Público</option>
-                  <option value="cc-by">CC BY — Atribución</option>
-                  <option value="cc-by-sa">CC BY-SA — Atribución-CompartirIgual</option>
-                  <option value="cc-by-nc">CC BY-NC — Atribución-NoComercial</option>
-                  <option value="cc-by-nc-sa">CC BY-NC-SA — Atribución-NoComercial-CompartirIgual</option>
+                  <option value="copyright">{t('config.licenses.copyright')}</option>
+                  <option value="cc0">{t('config.licenses.cc0')}</option>
+                  <option value="cc-by">{t('config.licenses.ccBy')}</option>
+                  <option value="cc-by-sa">{t('config.licenses.ccBySa')}</option>
+                  <option value="cc-by-nc">{t('config.licenses.ccByNc')}</option>
+                  <option value="cc-by-nc-sa">{t('config.licenses.ccByNcSa')}</option>
                 </select>
               </div>
 
               {/* field-geo */}
               <div id="field-geo">
                 <FieldLabel
-                  label="Geo-Linguistic Context"
-                  tooltip="Idioma de procesamiento NLU y región geográfica de referencia. Afecta la interpretación cultural de los pictogramas."
+                  label={t('config.geoContext')}
+                  tooltip={t('config.geoContextTooltip')}
                 />
                 <div className="flex flex-col gap-2">
                   <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
@@ -1161,8 +1161,8 @@ const App: React.FC = () => {
               {/* field-visual-style */}
               <div id="field-visual-style">
                 <FieldLabel
-                  label="Prompt de estilo visual"
-                  tooltip="Descripción del estilo gráfico que Gemini usará para renderizar todos los pictogramas de este espacio."
+                  label={t('config.visualStylePrompt')}
+                  tooltip={t('config.visualStylePromptTooltip')}
                 />
                 <textarea
                   value={config.visualStylePrompt}
@@ -1174,57 +1174,57 @@ const App: React.FC = () => {
               {/* field-aspect-ratio */}
               <div id="field-aspect-ratio">
                 <FieldLabel
-                  label="Proporción"
-                  tooltip="Relación de aspecto de las imágenes generadas."
+                  label={t('config.proportion')}
+                  tooltip={t('config.aspectRatioTooltip')}
                 />
                 <select
                   value={config.aspectRatio}
                   onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
                   className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
                 >
-                  <option value="1:1">Square (1:1)</option>
-                  <option value="4:3">Standard (4:3)</option>
-                  <option value="3:4">Portrait (3:4)</option>
-                  <option value="16:9">Widescreen (16:9)</option>
-                  <option value="9:16">Mobile (9:16)</option>
+                  <option value="1:1">{t('config.aspectRatios.square')}</option>
+                  <option value="4:3">{t('config.aspectRatios.standard')}</option>
+                  <option value="3:4">{t('config.aspectRatios.portrait')}</option>
+                  <option value="16:9">{t('config.aspectRatios.widescreen')}</option>
+                  <option value="9:16">{t('config.aspectRatios.mobile')}</option>
                 </select>
               </div>
 
               {/* field-image-model */}
               <div id="field-image-model">
                 <FieldLabel
-                  label="Modelo"
-                  tooltip="NanoBanana Flash es más rápido; NanoBanana Pro produce mayor calidad pero tarda más."
+                  label={t('config.model')}
+                  tooltip={t('config.imageModelTooltip')}
                 />
                 <select
                   value={config.imageModel || 'flash'}
                   onChange={e => setConfig({ ...config, imageModel: e.target.value })}
                   className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
                 >
-                  <option value="flash">NanoBanana (Flash 2.5)</option>
-                  <option value="pro">NanoBanana Pro (Gemini 3 Pro)</option>
+                  <option value="flash">{t('config.imageModels.flash')}</option>
+                  <option value="pro">{t('config.imageModels.pro')}</option>
                 </select>
               </div>
 
               {/* field-style-editor */}
               <div id="field-style-editor">
                 <FieldLabel
-                  label="Estilos"
-                  tooltip="Editor visual de estilos CSS para los SVGs generados. Define clases reutilizables para animaciones y apariencia."
+                  label={t('config.styles')}
+                  tooltip={t('config.stylesTooltip')}
                 />
                 <button
                   onClick={() => setShowStyleEditor(true)}
                   className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors flex items-center justify-center gap-2"
                 >
-                  <Palette size={14} aria-hidden="true" /> Abrir editor
+                  <Palette size={14} aria-hidden="true" /> {t('config.openEditor')}
                 </button>
               </div>
 
               {/* field-reduce-motion */}
               <div id="field-reduce-motion">
                 <FieldLabel
-                  label="Animaciones"
-                  tooltip="Desactivar animaciones y transiciones en la interfaz. Recomendado para accesibilidad (WCAG 2.3.3)."
+                  label={t('config.animations')}
+                  tooltip={t('config.animationsTooltip')}
                 />
                 <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
                   <input
@@ -1234,7 +1234,7 @@ const App: React.FC = () => {
                     className="w-4 h-4 accent-violet-600"
                   />
                   <span className="text-xs font-medium text-slate-700">
-                    {reduceMotion ? 'Animaciones desactivadas' : 'Animaciones activadas'}
+                    {reduceMotion ? t('config.animationsDisabled') : t('config.animationsEnabled')}
                   </span>
                 </label>
               </div>
@@ -1242,8 +1242,8 @@ const App: React.FC = () => {
               {/* field-high-contrast */}
               <div id="field-high-contrast">
                 <FieldLabel
-                  label="Alto contraste"
-                  tooltip="Activar modo de alto contraste: bordes reforzados, texto mas oscuro y fondos blancos puros. Recomendado para accesibilidad (WCAG 1.4.11)."
+                  label={t('config.highContrast')}
+                  tooltip={t('config.highContrastTooltip')}
                 />
                 <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
                   <input
@@ -1253,7 +1253,7 @@ const App: React.FC = () => {
                     className="w-4 h-4 accent-violet-600"
                   />
                   <span className="text-xs font-medium text-slate-700">
-                    {highContrast ? 'Alto contraste activado' : 'Alto contraste desactivado'}
+                    {highContrast ? t('config.highContrastEnabled') : t('config.highContrastDisabled')}
                   </span>
                 </label>
               </div>
@@ -1369,6 +1369,28 @@ const App: React.FC = () => {
               </a>
             </div>
           </div>
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-32 animate-in fade-in duration-700">
+            <div className="animate-bounce">
+              <ArrowUp size={32} className="text-violet-400" />
+            </div>
+            <h2 className="mt-8 text-3xl font-bold text-slate-300 tracking-tight">{t('home.emptyLibrary')}</h2>
+            <p className="mt-4 text-sm text-slate-500 font-medium">{t('home.emptyLibraryHint')}</p>
+            <p className="mt-6 text-xs text-slate-400">
+              <button
+                onClick={() => appendPhrasesInputRef.current?.click()}
+                className="underline hover:text-violet-600 transition-colors cursor-pointer"
+              >
+                {t('home.emptyLibraryImport')}
+              </button>
+              <span className="relative inline-block ml-1 group">
+                <HelpCircle size={12} className="inline text-slate-400 cursor-help" />
+                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-xs bg-slate-800 text-white rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  {t('home.emptyLibraryImportTooltip')}
+                </span>
+              </span>
+            </p>
+          </div>
         ) : (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
@@ -1380,7 +1402,7 @@ const App: React.FC = () => {
                   onRegeneratePrompt={() => regeneratePrompt(globalIndex)}
                   onStop={() => {
                     stopFlags.current[row.id] = true;
-                    addLog('info', `🛑 Solicitud de detención para: "${row.UTTERANCE}"`);
+                    addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
                   }}
                   onCascade={() => processCascade(globalIndex)}
                   onDelete={() => {
@@ -1523,19 +1545,19 @@ const App: React.FC = () => {
             style={{ top: libraryMenuPos.top, left: libraryMenuPos.left }}
           >
             <div className="px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500 tracking-wider tabular-nums">
-              {rows.length} {rows.length === 1 ? 'elemento' : 'elementos'}
+              {rows.length} {rows.length === 1 ? t('actions.element') : t('actions.elements')}
             </div>
             <button
               onClick={() => { appendPhrasesInputRef.current?.click(); setShowLibraryMenu(false); }}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
             >
-              <Upload size={14} className="text-violet-950" /> Importar frases (.txt)
+              <Upload size={14} className="text-violet-950" /> {t('actions.importPhrases')}
             </button>
             <button
               onClick={() => { importInputRef.current?.click(); setShowLibraryMenu(false); }}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
             >
-              <Upload size={14} className="text-emerald-600" /> Importar librería (.json)
+              <Upload size={14} className="text-emerald-600" /> {t('actions.importLibrary')}
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
@@ -1543,7 +1565,7 @@ const App: React.FC = () => {
               disabled={rows.length === 0}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Download size={14} className="text-slate-500" /> Exportar librería (.json)
+              <Download size={14} className="text-slate-500" /> {t('actions.exportLibrary')}
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
@@ -1566,12 +1588,12 @@ const App: React.FC = () => {
                 a.click();
                 URL.revokeObjectURL(url);
                 setShowLibraryMenu(false);
-                addLog('success', `${rowsWithBitmaps.length} PNGs exportados como ZIP.`);
+                addLog('success', t('messages.pngsExported', { count: rowsWithBitmaps.length }));
               }}
               disabled={pngCount === 0}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <ImageIcon size={14} className="text-orange-500" /> Descargar PNGs ({pngCount})
+              <ImageIcon size={14} className="text-orange-500" /> {t('actions.downloadPngs', { count: pngCount })}
             </button>
             <button
               onClick={async () => {
@@ -1591,12 +1613,12 @@ const App: React.FC = () => {
                 a.click();
                 URL.revokeObjectURL(url);
                 setShowLibraryMenu(false);
-                addLog('success', `${svgs.length} SVGs exportados como ZIP.`);
+                addLog('success', t('messages.svgsExported', { count: svgs.length }));
               }}
               disabled={svgCount === 0}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <FileDown size={14} className="text-blue-600" /> Exportar SVGs ({svgCount})
+              <FileDown size={14} className="text-blue-600" /> {t('actions.exportSvgs', { count: svgCount })}
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
@@ -1686,11 +1708,11 @@ const RowComponent: React.FC<{
         </div>
         <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
           {row.status === 'processing' ? (
-            <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title="Detener proceso" aria-label="Detener proceso">
+            <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title={t('actions.stopProcess')} aria-label={t('actions.stopProcess')}>
               <Square size={18} aria-hidden="true" />
             </button>
           ) : (
-            <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full bg-white shadow-sm" title="Ejecutar pipeline completo" aria-label="Ejecutar pipeline completo">
+            <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full bg-white shadow-sm" title={t('actions.runFullPipeline')} aria-label={t('actions.runFullPipeline')}>
               <Play size={18} aria-hidden="true" />
             </button>
           )}
@@ -1816,7 +1838,7 @@ const RowComponent: React.FC<{
                       <button
                         onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
                         className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                        title="Download PNG"
+                        title={t('actions.downloadPng')}
                       >
                         <FileDown size={14} />
                       </button>
@@ -2338,14 +2360,14 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
             <button
               onClick={() => addElement(element.id)}
               className="element-action-btn"
-              title="Agregar hijo"
+              title={t('actions.addChild')}
             >
               <CornerDownRight size={12} />
             </button>
             <button
               onClick={() => removeElement(element.id)}
               className="element-action-btn delete"
-              title="Eliminar"
+              title={t('actions.delete')}
             >
               <X size={12} />
             </button>
