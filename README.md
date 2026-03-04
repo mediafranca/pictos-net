@@ -342,6 +342,7 @@ Ver [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) para instrucciones completas,
 | [docs/UI_CONVENTIONS.md](./docs/UI_CONVENTIONS.md) | Convenciones de diseño: colores, tipografía, z-index |
 | [docs/CSS_STYLING_ARCHITECTURE.md](./docs/CSS_STYLING_ARCHITECTURE.md) | Modelo de dos niveles para estilos SVG (clases + overrides locales) |
 | [docs/WCAG_ROADMAP.md](./docs/WCAG_ROADMAP.md) | Estado de conformidad WCAG 2.1 AA y roadmap de accesibilidad |
+| [docs/ROADMAP_ESTRUCTURAR.md](./docs/ROADMAP_ESTRUCTURAR.md) | Plan de optimización de la fase ⑤ ESTRUCTURAR (branch `exp/optimize-structure`) |
 
 ---
 
