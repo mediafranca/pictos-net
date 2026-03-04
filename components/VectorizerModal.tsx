@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import {
     traceInteractive,
     drawBitmapToCanvas,
@@ -82,9 +83,9 @@ function LabeledSlider({
     return (
         <div className="mb-4">
             <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">{label}</p>
+                <p className="text-xs font-medium uppercase tracking-widest text-slate-500">{label}</p>
                 {debugValue && (
-                    <span className="text-[10px] font-mono text-slate-300">{value}</span>
+                    <span className="text-xs font-mono text-slate-500">{value}</span>
                 )}
             </div>
             <input
@@ -99,8 +100,8 @@ function LabeledSlider({
                 style={{ accentColor: '#7c3aed', backgroundColor: '#e2e8f0' }}
             />
             <div className="flex justify-between mt-1">
-                <span className="text-[9px] text-slate-400">{leftLabel}</span>
-                <span className="text-[9px] text-slate-400">{rightLabel}</span>
+                <span className="text-xs text-slate-500">{leftLabel}</span>
+                <span className="text-xs text-slate-500">{rightLabel}</span>
             </div>
         </div>
     );
@@ -123,8 +124,8 @@ function SegmentGroup<T extends string>({
 }: SegmentGroupProps<T>) {
     return (
         <div className="mb-4">
-            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-1.5">{label}</p>
-            <div className="flex rounded overflow-hidden border border-slate-200 text-[10px]">
+            <p className="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1.5">{label}</p>
+            <div className="flex rounded overflow-hidden border border-slate-200 text-xs">
                 {options.map((opt, i) => (
                     <button
                         key={String(opt.value)}
@@ -162,14 +163,14 @@ function PresetChips({
 }: { onSelect: (config: Partial<VectorizerConfig>) => void; disabled?: boolean }) {
     return (
         <div className="mb-4">
-            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 mb-1.5">Presets</p>
+            <p className="text-xs font-medium uppercase tracking-widest text-slate-500 mb-1.5">Presets</p>
             <div className="flex flex-wrap gap-1.5">
                 {PRESET_LABELS.map(({ key, label }) => (
                     <button
                         key={key}
                         disabled={disabled}
                         onClick={() => onSelect(PRESETS[key])}
-                        className="px-3 py-1 text-[10px] font-medium bg-white border border-slate-200 text-slate-600 rounded hover:border-violet-300 hover:text-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="px-3 py-1 text-xs font-medium bg-white border border-slate-200 text-slate-600 rounded hover:border-violet-300 hover:text-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {label}
                     </button>
@@ -191,6 +192,8 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     onClose,
     onApply,
 }) => {
+    const { dialogProps } = useDialogA11y({ isOpen, onClose, label: `Vectorizer — ${utterance}` });
+
     const [config, setConfig] = useState<VectorizerConfig>({
         ...DEFAULT_CONFIG,
         ...initialConfig,
@@ -248,8 +251,12 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 const dims = await drawBitmapToCanvas(bitmap, CANVAS_ID);
                 if (!isMounted.current) return;
                 setImageDims(dims);
-                // Set viewBox on the hidden SVG so paths render correctly
+                // Set viewBox AND explicit width/height on the hidden SVG.
+                // The WASM reads .width/.height to determine the output coordinate space.
                 hiddenSvg.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
+                hiddenSvg.setAttribute('width', String(dims.width));
+                hiddenSvg.setAttribute('height', String(dims.height));
+                console.debug('[VectorizerModal] canvas dims:', dims.width, 'x', dims.height);
                 setCanvasReady(true);
             } catch (err) {
                 console.error('[VectorizerModal] Failed to draw bitmap:', err);
@@ -346,6 +353,14 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 );
                 if (!isMounted.current || controller.signal.aborted) return;
 
+                // Ensure the SVG has correct dimensions after WASM may have modified them
+                if (hiddenSvg) {
+                    const vb = hiddenSvg.getAttribute('viewBox');
+                    console.debug('[VectorizerModal] post-trace viewBox:', vb,
+                        'width:', hiddenSvg.getAttribute('width'),
+                        'height:', hiddenSvg.getAttribute('height'));
+                }
+
                 // Serialize the hidden SVG and store for display
                 const svg = hiddenSvg ? new XMLSerializer().serializeToString(hiddenSvg) : '';
                 const pathCount = hiddenSvg?.querySelectorAll('path').length ?? 0;
@@ -397,17 +412,15 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
         <div
             id="vectorizer-modal"
             className="fixed inset-0 z-[50] flex flex-col bg-white animate-in fade-in duration-150"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Vectorizer — ${utterance}`}
+            {...dialogProps}
         >
             {/* Header */}
             <header className="flex items-center justify-between px-6 h-14 border-b border-slate-200 shrink-0 bg-white">
                 <div className="flex items-center gap-3 min-w-0">
                     <span className="text-slate-900 font-bold text-sm uppercase tracking-widest">Vectorizer</span>
-                    <span className="text-slate-400 text-sm truncate">— "{utterance}"</span>
+                    <span className="text-slate-500 text-sm truncate">— "{utterance}"</span>
                     {traceState === 'done' && result && (
-                        <span className="text-[10px] font-mono text-slate-400 ml-2">
+                        <span className="text-xs font-mono text-slate-500 ml-2">
                             {result.layersTraced} paths
                             {result.tiersUsed > 1 && ` · tier ${result.tiersUsed}`}
                         </span>
@@ -415,10 +428,11 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 </div>
                 <button
                     onClick={onClose}
-                    className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors"
+                    className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors"
                     title="Close"
+                    aria-label="Close"
                 >
-                    <X size={16} />
+                    <X size={16} aria-hidden="true" />
                 </button>
             </header>
 
@@ -496,7 +510,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                         {/* Advanced (collapsible) */}
                         <button
                             onClick={() => setAdvancedOpen(v => !v)}
-                            className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors mt-1 mb-3 w-full"
+                            className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-widest text-slate-500 hover:text-slate-600 transition-colors mt-1 mb-3 w-full"
                         >
                             {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                             Advanced
@@ -558,18 +572,18 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                         <button
                             onClick={handleDownload}
                             disabled={!result?.svg || isTracing}
-                            className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-900 bg-white px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center gap-2 border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-900 bg-white px-4 py-2 text-xs font-bold uppercase tracking-widest rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                            <Download size={12} />
+                            <Download size={12} aria-hidden="true" />
                             Download SVG
                         </button>
 
                         <button
                             onClick={handleApply}
                             disabled={!result?.svg || isTracing}
-                            className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest rounded transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-xs font-bold uppercase tracking-widest rounded transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                            <Check size={12} />
+                            <Check size={12} aria-hidden="true" />
                             Apply
                         </button>
                     </div>
@@ -592,7 +606,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                                     />
                                 </div>
                             </div>
-                            <span className="text-[10px] font-mono text-violet-600 shrink-0">{progress}%</span>
+                            <span className="text-xs font-mono text-violet-600 shrink-0">{progress}%</span>
                         </div>
                     )}
 
@@ -600,7 +614,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     {traceState === 'done' && result && result.warnings.length > 0 && (
                         <div className="shrink-0 px-6 py-2 bg-amber-50 border-b border-amber-200 flex items-start gap-2">
                             <AlertTriangle size={12} className="text-amber-500 mt-0.5 shrink-0" />
-                            <div className="text-[10px] text-amber-700">
+                            <div className="text-xs text-amber-700">
                                 {result.warnings.map((w, i) => <div key={i}>{w}</div>)}
                             </div>
                         </div>
@@ -610,7 +624,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     {traceState === 'error' && (
                         <div className="shrink-0 px-6 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2">
                             <AlertTriangle size={12} className="text-red-500 shrink-0" />
-                            <p className="text-[10px] text-red-600 font-mono break-all">{errorMsg}</p>
+                            <p className="text-xs text-red-600 font-mono break-all">{errorMsg}</p>
                         </div>
                     )}
 
@@ -621,7 +635,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             id="vectorizer-original"
                             className="flex-1 flex flex-col overflow-hidden border-r border-slate-200"
                         >
-                            <p className="text-[9px] font-medium uppercase tracking-widest text-slate-400 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
+                            <p className="text-xs font-medium uppercase tracking-widest text-slate-500 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
                                 Original
                             </p>
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
@@ -637,23 +651,22 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             id="vectorizer-result"
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <p className="text-[9px] font-medium uppercase tracking-widest text-slate-400 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
+                            <p className="text-xs font-medium uppercase tracking-widest text-slate-500 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
                                 SVG Result
                             </p>
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
                                 {resultSvgHtml ? (
                                     <div
-                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-full [&>svg]:h-full"
-                                        style={{ width: '100%', height: '100%' }}
+                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto"
                                         dangerouslySetInnerHTML={{ __html: resultSvgHtml }}
                                     />
                                 ) : traceState === 'idle' ? (
-                                    <p className="absolute text-xs text-slate-400">Starting...</p>
+                                    <p className="absolute text-xs text-slate-500">Starting...</p>
                                 ) : traceState === 'tracing' ? (
                                     <Loader2 size={32} className="animate-spin text-violet-300" />
                                 ) : null}
                                 {traceState === 'error' && (
-                                    <div className="absolute flex flex-col items-center gap-3 text-slate-400">
+                                    <div className="absolute flex flex-col items-center gap-3 text-slate-500">
                                         <AlertTriangle size={32} className="text-red-400" />
                                         <p className="text-xs text-red-500">Trace failed — adjust settings and retry</p>
                                     </div>

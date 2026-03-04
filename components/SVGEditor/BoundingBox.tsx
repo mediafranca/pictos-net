@@ -360,7 +360,6 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
             targetElementRef.current = element;
             try {
                 const elementBBox = element.getBBox();
-                const containerRect = containerElement.getBoundingClientRect();
 
                 const points = [
                     { x: elementBBox.x, y: elementBBox.y },
@@ -369,14 +368,18 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
                     { x: elementBBox.x, y: elementBBox.y + elementBBox.height },
                 ];
 
-                const ctm = element.getScreenCTM();
+                // Use relative CTM (element to SVG root) so bbox is in SVG-local coords.
+                // The CSS transform on the viewport div handles visual placement.
+                const elementCTM = element.getScreenCTM();
+                const svgCTM = svgElement.getScreenCTM();
 
-                if (ctm) {
+                if (elementCTM && svgCTM) {
+                    const relCTM = svgCTM.inverse().multiply(elementCTM);
                     const transformed = points.map((point) => {
                         const svgPoint = svgElement.createSVGPoint();
                         svgPoint.x = point.x;
                         svgPoint.y = point.y;
-                        return svgPoint.matrixTransform(ctm);
+                        return svgPoint.matrixTransform(relCTM);
                     });
 
                     const xs = transformed.map((p) => p.x);
@@ -387,8 +390,8 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
                     const maxY = Math.max(...ys);
 
                     setBbox({
-                        x: minX - containerRect.left,
-                        y: minY - containerRect.top,
+                        x: minX,
+                        y: minY,
                         width: maxX - minX,
                         height: maxY - minY,
                     });
@@ -474,8 +477,10 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
             return;
         }
 
-        const dx = e.clientX - dragStartRef.current.x;
-        const dy = e.clientY - dragStartRef.current.y;
+        // Screen-pixel deltas scaled to SVG-local coords via zoom
+        const { zoom } = useSVGEditorStore.getState().viewport;
+        const dx = (e.clientX - dragStartRef.current.x) / zoom;
+        const dy = (e.clientY - dragStartRef.current.y) / zoom;
         const startBBox = dragStartRef.current.bbox;
 
         let newBBox = { ...bbox };
@@ -549,8 +554,6 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
 
         // Use the element's own CTM to map screen coordinates into the element's local
         // coordinate space — where x, y, cx, cy, d etc. are defined.
-        // This correctly accounts for any transform attribute on the element itself
-        // (e.g. translate, scale, rotate from vectorization tools).
         let inverseCTM: DOMMatrix | null = null;
         const elementCTM = element.getScreenCTM();
         if (elementCTM) {
@@ -562,7 +565,10 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
 
         if (!inverseCTM) return;
 
-        const containerRect = containerElement.getBoundingClientRect();
+        // BBox is in SVG-local coords. Convert to screen using svgElement.getScreenCTM()
+        // so the existing screenToLocal logic works correctly with the CSS transform.
+        const svgCTM = svgElement.getScreenCTM();
+        if (!svgCTM) return;
 
         const screenToLocal = (x: number, y: number) => {
             const point = svgElement.createSVGPoint();
@@ -571,10 +577,10 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
             return point.matrixTransform(inverseCTM!);
         };
 
-        const screenLeft = containerRect.left + bbox.x;
-        const screenTop = containerRect.top + bbox.y;
-        const screenRight = screenLeft + bbox.width;
-        const screenBottom = screenTop + bbox.height;
+        const screenLeft = svgCTM.a * bbox.x + svgCTM.e;
+        const screenTop = svgCTM.d * bbox.y + svgCTM.f;
+        const screenRight = svgCTM.a * (bbox.x + bbox.width) + svgCTM.e;
+        const screenBottom = svgCTM.d * (bbox.y + bbox.height) + svgCTM.f;
 
         const svgTopLeft = screenToLocal(screenLeft, screenTop);
         const svgBottomRight = screenToLocal(screenRight, screenBottom);
@@ -697,19 +703,29 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
 
         let updatedTarget = element;
 
-        /*
         if (element.tagName.toLowerCase() === 'g') {
-            const descendants = element.querySelectorAll<SVGGraphicsElement>(
-                'rect,circle,ellipse,line,polyline,polygon,path'
+            // Groups: compose an affine transform on the <g> itself so all
+            // children move/scale together, preserving spatial relationships.
+            const tx = newBBox.x - scaleX * elementBBox.x;
+            const ty = newBBox.y - scaleY * elementBBox.y;
+            const delta = new DOMMatrix([scaleX, 0, 0, scaleY, tx, ty]);
+
+            let existing = new DOMMatrix();
+            const baseVal = (element as SVGGraphicsElement).transform?.baseVal;
+            if (baseVal) {
+                for (let i = 0; i < baseVal.numberOfItems; i++) {
+                    const m = baseVal.getItem(i).matrix;
+                    existing = existing.multiply(new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]));
+                }
+            }
+
+            const composed = existing.multiply(delta);
+            element.setAttribute('transform',
+                `matrix(${composed.a},${composed.b},${composed.c},${composed.d},${composed.e},${composed.f})`
             );
-            descendants.forEach((child) => {
-                applyMapToElement(child);
-            });
         } else {
             updatedTarget = applyMapToElement(element);
         }
-        */
-        updatedTarget = applyMapToElement(element);
 
         if (updatedTarget !== element) {
             targetElementRef.current = updatedTarget;
@@ -840,19 +856,19 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
         let updatedTarget = element;
 
         if (element.tagName.toLowerCase() === 'g') {
-            const descendants = element.querySelectorAll<SVGGraphicsElement>('rect,circle,ellipse,line,polyline,polygon,path');
-            descendants.forEach((child) => {
-                applyRotateToElement(child);
-            });
+            // Groups: the drag preview (handleMouseMove) already set the
+            // correct composed transform on the <g> element:
+            //   originalTransform + " rotate(θ, cx, cy)"
+            // Nothing else to do — just serialize below.
         } else {
             updatedTarget = applyRotateToElement(element);
-        }
 
-        const originalTransform = rotation.originalTransform;
-        if (originalTransform) {
-            updatedTarget.setAttribute('transform', originalTransform);
-        } else {
-            updatedTarget.removeAttribute('transform');
+            const originalTransform = rotation.originalTransform;
+            if (originalTransform) {
+                updatedTarget.setAttribute('transform', originalTransform);
+            } else {
+                updatedTarget.removeAttribute('transform');
+            }
         }
 
         if (updatedTarget !== element) {

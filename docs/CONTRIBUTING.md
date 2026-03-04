@@ -64,7 +64,7 @@ GEMINI_API_KEY=tu_api_key_aquí
 npm run dev
 ```
 
-La aplicación estará disponible en `http://localhost:5173`
+La aplicación estará disponible en `http://localhost:3000`
 
 Este comando ejecuta Vite en modo desarrollo con:
 
@@ -187,12 +187,13 @@ pictos-net/
 
 ### Pipeline de Procesamiento
 
-El sistema implementa un pipeline de 4 fases:
+El sistema implementa un pipeline de 5 fases:
 
-1. **Understand (NLU)**: Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM)
-2. **Compose (Visual)**: Generación de elementos jerárquicos y lógica de articulación espacial
-3. **Produce (Bitmap)**: Renderizado de imagen PNG usando Gemini Image Generation
-4. **Evaluate**: Evaluación del pictograma según 6 métricas de calidad cognitiva
+1. **COMPRENDER (NLU)**: Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM), 65 primitivos universales
+2. **COMPONER (Visual)**: Generación de elementos jerárquicos (`elements`) y articulación espacial (`prompt`)
+3. **PRODUCIR (Bitmap)**: Renderizado PNG lossless max 1024px usando Gemini Image Generation
+4. **VECTORIZAR (WASM)**: Conversión bitmap→SVG via vtracer local (sin API). Resultado: `rawSvg`
+5. **ESTRUCTURAR (Gemini multimodal)**: Agrupación semántica del SVG crudo según mf-svg-schema. Resultado: `structuredSvg`
 
 ### Consistencia Transversal
 

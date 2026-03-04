@@ -8,6 +8,7 @@ import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
 
 import { generateStylesheet } from '../services/svgStructureService';
+import { injectSvgA11y } from '../utils/svgAccessibility';
 
 // Helper function to sanitize filename for downloads
 const sanitizeFilename = (text: string, maxLength: number = 30): string => {
@@ -32,7 +33,7 @@ interface SVGGeneratorProps {
 
 export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer }) => {
     const { t } = useTranslation();
-    const { addSVG, getSVGByRowId, downloadSVG, removeSVGByRowId } = useSVGLibrary();
+    const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
     const [error, setError] = useState<string | undefined>();
     const [progress, setProgress] = useState(0);
@@ -123,18 +124,26 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         }
     }, [rawSvg]);
 
-    // Download raw SVG
-    const downloadRawSvg = () => {
-        if (!rawSvg) return;
-        const blob = new Blob([rawSvg], { type: 'image/svg+xml' });
+    // Download helpers — use the SVG string directly instead of relying on
+    // the library lookup (which can miss due to ID mismatch or stale state).
+    const triggerDownload = (svgString: string, suffix: string) => {
+        const blob = new Blob([svgString], { type: 'image/svg+xml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${sanitizeFilename(row.UTTERANCE)}_raw.svg`;
+        a.download = `${sanitizeFilename(row.UTTERANCE)}${suffix}.svg`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    };
+
+    const downloadRawSvg = () => {
+        if (rawSvg) triggerDownload(rawSvg, '_raw');
+    };
+
+    const downloadStructuredSvg = () => {
+        if (structuredSvgEntry?.svg) triggerDownload(structuredSvgEntry.svg, '');
     };
 
     // Strip hardcoded inline styles from the raw traced SVG so CSS classes take effect
@@ -294,7 +303,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             onUpdate({ structuredSvg: result.svg });
 
             setStatus('completed');
-            setRawSvg(null); // Clear local raw SVG state
             const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
             onLog('success', `Proceso SVG finalizado. Tiempo total: ${totalTime}s`);
 
@@ -311,9 +319,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     if (!vectorizeEligibility.eligible) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-6 bg-slate-50 border border-slate-100 rounded text-center opacity-75">
-                <AlertCircle size={24} className="text-slate-300 mb-2" />
-                <p className="text-xs text-slate-400 font-medium mb-1">SVG Generation Unavailable</p>
-                <p className="text-[10px] text-slate-400 font-mono">
+                <AlertCircle size={24} className="text-slate-500 mb-2" />
+                <p className="text-xs text-slate-500 font-medium mb-1">SVG Generation Unavailable</p>
+                <p className="text-xs text-slate-500 font-mono">
                     {vectorizeEligibility.reason || "Requirements not met"}
                 </p>
             </div>
@@ -323,15 +331,35 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     if (status === 'completed' && structuredSvgEntry) {
         return (
             <div className="flex flex-col h-full">
-                <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/svg-preview">
-                    <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity bg-black/70 text-white text-[10px] px-2 py-1 rounded pointer-events-none z-10 font-medium">
-                        Click parts to cycle through styles
+                {/* Raw traced SVG — compact preview (only when rawSvg exists) */}
+                {rawSvg && (
+                    <div className="bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact mb-2" style={{ flex: '2 1 0%', minHeight: 80 }}>
+                        <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
+                        <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                            {t('svg.traceSvg')}
+                        </div>
+                        <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
+                            <button
+                                onClick={downloadRawSvg}
+                                className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                                title="Download raw SVG"
+                            >
+                                <Download size={12} />
+                            </button>
+                        </div>
+                        <div
+                            dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
+                            className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+                        />
                     </div>
-                    <div className="absolute top-2 left-2 bg-emerald-600 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                )}
+
+                {/* Structured SVG — main preview */}
+                <div className="bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview mb-3" style={{ flex: '3 1 0%', minHeight: 120 }}>
+                    <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
+                    <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.structureLabel')}
                     </div>
-                    {/* Download & Edit overlay — bottom-right */}
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
                         {onOpenEditor && (
                             <button
@@ -343,7 +371,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             </button>
                         )}
                         <button
-                            onClick={() => downloadSVG(structuredSvgEntry.id)}
+                            onClick={downloadStructuredSvg}
                             className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
                             title="Descargar SVG"
                         >
@@ -351,7 +379,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     </div>
                     <div
-                        dangerouslySetInnerHTML={{ __html: displaySvg }}
+                        dangerouslySetInnerHTML={{ __html: injectSvgA11y(displaySvg, row.UTTERANCE, row.prompt) }}
                         onClick={handleSvgInteraction}
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full cursor-pointer"
                     />
@@ -367,23 +395,25 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                                 setRawSvg(row.rawSvg!);
                                 setStatus('traced');
                             }}
-                            className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
+                            className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
                             title={t('svg.reStructureTooltip')}
                         >
-                            <Layers size={14} /> {t('svg.reStructure')}
+                            <Layers size={14} aria-hidden="true" /> {t('svg.reStructure')}
                         </button>
                     )}
 
-                    {/* Re-trace: open vectorizer and clear local raw SVG state */}
+                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace */}
                     <button
                         onClick={() => {
+                            removeSVGByRowId(row.id);
+                            onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
                             onOpenVectorizer?.();
                         }}
                         title={t('svg.retrace')}
-                        className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px] font-bold uppercase tracking-widest"
+                        className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
                     >
-                        <RefreshCw size={14} /> {t('svg.retrace')}
+                        <RefreshCw size={14} aria-hidden="true" /> {t('svg.retrace')}
                     </button>
                 </div>
 
@@ -397,7 +427,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             <div className="flex flex-col h-full">
                 <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview">
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.traceSvg')}
                     </div>
                     {/* Download & Edit overlay — bottom on hover */}
@@ -420,7 +450,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     </div>
                     <div
-                        dangerouslySetInnerHTML={{ __html: displayRawSvg }}
+                        dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
                     />
                 </div>
@@ -430,15 +460,15 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         onClick={handleFormat}
                         disabled={!structureEligibility.eligible}
                         title={structureEligibility.eligible ? undefined : structureEligibility.reason}
-                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'}`}
+                        className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-none'}`}
                     >
-                        <Layers size={16} /> {t('svg.formatGemini')}
+                        <Layers size={16} aria-hidden="true" /> {t('svg.formatGemini')}
                     </button>
 
                     <button
                         onClick={cleanInlineStyles}
                         title={t('svg.clearInlineStyles')}
-                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px]"
+                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs"
                     >
                         <Eraser size={13} />
                     </button>
@@ -446,13 +476,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <button
                         onClick={() => onOpenVectorizer?.()}
                         title={t('vectorizer.adjustTrace')}
-                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-[10px]"
+                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs"
                     >
                         <Settings2 size={13} />
                     </button>
                 </div>
 
-                <div className="mt-1 text-center text-[10px] text-slate-500">
+                <div className="mt-1 text-center text-xs text-slate-500">
                     {t('svg.traceDone')}
                 </div>
             </div>
@@ -474,29 +504,38 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         ></div>
                     </div>
                     <div className="flex justify-between items-center mt-2">
-                        <p className="text-[10px] text-slate-400">
+                        <p className="text-xs text-slate-500">
                             {subStatus || (status === 'structuring' ? 'Applying semantic schema with Gemini...' : 'Tracing bitmap paths...')}
                         </p>
-                        <span className="text-[10px] font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
+                        <span className="text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
                             {elapsedTime.toFixed(1)}s
                         </span>
                     </div>
                 </div>
             ) : (
                 <>
-                    <FileCode size={32} className="text-slate-300 group-hover:text-violet-500 mb-3 transition-colors" />
-                    <button
-                        onClick={() => onOpenVectorizer?.()}
-                        className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
-                    >
-                        {t('svg.traceSvg')}
-                    </button>
-                    <p className="text-[10px] text-slate-400 mt-2 text-center max-w-[200px]">
+                    <FileCode size={32} className="text-slate-500 group-hover:text-violet-500 mb-3 transition-colors" />
+                    <div className="flex flex-col gap-2 items-center">
+                        <button
+                            onClick={() => onOpenVectorizer?.()}
+                            className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
+                        >
+                            {t('svg.traceSvg')}
+                        </button>
+                        <button
+                            disabled
+                            className="bg-slate-100 border-2 border-slate-200 text-slate-400 px-6 py-2 font-bold uppercase text-xs tracking-widest rounded-full cursor-not-allowed"
+                            title={t('svg.structureTooltip')}
+                        >
+                            <Layers size={14} className="inline mr-1.5" aria-hidden="true" />{t('svg.formatGemini')}
+                        </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2 text-center max-w-[200px]">
                         {t('svg.traceConverts')}
                     </p>
                     {error && (
-                        <div className="mt-3 text-[10px] text-red-500 flex items-center gap-1 bg-red-50 px-2 py-1 rounded">
-                            <AlertCircle size={10} /> {error}
+                        <div className="mt-3 text-xs text-red-500 flex items-center gap-1 bg-red-50 px-2 py-1 rounded">
+                            <AlertCircle size={10} aria-hidden="true" /> {error}
                         </div>
                     )}
                 </>

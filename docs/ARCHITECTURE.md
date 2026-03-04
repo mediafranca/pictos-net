@@ -1,732 +1,244 @@
-# PICTOS.NET v1.0.1 - Architecture Documentation
+# PICTOS.NET — Documentación de Arquitectura
 
-**Semantic Image Architect / Semantic Pictogram Architect**
+**Pictogramas generativos para la Comunicación Aumentativa y Alternativa (CAA)**
 
-Generated: 2026-01-27
-Updated: 2026-02-23
-
----
-
-## Table of Contents
-
-1. [Project Overview](#1-project-overview)
-2. [Repository Structure](#2-repository-structure)
-3. [Technology Stack](#3-technology-stack)
-4. [Core Features](#4-core-features)
-5. [Architecture & Design](#5-architecture--design)
-6. [Component Hierarchy](#6-component-hierarchy)
-7. [Data Models](#7-data-models)
-8. [API Services](#8-api-services)
-9. [Configuration](#9-configuration)
-10. [Build & Deployment](#10-build--deployment)
-11. [Key Insights](#11-key-insights)
+Actualizado: 2026-03-05
 
 ---
 
-## 1. Project Overview
+## Tabla de contenidos
 
-### Purpose
-
-PictoNet transforms natural language utterances into high-fidelity semantic pictogram schemas and bitmap images for augmentative and alternative communication (AAC) systems.
-
-### Key Technologies
-
-- **Natural Semantic Metalanguage (NSM)**: 65 universal semantic primitives
-- **Google Gemini 2.5/3.0**: Semantic processing and image generation
-- **Hierarchical Graph Architecture**: Semantic node processing
-- **MediaFranca Standards**: Cognitive accessibility compliance
-
-### Primary Use Cases
-
-- Creating cognitively accessible pictograms from communicative intentions
-- Augmentative and alternative communication (AAC) support
-- Research in applied linguistics and semantic modeling
-- Accessibility tooling for non-verbal communication
+1. [Visión general](#1-visión-general)
+2. [Estructura del repositorio](#2-estructura-del-repositorio)
+3. [Stack tecnológico](#3-stack-tecnológico)
+4. [Pipeline de generación (5 fases)](#4-pipeline-de-generación-5-fases)
+5. [Modelos de datos](#5-modelos-de-datos)
+6. [Servicios](#6-servicios)
+7. [Componentes](#7-componentes)
+8. [Almacenamiento](#8-almacenamiento)
+9. [Configuración](#9-configuración)
+10. [Build y deployment](#10-build-y-deployment)
 
 ---
 
-## 2. Repository Structure
+## 1. Visión general
+
+PICTOS.NET transforma intenciones comunicativas en lenguaje natural en pictogramas SVG semánticos mediante un pipeline de razonamiento en 5 fases. Es una herramienta de investigación doctoral orientada a profesionales de la CAA (fonoaudiólogos, educadores especiales, psicólogos) que trabajan con personas con diversidad funcional comunicativa.
+
+### Principios de diseño
+
+- **Explicabilidad**: cada fase es visible, editable y regenerable de forma independiente
+- **Control local**: todo el procesamiento pesado (vectorización) ocurre en el navegador via WASM
+- **Semántica persistente**: los SVG exportados son autocontenidos con metadatos accesibles embebidos
+- **Privacidad**: datos almacenados localmente (IndexedDB), sin servidor propio
+
+---
+
+## 2. Estructura del repositorio
 
 ```
 pictos-net/
-├── App.tsx                          # Main React application
-├── index.tsx                        # React entry point
-├── index.html                       # HTML template with Tailwind & fonts
-├── types.ts                         # TypeScript type definitions
-├── vite.config.ts                   # Vite build configuration
-├── tsconfig.json                    # TypeScript configuration
-├── package.json                     # Dependencies and scripts
-├── README.md                        # Spanish documentation
-├── ARCHITECTURE.md                  # This document
+├── App.tsx                        # Componente raíz, orquestación del pipeline
+├── index.tsx                      # Entry point React
+├── index.html                     # Template HTML (Tailwind CDN, fuentes)
+├── types.ts                       # Tipos TypeScript globales
+├── vite.config.ts
+├── tailwind.config.js
+├── package.json
+│
 ├── services/
-│   ├── geminiService.ts             # Google Gemini API integration
-│   ├── vtracerService.ts            # VTracer WASM bitmap→SVG conversion
-│   └── svgStructureService.ts       # Gemini-powered SVG structuring (mf-svg-schema)
-├── types/
-│   └── svg.ts                       # SVG-specific type definitions
+│   ├── geminiService.ts           # Integración Gemini API (NLU, imagen, composición)
+│   ├── vtracerService.ts          # Vectorización WASM (vtracer visioncortex)
+│   ├── svgStructureService.ts     # Estructuración semántica SVG (Gemini multimodal)
+│   ├── indexedDBService.ts        # Capa de persistencia (IndexedDB v3)
+│   ├── svgStyles.ts               # Generación de CSS para SVG
+│   └── geocodingService.ts        # Geocodificación para contexto geográfico
+│
+├── stores/
+│   └── svgEditorStore.ts          # Estado del editor SVG (zustand-like, pure React)
+│
 ├── hooks/
-│   └── useSVGLibrary.ts             # SVG library state management
+│   ├── useDialogA11y.ts           # Focus trap + Escape para modales
+│   ├── useSVGLibrary.ts           # Gestión de la librería de SVGs
+│   └── useTranslation.ts          # i18n hook (en-GB / es-419)
+│
 ├── components/
-│   ├── SVGGenerator.tsx             # SVG generation UI component
-│   └── PictoForge/                  # SVG editing components
-├── data/
-│   └── canonicalData.ts             # ICAP core semantic module
-└── .git/                            # Version control
+│   ├── SVGGenerator.tsx           # UI de generación SVG por fila
+│   ├── SVGThumbnail.tsx           # Miniatura de pictograma
+│   ├── GeoAutocomplete.tsx        # Input de contexto geográfico
+│   ├── VectorizerModal.tsx        # Modal bitmap→SVG (vtracer WASM)
+│   ├── PictoForge/
+│   │   └── StyleEditor.tsx        # Editor de estilos CSS para SVG
+│   ├── SVGEditor/
+│   │   ├── SVGEditorModal.tsx     # Modal editor SVG semántico (fullscreen)
+│   │   ├── SVGCanvas.tsx          # Viewport zoom/pan con selección de elementos
+│   │   ├── SemanticTree.tsx       # Árbol de capas del SVG
+│   │   ├── StylePanel.tsx         # Panel de propiedades y estilos
+│   │   ├── StylePickerModal.tsx   # Modal selector de clases CSS
+│   │   ├── SelectionToolbar.tsx   # Toolbar contextual de selección
+│   │   └── BoundingBox.tsx        # Caja de selección visual
+│   └── ui/
+│       ├── button.tsx
+│       └── input.tsx
+│
+├── utils/
+│   ├── svgAccessibility.ts        # Inyección de <title>, <desc>, role="img"
+│   └── styleUtils.ts              # Parse/serialize de reglas CSS del SVG
+│
+├── lib/
+│   ├── style-editor/              # Librería interna de edición de estilos
+│   │   ├── lib/constants.ts       # INITIAL_STYLES
+│   │   └── lib/keyframeConstants.ts # INITIAL_KEYFRAMES
+│   └── vtracer-wasm/              # WASM bundle (visioncortex vtracer-webapp)
+│       └── vtracer_webapp_bg.wasm
+│
+├── locales/
+│   ├── en-GB.json                 # Traducciones inglés
+│   └── es-419.json                # Traducciones español latinoamericano
+│
+├── schemas/                       # Git submodules
+│   ├── nlu-schema/                # mediafranca/nlu-schema
+│   ├── mf-svg-schema/             # mediafranca/mf-svg-schema
+│   └── ICAP/                      # mediafranca/ICAP
+│
+├── public/
+│   ├── wasm/vtracer/              # WASM binary servido estáticamente
+│   ├── libraries/                 # Bibliotecas de ejemplo (.json)
+│   └── schemas/                   # Copias de schemas para acceso web
+│
+├── docs/                          # Documentación técnica
+└── data/
+    └── canonicalData.ts           # Corpus ICAP-50 (fallback offline)
 ```
-
-### Architecture Principles
-
-- **services/**: API layer (Gemini integration)
-- **data/**: Dataset and canonical data modules
-- **types.ts**: Unified type definitions
-- **App.tsx**: UI components and state management
 
 ---
 
-## 3. Technology Stack
+## 3. Stack tecnológico
 
-### Runtime Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| React | ^19.2.3 | UI framework |
-| ReactDOM | ^19.2.3 | DOM rendering |
-| @google/genai | ^1.38.0 | Google Gemini AI API |
-| lucide-react | ^0.562.0 | Icon library |
-| vtracer-webapp (local WASM) | 0.4.0 | WASM bitmap→SVG vectorization (visioncortex) |
-
-### Development Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| TypeScript | ~5.8.2 | Type-safe JavaScript |
-| Vite | ^6.2.0 | Build tool and dev server |
-| @vitejs/plugin-react | ^5.0.0 | React integration |
-| @types/node | ^22.14.0 | Node.js type definitions |
-
-### External Dependencies (CDN)
-
-- **Tailwind CSS**: Utility-first CSS framework
-- **Google Fonts**: Lexend (primary), Fira Code (monospace)
+| Capa | Tecnología | Versión |
+|------|-----------|---------|
+| UI Framework | React | 19 |
+| Tipado | TypeScript | ~5.8 |
+| Build | Vite | ^6.2 |
+| Estilos | Tailwind CSS (CDN) | — |
+| Iconos | Lucide React | ^0.562 |
+| Drag & drop | @dnd-kit | — |
+| Compresión de descarga | JSZip | — |
+| AI / LLM | Google Gemini API (`@google/genai`) | ^1.38 |
+| Vectorización | vtracer-webapp WASM (visioncortex) | 0.4.0 |
+| Persistencia | IndexedDB (nativo) | — |
+| i18n | Hook personalizado | — |
 
 ---
 
-## 4. Core Features
+## 4. Pipeline de generación (5 fases)
 
-### 4.1 Four-Stage Semantic Pipeline + SVG Extension
+La cascada automática abarca las fases ①②③. Las fases ④⑤ son opcionales e iniciadas manualmente por el usuario.
 
 ```
-Utterance → NLU → Visual Topology → Bitmap → Evaluation
-                                        ↓
-                                [ICAP ≥ 4.0]
-                                        ↓
-                        Trace (vtracer) → Raw SVG
-                                        ↓
-                        Format (Gemini) → Structured SVG (mf-svg-schema)
+utterance
+    │
+    ▼
+① COMPRENDER — Gemini 2.5 Flash
+    │  NSM Schema Engine
+    │  65 primitivos semánticos universales
+    │  → NLUData (domain, frames, nsm_explications, visual_guidelines)
+    │
+    ▼
+② COMPONER — Gemini 2.5 Flash
+    │  Visual Topology Node  → elements (VisualElement[])
+    │  Spatial Articulation  → prompt (descripción composición espacial)
+    │
+    ▼
+③ PRODUCIR — Gemini Image (flash-image | pro-image)
+    │  fullPrompt = utterance + NLU + elements + prompt + visualStylePrompt
+    │  → bitmap PNG lossless, máximo 1024×1024px
+    │  (JPEG q=0.75 solo en capa de persistencia IndexedDB)
+    │
+    ▼ (usuario inicia manualmente)
+④ VECTORIZAR — vtracer WASM (local, sin API)
+    │  ColorImageConverter (color) / BinaryImageConverter (B&W)
+    │  Clustering jerárquico de color, spline/polygon fitting
+    │  → rawSvg (paths sin semántica)
+    │
+    ▼ (usuario inicia manualmente)
+⑤ ESTRUCTURAR — Gemini (multimodal: bitmap + rawSvg + elements + CSS)
+       Agrupa paths en <g> semánticos según jerarquía de elementos
+       Aplica clases CSS, atributos ARIA, metadatos mf-svg-schema
+       → structuredSvg (autocontenido, accesible)
 ```
 
-#### Stage 1: NLU (Natural Language Understanding)
+### Acumulación en RowData
 
-- **Input**: Utterance (natural language text)
-- **Model**: Gemini-3-pro-preview
-- **Output**: Structured semantic schema
-  - Speech acts (assertive, directive, commissive, expressive)
-  - Intent classification (inform, request, desire_expression, command)
-  - Frame-based semantic roles (FrameNet compatible)
-  - NSM explications (65 primitive semantic decomposition)
-  - Logical form, pragmatics, visual guidelines
+Cada fila acumula los resultados progresivamente:
 
-#### Stage 2: Visual Topology
+```
+RowData = { utterance, NLU, elements, prompt, bitmap, rawSvg, structuredSvg }
+```
 
-- **Input**: NLU semantic data
-- **Model**: Gemini-3-pro-preview
-- **Output**: Two components
-  - **elements**: Hierarchical visual component tree
-  - **prompt**: Spatial articulation logic describing topology
+Ningún campo se sobreescribe automáticamente al regenerar una fase posterior. El usuario controla qué fases regenerar.
 
-#### Stage 3: Bitmap Rendering
+### Invalidación en cascada
 
-- **Input**: Visual elements + spatial prompt + style config
-- **Models**:
-  - `gemini-2.5-flash-image` (fast)
-  - `gemini-3-pro-image-preview` (high-quality)
-- **Output**: Base64 PNG image (data URL)
-- **Aspect Ratios**: 1:1, 3:4, 4:3, 9:16, 16:9
+Al editar un campo, los pasos posteriores se marcan como `outdated`:
 
-#### Stage 4: Evaluation (Manual)
-
-- **Input**: Generated bitmap
-- **Method**: ICAP metrics (Vocabulary of Core Semantic Communicative Intentions)
-- **Output**: Hexagonal evaluation across 6 dimensions (Likert 1-5 scale)
-  - **Semantics**: Accuracy of meaning
-  - **Syntactics**: Visual composition quality
-  - **Pragmatics**: Context fitness
-  - **Clarity**: Legibility and recognition
-  - **Universality**: Cultural independence
-  - **Aesthetics**: Visual appeal
-
-#### Stage 5: SVG Generation (Optional - Quality Gated)
-
-##### Eligibility Requirements
-
-- Bitmap must exist
-- NLU data must be complete
-- Visual elements must be defined
-- ICAP average score ≥ 4.0
-
-##### Step 5a: Trace (Vectorization)
-
-- **Input**: Bitmap PNG (Base64)
-- **Engine**: vtracer-webapp WASM (visioncortex, local)
-- **Process**: Raster-to-vector conversion via hierarchical color clustering
-  - Native `ColorImageConverter` for multi-color images (stacked/cutout modes)
-  - `BinaryImageConverter` for B&W line art
-  - Spline curve fitting with polygon fallback
-  - Configurable presets: B&W, Pictogram, Poster, Photo
-  - Desynchronized UI: parameter adjustment without auto-retrace
-- **Output**: Raw SVG with unstructured paths
-
-##### Step 5b: Format (Semantic Structuring)
-
-- **Input**: Raw SVG + NLU + Elements + Evaluation + Config
-- **Model**: Gemini 3 Pro
-- **Process**: Transform raw SVG to mf-svg-schema compliant structure
-  - Group paths by semantic roles (Agent, Patient, Theme, Action)
-  - Embed metadata: NSM primes, concepts, ICAP scores
-  - Add accessibility attributes (ARIA labels, descriptions)
-  - Generate CSS classes and styling system
-  - Include provenance data (generator, timestamp, license)
-- **Output**: Structured SVG with embedded semantics
-- **Storage**: Saved to independent SVG Library (SSoT pattern)
-
-### 4.2 Data Management Features
-
-- **Transversal Consistency**: Unified JSON schema across entire pipeline
-- **Dual Storage Architecture**: Separate bitmap (RowData) and SVG (SVGLibrary) storage
-- **Full-Dump Export**: Projects exported with Base64 embedded images
-- **SVG Independent Export**: Individual SVG downloads with embedded metadata
-- **Project Import**: Support for legacy and current formats
-- **Local Storage**: Persistent browser storage for both bitmaps and SVGs
-- **Batch Processing**: Multi-row processing with cascading execution
-- **SSoT Pattern**: SVGs are self-contained artifacts with complete semantics
-
-### 4.3 Workbench Capabilities
-
-- **Editable Pipeline**: Manual editing at each stage
-- **Status Tracking**: 5-state system (idle, processing, completed, error, outdated)
-- **Cascading Validation**: Editing marks downstream stages as "outdated"
-- **Search & Discovery**: Full-text search with auto-completion
-- **Library Management**: Import/export semantic graphs
-
-### 4.4 Semantic Monitoring
-
-- **Real-time Trace Console**:
-  - API call timestamps
-  - Processing stage completion messages (NLU, Visual, Bitmap, SVG)
-  - Duration tracking (ms to seconds)
-  - Vectorization progress (0-100%)
-  - Error logs with context
-- **Performance Metrics**: Per-row timing data for all pipeline stages
+| Edición | Invalida |
+|---------|---------|
+| utterance | NLU → elements → prompt → bitmap |
+| NLU | elements → prompt → bitmap |
+| elements | prompt → bitmap |
+| prompt | bitmap |
+| bitmap | rawSvg → structuredSvg |
 
 ---
 
-## 5. Architecture & Design
+## 5. Modelos de datos
 
-### 5.1 Design Patterns
-
-**React Hooks Pattern:**
-
-- **useState**: Primary state management (rows, config, logs, UI states)
-- **useEffect**: Side effects (localStorage sync, processing scheduling)
-- **useCallback**: Event handlers (pipeline execution, row updates)
-- **useMemo**: Performance optimization (filtered rows, metrics)
-- **useRef**: Non-state data (file inputs, stop flags)
-
-### 5.2 Data Flow
-
-```
-User Input (Utterance)
-    ↓
-generateNLU() → NLU Data (JSON)
-    ↓
-generateVisualBlueprint() → Visual Elements + Spatial Prompt
-    ↓
-generateImage() → Base64 Bitmap
-    ↓
-Manual Evaluation → Metrics Data
-```
-
-
-#### Future data vision
-
-```mermaid
-
-erDiagram
-  SPACE ||--o{ SPACE_MEMBERSHIP : has
-  USER  ||--o{ SPACE_MEMBERSHIP : belongs_to
-
-  SPACE ||--o{ CSS_PROFILE : uses
-  SPACE ||--o{ CANONICAL_EXAMPLE : showcases
-  CANONICAL_EXAMPLE }o--|| ASSET : references
-
-  SPACE ||--o{ UTTERANCE : contains
-  UTTERANCE ||--o| SEMANTIC_EXPANSION : expands_to
-  UTTERANCE ||--o{ PICTOGRAM : renders_as
-
-  PICTOGRAM }o--|| ASSET : svg_asset
-  PICTOGRAM }o--o| ASSET : bitmap_asset
-
-  SPACE ||--o{ EVALUATION : records
-  USER  ||--o{ EVALUATION : authored
-  PICTOGRAM ||--o{ EVALUATION : evaluated_by
-
-  EVALUATION ||--o{ EVALUATION_DIMENSION_SCORE : includes
-
-  RUBRIC ||--o{ EVALUATION : versioned_by
-
-  SPACE {
-    string space_id PK
-    string name
-    string language_locales
-    float geopoint_lat
-    float geopoint_lng
-    array user_collaborators
-    string place_label
-    string style_prompt
-    array css_styles
-    string aspect_policy
-    datetime created_at
-  }
-
-  USER {
-    string user_id PK
-    string display_name
-    string email_hash
-    string auth_provider
-    string auth_subject
-    datetime created_at
-  }
-
-  SPACE_MEMBERSHIP {
-    string space_id FK
-    string user_id FK
-    string role
-    string status
-    string invited_by FK
-    datetime invited_at
-    datetime created_at
-  }
-
-  CSS_PROFILE {
-    string css_profile_id PK
-    string space_id FK
-    string css_text
-    json palette_json
-    datetime created_at
-  }
-
-  CANONICAL_EXAMPLE {
-    string example_id PK
-    string space_id FK
-    string asset_id FK
-    string label
-    datetime created_at
-  }
-
-  UTTERANCE {
-    string utterance_id PK
-    string space_id FK
-    string text
-    string language
-    datetime created_at
-  }
-
-  SEMANTIC_EXPANSION {
-    string semantic_expansion_id PK
-    string utterance_id FK
-    json nlu_json
-    string nlu_schema_version
-    string generator_model
-    string generator_prompt_hash
-    datetime created_at
-  }
-
-  PICTOGRAM {
-    string pictogram_id PK
-    string utterance_id FK
-    string svg_asset_id FK
-    string bitmap_asset_id FK
-    json render_params_json
-    json style_profile_snapshot_json
-    string pipeline_version
-    string created_by_user_id FK
-    datetime created_at
-  }
-
-  ASSET {
-    string asset_id PK
-    string kind
-    string mime_type
-    int byte_size
-    string sha256
-    string storage_uri
-    datetime created_at
-  }
-
-  RUBRIC {
-    string rubric_id PK
-    string version
-    json rubric_json
-    datetime created_at
-  }
-
-  EVALUATION {
-    string evaluation_id PK
-    string pictogram_id FK
-    string space_id FK
-    string evaluator_user_id FK
-    string evaluator_role
-    string rubric_id FK
-    int overall_score
-    string notes
-    datetime created_at
-  }
-
-  EVALUATION_DIMENSION_SCORE {
-    string evaluation_id FK
-    string dimension_key
-    int score
-    string scale_label_en
-    string scale_label_es
-    string dimension_name_en
-    string dimension_name_es
-    string level_description_en
-    string level_description_es
-  }
-  
-```
-
-
-#### Future data vision
-
-```mermaid
-
-erDiagram
-  SPACE ||--o{ SPACE_MEMBERSHIP : has
-  USER  ||--o{ SPACE_MEMBERSHIP : belongs_to
-
-  SPACE ||--o{ CSS_PROFILE : uses
-  SPACE ||--o{ CANONICAL_EXAMPLE : showcases
-  CANONICAL_EXAMPLE }o--|| ASSET : references
-
-  SPACE ||--o{ UTTERANCE : contains
-  UTTERANCE ||--o| SEMANTIC_EXPANSION : expands_to
-  UTTERANCE ||--o{ PICTOGRAM : renders_as
-
-  PICTOGRAM }o--|| ASSET : svg_asset
-  PICTOGRAM }o--o| ASSET : bitmap_asset
-
-  SPACE ||--o{ EVALUATION : records
-  USER  ||--o{ EVALUATION : authored
-  PICTOGRAM ||--o{ EVALUATION : evaluated_by
-
-  EVALUATION ||--o{ EVALUATION_DIMENSION_SCORE : includes
-
-  RUBRIC ||--o{ EVALUATION : versioned_by
-
-  SPACE {
-    string space_id PK
-    string name
-    string language_locales
-    float geopoint_lat
-    float geopoint_lng
-    array user_collaborators
-    string place_label
-    string style_prompt
-    array css_styles
-    string aspect_policy
-    datetime created_at
-  }
-
-  USER {
-    string user_id PK
-    string display_name
-    string email_hash
-    string auth_provider
-    string auth_subject
-    datetime created_at
-  }
-
-  SPACE_MEMBERSHIP {
-    string space_id FK
-    string user_id FK
-    string role
-    string status
-    string invited_by FK
-    datetime invited_at
-    datetime created_at
-  }
-
-  CSS_PROFILE {
-    string css_profile_id PK
-    string space_id FK
-    string css_text
-    json palette_json
-    datetime created_at
-  }
-
-  CANONICAL_EXAMPLE {
-    string example_id PK
-    string space_id FK
-    string asset_id FK
-    string label
-    datetime created_at
-  }
-
-  UTTERANCE {
-    string utterance_id PK
-    string space_id FK
-    string text
-    string language
-    datetime created_at
-  }
-
-  SEMANTIC_EXPANSION {
-    string semantic_expansion_id PK
-    string utterance_id FK
-    json nlu_json
-    string nlu_schema_version
-    string generator_model
-    string generator_prompt_hash
-    datetime created_at
-  }
-
-  PICTOGRAM {
-    string pictogram_id PK
-    string utterance_id FK
-    string svg_asset_id FK
-    string bitmap_asset_id FK
-    json render_params_json
-    json style_profile_snapshot_json
-    string pipeline_version
-    string created_by_user_id FK
-    datetime created_at
-  }
-
-  ASSET {
-    string asset_id PK
-    string kind
-    string mime_type
-    int byte_size
-    string sha256
-    string storage_uri
-    datetime created_at
-  }
-
-  RUBRIC {
-    string rubric_id PK
-    string version
-    json rubric_json
-    datetime created_at
-  }
-
-  EVALUATION {
-    string evaluation_id PK
-    string pictogram_id FK
-    string space_id FK
-    string evaluator_user_id FK
-    string evaluator_role
-    string rubric_id FK
-    int overall_score
-    string notes
-    datetime created_at
-  }
-
-  EVALUATION_DIMENSION_SCORE {
-    string evaluation_id FK
-    string dimension_key
-    int score
-    string scale_label_en
-    string scale_label_es
-    string dimension_name_en
-    string dimension_name_es
-    string level_description_en
-    string level_description_es
-  }
-  
-```
-
-### 5.3 State Management
-
-**No External State Library** - Pure React hooks
+### RowData
 
 ```typescript
-// Core application state
-const [rows, setRows] = useState<RowData[]>([]);
-const [config, setConfig] = useState<GlobalConfig>(DEFAULT_CONFIG);
-const [logs, setLogs] = useState<LogEntry[]>([]);
+interface RowData {
+  id: string;
+  UTTERANCE: string;
+  NLU?: NLUData;
+  elements?: VisualElement[];
+  prompt?: string;
+  bitmap?: string;               // base64 data URL (PNG en memoria, JPEG en IndexedDB)
+  rawSvg?: string;               // output vtracer, sin semántica
+  structuredSvg?: string;        // output mf-svg-schema, autocontenido
+  shared?: boolean;
 
-// UI state
-const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
-const [showConsole, setShowConsole] = useState(false);
-const [focusMode, setFocusMode] = useState<any>(null);
-```
-
-### 5.4 Error Handling
-
-- Try-catch blocks in `processStep` and `processCascade`
-- Status-based error tracking per step
-- User feedback via trace logs
-- Graceful degradation (failed steps don't prevent rendering)
-
----
-
-## 6. Component Hierarchy
-
-```
-App (Main Container)
-├── Header
-│   ├── Navigation (Home/List toggle)
-│   ├── SearchComponent (utterance search)
-│   ├── ConfigButton (global settings)
-│   └── ConsoleButton (trace monitor)
-│
-├── Main Content
-│   ├── Home View
-│   │   ├── Module Loading (ICAP core)
-│   │   └── Text Import (batch processing)
-│   │
-│   └── List View
-│       └── RowComponent[] (semantic nodes)
-│           ├── StepBox (NLU)
-│           │   └── SmartNLUEditor
-│           ├── StepBox (Visual)
-│           │   └── ElementsEditor
-│           ├── StepBox (Bitmap)
-│           └── StepBox (Eval)
-│               └── EvaluationEditor
-│                   └── HexagonChart
-│
-├── FocusViewModal (full-screen detail views)
-├── ConsolePanel (Semantic Trace Monitor)
-├── ConfigPanel (global settings)
-│   └── StyleEditor (lib/style-editor) — CSS style gallery + keyframe editor
-│       └── EditModal — create/edit individual CSS class rules
-│
-├── SVGEditorModal — fullscreen SVG semantic editor
-│   ├── SemanticTree — SVG DOM as expandable/editable layer tree
-│   ├── SVGCanvas — zoom/pan viewport with element selection
-│   └── StylePanel — CSS class assignment + inline style controls
-│
-└── VectorizerModal — bitmap→SVG vectorization (vtracer WASM)
-```
-
-### Key Components
-
-#### App Component (Root)
-- Global state management
-- View mode switching
-- Pipeline orchestration
-- localStorage persistence
-- Event delegation
-
-**Key Methods:**
-- `processCascade(index)`: Full 4-stage pipeline
-- `processStep(index, step)`: Single-step processing
-- `addNewRow(text)`: Create semantic node
-- `exportProject()`: Generate JSON dump
-- `handleImportProject()`: Load from file
-
-#### RowComponent
-- Display individual semantic node
-- Manage expanded/collapsed state
-- Trigger step processing
-- Delete row
-
-#### StepBox
-- Display processing step container
-- Show status with color coding
-- Manage regeneration/stop buttons
-- Track elapsed time
-- Provide focus mode access
-
-**Visual States:**
-- idle: gray background
-- processing: orange, animated pulse
-- completed: white/green
-- outdated: amber
-- error: red
-
-#### SmartNLUEditor
-- Display/edit NLU schema
-- Metadata classification
-- Frame-based role editing
-- NSM explications editor
-- Expandable sections with VOCAB validation
-
-#### ElementsEditor
-- Visual hierarchy tree editing
-- Add/remove/rename elements
-- Parent-child relationships
-- Hierarchical rendering with indentation
-
-#### EvaluationEditor + HexagonChart
-- Likert scale sliders (1-5) for 6 dimensions
-- Hexagon radar chart visualization
-- Average score calculation
-- Reasoning text input
-- Real-time chart updates
-
----
-
-## 7. Data Models
-
-### 7.1 Core Types
-
-#### RowData (Complete semantic node)
-
-```typescript
-{
-  id: string;                    // Unique identifier
-  UTTERANCE: string;             // Input text
-  NLU?: NLUData | string;        // Semantic analysis result
-  elements?: VisualElement[];    // Visual hierarchy
-  prompt?: string;               // Spatial articulation
-  bitmap?: string;               // Base64 PNG data URL
-  evaluation?: EvaluationMetrics;// Manual evaluation
-  status: 'idle' | 'processing' | 'completed' | 'error';
-  nluStatus: StepStatus;         // Per-step status
+  // Estado por fase
+  nluStatus: StepStatus;
   visualStatus: StepStatus;
   bitmapStatus: StepStatus;
-  evalStatus: StepStatus;
-  nluDuration?: number;          // Processing time (seconds)
+
+  // Duración de procesamiento (segundos)
+  nluDuration?: number;
   visualDuration?: number;
   bitmapDuration?: number;
-  evalDuration?: number;
 }
+
+type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdated';
 ```
 
-#### NLUData (Semantic analysis schema)
+### NLUData (nlu-schema v2.0)
 
 ```typescript
-{
+interface NLUData {
   utterance: string;
-  lang: string;                  // ISO 639-1 code
+  lang: string;
   metadata: {
-    speech_act: string;          // Communicative act type
-    intent: string;              // User intent classification
+    speech_act: string;
+    intent: string;
   };
-  frames: NLUFrame[];            // FrameNet-compatible roles
-  nsm_explications: Record<string, string>;  // 65 primitives
-  logical_form: {
-    event: string;
-    modality: string;
-  };
-  pragmatics: {
-    politeness: string;
-    formality: string;
-    expected_response: string;
-  };
+  domain: string;
+  frame_name: string;
+  frame_label: string;
+  frames: NLUFrame[];
+  nsm_explications: Record<string, string>;
+  logical_form: { event: string; modality: string };
+  pragmatics: { politeness: string; formality: string; expected_response: string };
   visual_guidelines: {
     focus_actor: string;
     action_core: string;
@@ -737,487 +249,279 @@ App (Main Container)
 }
 ```
 
-#### NLUFrame (Semantic role frame)
+### VisualElement
 
 ```typescript
-{
-  frame_name: string;            // FrameNet compatible
-  lexical_unit: string;          // Main predicate
-  roles: Record<string, NLUFrameRole>;
+interface VisualElement {
+  id: string;                    // snake_case, sustantivo en el idioma del utterance
+  children?: VisualElement[];
 }
 ```
 
-#### NLUFrameRole (Individual role)
+### GlobalConfig
 
 ```typescript
-{
-  type: string;                  // Agent, Object, Event, Attribute, Place, Time, Abstract, Quantity, Recipient, Instrument
-  surface: string;               // Surface text
-  lemma?: string;
-  definiteness?: string;         // none, definite, indefinite
-  ref?: string;
-  ref_frame?: string;
+interface GlobalConfig {
+  lang: string;                  // ISO 639 (ej: 'es-419')
+  aspectRatio: string;           // '1:1' | '3:4' | '4:3' | '9:16' | '16:9'
+  imageModel: 'flash' | 'pro';
+  author: string;
+  license: string;
+  visualStylePrompt: string;
+  geoContext?: { lat: string; lng: string; region: string };
+  annotatedContext?: string;
+  svgStyleDefs?: StyleDefinition[];
+  svgKeyframes?: KeyframeDefinition[];
 }
 ```
-
-#### VisualElement (Hierarchical visual component)
-
-```typescript
-{
-  id: string;                    // snake_case noun identifier
-  children?: VisualElement[];    // Recursive tree structure
-}
-```
-
-#### EvaluationMetrics (ICAP evaluation)
-
-Aligned with official ICAP schema (mediafranca/ICAP)
-
-```typescript
-{
-  clarity: number;                      // 1-5 Likert scale
-  recognizability: number;              // 1-5 Likert scale
-  semantic_transparency: number;        // 1-5 Likert scale
-  pragmatic_fit: number;                // 1-5 Likert scale
-  cultural_adequacy: number;            // 1-5 Likert scale
-  cognitive_accessibility: number;      // 1-5 Likert scale
-  reasoning: string;                    // Human explanation
-}
-```
-
-#### SVGPictogram (Structured SVG artifact)
-
-```typescript
-{
-  id: string;                    // Unique identifier (matches source row ID)
-  utterance: string;             // Original communicative intent
-  svg: string;                   // Complete mf-svg-schema compliant SVG
-  createdAt: string;             // ISO timestamp
-  sourceRowId: string;           // Reference to original RowData
-  icapScore: number;            // ICAP average at generation time
-  lang?: string;                 // Language of utterance
-}
-```
-
-#### SVGLibraryState (SVG collection management)
-
-```typescript
-{
-  svgs: SVGPictogram[];          // Array of all SVG pictograms
-  isLoading: boolean;            // Loading state
-  error?: string;                // Error message if any
-}
-```
-
-### 7.2 Vocabulary Enumerations
-
-#### VOCAB (Semantic vocabulary)
-
-```typescript
-{
-  speech_act: ['assertive', 'directive', 'commissive', 'expressive', 'declarative', 'interrogative'],
-  intent: ['inform', 'request', 'desire_expression', 'command', 'offer', 'promise', 'thanking', 'greeting', 'question', 'complaint'],
-  role_type: ['Agent', 'Object', 'Event', 'Attribute', 'Place', 'Time', 'Abstract', 'Quantity', 'Recipient', 'Instrument'],
-  definiteness: ['none', 'definite', 'indefinite'],
-  lang: ['en', 'es', 'fr', 'pt', 'it', 'de']
-}
-```
-
-#### VOCAB_NSM (65 Universal Semantic Primitives)
-
-Based on Wierzbicka/Goddard Natural Semantic Metalanguage:
-
-- **Substantives**: I, YOU, SOMEONE, SOMETHING, PEOPLE, BODY
-- **Determiners**: THIS, THE SAME, OTHER
-- **Quantifiers**: ONE, TWO, SOME, ALL, MUCH/MANY, LITTLE/FEW
-- **Evaluators**: GOOD, BAD
-- **Descriptors**: BIG, SMALL
-- **Mental Predicates**: THINK, KNOW, WANT, FEEL, SEE, HEAR
-- **Speech**: SAY, WORD, TRUE
-- **Actions**: DO, HAPPEN, MOVE
-- **Existence**: THERE IS, HAVE, BE
-- **Life/Death**: LIVE, DIE
-- **Time**: WHEN, TIME, NOW, BEFORE, AFTER, A LONG TIME, A SHORT TIME, FOR SOME TIME, MOMENT
-- **Space**: WHERE, PLACE, HERE, ABOVE, BELOW, FAR, NEAR, SIDE, INSIDE, TOUCH
-- **Logical**: NOT, MAYBE, CAN, BECAUSE, IF
-- **Intensifier**: VERY, MORE
-- **Similarity**: LIKE
-
-### 7.3 ICAP-50 Corpus Module
-
-The ICAP-50 corpus contains 50 communicative intent phrases loaded dynamically from the external ICAP repository:
-
-**Source**: `https://mediafranca.github.io/ICAP/frases.json`
-
-**8 Communication Categories** (canonicalData.ts):
-
-1. **Solicitar (Request)**: 6 phrases - Basic needs and requests
-2. **Rechazar (Reject)**: 5 phrases - Refusal and rejection
-3. **Dirigir (Direct)**: 6 phrases - Commands and directions
-4. **Aceptar (Accept)**: 6 phrases - Agreement and acceptance
-5. **Interacción Social (Social)**: 6 phrases - Greetings and social protocols
-6. **Emoción (Emotion)**: 5 phrases - Emotional states
-7. **Comentar (Comment)**: 6 phrases - Observations and commentary
-8. **Preguntar (Question)**: 7 phrases - Information seeking
-
-**Implementation Details**:
-- Primary: Fetched from external endpoint on module load
-- Fallback: Static 20-phrase module for offline usage
-- Format: Each phrase includes ID, category, Spanish text, NSM primitives, semantic roles, and domain classification
 
 ---
 
-## 8. API Services
+## 6. Servicios
 
-### 8.1 Gemini Service (geminiService.ts)
+### geminiService.ts
 
-**Configuration:**
-- Environment: `GEMINI_API_KEY`
-- Client: `GoogleGenAI` from `@google/genai`
+Integración con la API de Google Gemini. Todas las llamadas usan `@google/genai`.
 
-**Models:**
-- `gemini-3-pro-preview`: NLU, visual topology, and SVG structuring
-- `gemini-2.5-flash-image`: Fast image generation
-- `gemini-3-pro-image-preview`: High-quality images
+| Función | Modelo | Descripción |
+|---------|--------|-------------|
+| `generateNLU(utterance, onLog, config)` | `gemini-2.5-flash` | Análisis semántico NSM → NLUData |
+| `generateElements(nlu, config, onLog)` | `gemini-2.5-flash` | Visual Topology → VisualElement[] |
+| `generatePrompt(nlu, elements, config, onLog)` | `gemini-2.5-flash` | Spatial Articulation → string |
+| `generateImage(elements, prompt, row, config, onLog)` | `gemini-2.5-flash-image` / `gemini-3-pro-image-preview` | Bitmap PNG |
 
-### 8.2 VTracer Service (vtracerService.ts)
+**Post-procesamiento de imagen:**
+```typescript
+// En memoria: PNG lossless 1024px
+const resized = await resizeImage(base64Image, 1024);
+// En IndexedDB: JPEG q=0.75 (compressForStorage en indexedDBService.ts)
+```
 
-**Purpose**: Bitmap to vector conversion using the official vtracer-webapp WASM (visioncortex)
+### vtracerService.ts
 
-**Architecture**: The WASM is DOM-coupled -- it reads pixels from a `<canvas>` element and writes `<path>` elements to an `<svg>` element, both referenced by ID. The WASM binary loads lazily on first use from `public/wasm/vtracer/`.
+Vectorización local via WASM. El WASM es DOM-coupled: lee pixels de un `<canvas>` y escribe `<path>` directamente a un `<svg>`, ambos referenciados por ID.
 
-**Key Functions:**
+**APIs principales:**
 
-#### vectorizeBitmap(base64, config?, onProgress?): Promise<VectorizerResult>
+| Función | Descripción |
+|---------|-------------|
+| `traceInteractive(canvasId, svgId, config, onProgress, signal)` | API interactiva para VectorizerModal (renderizado progresivo) |
+| `vectorizeBitmap(base64, config, onProgress)` | API one-shot (crea elementos DOM temporales) |
+| `drawBitmapToCanvas(base64, canvasId)` | Dibuja bitmap en canvas, aplica downscale si >1024px |
+| `preloadWasm()` | Precarga el WASM (llamar antes de la primera conversión) |
 
-One-shot API: creates hidden DOM elements, runs conversion, returns SVG string. Used for programmatic vectorization.
+**VectorizerConfig:**
 
-#### traceInteractive(canvasId, svgId, config, onProgress?): Promise
+```typescript
+interface VectorizerConfig {
+  mode?: 'polygon' | 'spline' | 'none';      // default: 'spline'
+  colorMode?: 'color' | 'bw';                // default: 'color'
+  hierarchical?: 'stacked' | 'cutout';       // default: 'stacked'
+  colorPrecision?: number;                   // 1-8, default: 6
+  layerDifference?: number;                  // 0-255, default: 16
+  filterSpeckle?: number;                    // 0-16, default: 4
+  cornerThreshold?: number;                  // grados, default: 60
+  lengthThreshold?: number;                  // 1-10, default: 4.0
+  spliceThreshold?: number;                  // grados, default: 45
+  pathPrecision?: number;                    // 1-8, default: 8
+}
+```
 
-Interactive API for VectorizerModal: uses visible DOM elements for progressive rendering (paths appear as WASM processes).
+### svgStructureService.ts
 
-#### drawBitmapToCanvas(base64, canvasId): Promise<{width, height}>
+Estructuración semántica del SVG crudo. Llama a Gemini con contexto multimodal.
 
-Draws a base64 image onto a canvas element, applying automatic downscaling for images >1024px.
+**Input:** `{ rawSvg, bitmap, nlu, elements, utterance, config }`
 
-**Configuration (VectorizerConfig)**:
+**Proceso:**
+1. Construye CSS stylesheet desde `config.svgStyleDefs`
+2. Envía a Gemini: bitmap PNG + rawSvg + elements + CSS como contexto
+3. Gemini agrupa paths en `<g>` semánticos, aplica clases CSS, elimina estilos inline
+4. Output: SVG conforme a mf-svg-schema con `<title>`, `<desc>`, metadatos embebidos
 
-- `mode`: 'spline' | 'polygon' | 'none' (default: 'spline')
-- `colorMode`: 'color' | 'bw' (default: 'color')
-- `hierarchical`: 'stacked' | 'cutout' (default: 'stacked', color mode only)
-- `colorPrecision`: 1-8, significant bits per RGB channel (default: 6)
-- `layerDifference`: 0-255, min color distance between layers (default: 16)
-- `filterSpeckle`: 0-16, noise removal threshold (default: 4)
-- `cornerThreshold`: 0-180 degrees (default: 60)
-- `pathPrecision`: 1-8, decimal places for coordinates (default: 8)
+**Funciones de eligibilidad:**
+```typescript
+canVectorize({ bitmap }): EligibilityResult
+canStructureSVG({ bitmap, NLU, elements }): EligibilityResult
+```
 
-**Presets**: B&W, Pictogram, Poster, Photo
+### indexedDBService.ts
 
-### 8.3 SVG Structure Service (svgStructureService.ts)
+Capa de persistencia. Base de datos `pictonet_storage` v3, tres stores:
 
-**Purpose**: Transform raw SVG into semantically structured SVG following mf-svg-schema
+| Store | Contenido | Notas |
+|-------|-----------|-------|
+| `rows` | RowData sin campos binarios | Metadata del pipeline |
+| `bitmaps` | `{ id, bitmap: string }` | PNG→JPEG q=0.75 al escribir |
+| `svgs` | `{ id, rawSvg?, structuredSvg? }` | Sin compresión |
 
-**Key Functions:**
-
-#### structureSVG(input: SVGStructureInput): Promise
-
-**Purpose**: Apply semantic structure and metadata to raw SVG
-
-**Input**: Complex object containing:
-
-- `rawSvg`: Vectorized SVG from vtracer
-- `nlu`: NLU semantic analysis
-- `elements`: Visual element hierarchy
-- `evaluation`: ICAP metrics
-- `utterance`: Original text
-- `config`: Global configuration with styling
-
-**Processing**:
-
-- Build metadata JSON (NSM, concepts, accessibility, provenance, ICAP)
-- Generate dynamic CSS stylesheet from config
-- Create system instruction for Gemini with mf-svg-schema spec
-- Stream response from Gemini 3 Pro
-- Clean and sanitize SVG (remove inline styles, enforce CSS classes)
-- Group paths by semantic roles (Agent, Patient, Theme, Action)
-
-**Output**: Structured SVG with:
-
-- Semantic groups with roles and ARIA attributes
-- Embedded metadata block with complete JSON
-- Style section with CSS classes
-- Title and description for accessibility
-- Proper SVG attributes (viewBox, role, tabindex, lang)
-
-#### canGenerateSVG(row: RowData): object
-
-**Purpose**: Check if a row meets requirements for SVG generation
-
-**Requirements**:
-
-- Bitmap must exist
-- NLU must be complete (not string)
-- Visual elements must exist
-- ICAP average score ≥ 4.0
-
-### 8.4 Service Functions
-
-#### generateNLU(utterance: string): Promise<NLUData>
-
-**Purpose**: Semantic analysis of natural language
-
-**Input**: Natural language utterance string
-
-**Processing**:
-- System instruction with NSM primitive constraints
-- Strict adherence to mediafranca/nlu-schema v1.0
-- JSON output validation and cleanup
-
-**Output**: Structured NLU semantic analysis
-
-**Model**: gemini-3-pro-preview
+**Funciones principales:**
+```typescript
+saveRows(rows)           getAllRows()
+saveBitmap(id, bitmap)   getBitmap(id)      deleteBitmap(id)
+saveSvgs(id, svgs)       getSvgs(id)        deleteSvgs(id)
+clearAllData()           getStorageEstimate()
+```
 
 ---
 
-#### generateVisualBlueprint(nlu: NLUData, config: GlobalConfig): Promise<Partial<RowData>>
+## 7. Componentes
 
-**Purpose**: Convert semantic data to visual hierarchy
+### Jerarquía
 
-**Input**: NLU data + global configuration
+```
+App.tsx
+├── Header (#toolbar)
+│   ├── SearchComponent
+│   ├── Library dropdown
+│   ├── Settings button → #globalSettings panel
+│   └── Console button → #console-panel
+│
+├── Main (#mainContent)
+│   ├── Home view (#home-view)
+│   └── List view (#list-view)
+│       └── RowComponent (#picto-row-{id}) × N
+│           ├── row header (utterance, badges, thumbnail, cascade control)
+│           └── row detail (3 StepBoxes)
+│               ├── #block-nlu → SmartNLUEditor
+│               ├── #block-compose → ElementsEditor + PromptRenderer
+│               └── #block-produce → SVGGenerator
+│
+└── Modales (portales, z-index 50+)
+    ├── FocusViewModal       — detalle fullscreen de cada fase
+    ├── StyleEditor          — editor de clases CSS del sistema visual
+    ├── SVGEditorModal       — editor semántico fullscreen del SVG estructurado
+    │   ├── SemanticTree     — árbol de capas
+    │   ├── SVGCanvas        — viewport zoom/pan
+    │   ├── StylePanel       — propiedades y clases CSS
+    │   └── StylePickerModal — selector de estilos de biblioteca
+    └── VectorizerModal      — vectorizador bitmap→SVG con controles vtracer
+```
 
-**Processing**:
-- Language-aware element ID generation (snake_case)
-- Spatial topology articulation (composition focus)
-- Hierarchical element structure
+### SVGEditorModal
 
-**Output**: `{ elements: VisualElement[], prompt: string }`
+Editor semántico completo para `structuredSvg` o `rawSvg`. Organizado en tres paneles:
 
-**Model**: gemini-3-pro-preview
+- **Izquierda** (`#svg-editor-tree-panel`): SemanticTree — árbol de elementos SVG como capas editables
+- **Centro** (`#svg-editor-canvas`): SVGCanvas — viewport con zoom/pan, selección, bounding boxes
+- **Derecha** (`#svg-editor-properties-panel`): StylePanel — aplicar/quitar clases CSS, overrides locales, renombrar, eliminar
+
+El modelo de estilos sigue arquitectura de dos niveles documentada en `docs/CSS_STYLING_ARCHITECTURE.md`.
+
+### VectorizerModal
+
+Modal fullscreen para la fase ④. Panel izquierdo con controles vtracer (presets, curve mode, color mode, sliders). Panel derecho dividido: original bitmap (canvas) | SVG result (renderizado progresivo).
 
 ---
 
-#### generateImage(elements: VisualElement[], prompt: string, row: any, config: GlobalConfig): Promise<string>
+## 8. Almacenamiento
 
-**Purpose**: Generate bitmap image from visual specification
+### Arquitectura dual
 
-**Input**: Visual elements, spatial prompt, row data, config
+**IndexedDB** (`pictonet_storage` v3) — datos binarios y pipeline:
+- Filas (metadata sin binarios), bitmaps, SVGs
+- Persiste entre sesiones, sobrevive recarga de página
+- Los bitmaps se comprimen a JPEG q=0.75 al guardar (solo para storage, no afecta al pipeline)
 
-**Processing**:
-- Combines spatial + style prompts + metadata
-- Applies aspect ratio from config
-- Model selection based on config.imageModel
+**localStorage** — solo configuración:
+- Clave: `pictonet_v19_config`
+- Contiene: `GlobalConfig` (lang, modelo, estilos, geo, etc.)
 
-**Output**: Base64 data URL string
+### Exportación
 
-**Models**:
-- `flash`: gemini-2.5-flash-image
-- `pro`: gemini-3-pro-image-preview
+**Exportar librería** → JSON con todos los rows + bitmaps base64 embebidos
+**Exportar SVGs** → ZIP con todos los `structuredSvg` como archivos `.svg` individuales
 
-**Aspect Ratios**: 1:1, 3:4, 4:3, 9:16, 16:9
+### Limpiar datos (desarrollo / troubleshooting)
 
----
+```javascript
+// Consola del navegador
+indexedDB.deleteDatabase('pictonet_storage')
+localStorage.removeItem('pictonet_v19_config')
+```
 
-### 8.3 Response Parsing
-
-**cleanJSONResponse()**: Extracts JSON from markdown code blocks, handles nested structures
-
-**Error Handling**:
-- API errors logged to trace console
-- User-friendly error messages
-- Graceful failure with retry capability
+O desde DevTools → Application → Storage → Clear site data.
 
 ---
 
-## 9. Configuration
+## 9. Configuración
 
-### 9.1 Environment Variables
+### Variables de entorno
 
 ```bash
-# Required for production
 GEMINI_API_KEY=<Google Generative AI API Key>
 ```
 
-### 9.2 Build Configuration (vite.config.ts)
+Necesaria en `.env` para desarrollo local. En producción se inyecta via GitHub Actions secret.
+
+⚠️ La API key queda embebida en el bundle compilado. Ver `docs/SECURITY.md`.
+
+### vite.config.ts
 
 ```typescript
 {
-  server: {
-    port: 3000,
-    host: '0.0.0.0'
-  },
+  server: { port: 3000, host: '0.0.0.0' },
   plugins: [react()],
   define: {
     'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.')
-    }
   }
 }
 ```
 
-### 9.3 TypeScript Configuration
-
-- **Target**: ES2022
-- **Module**: ESNext
-- **JSX**: react-jsx (automatic runtime)
-- **Module Resolution**: bundler
-- **Path Alias**: `@/*` → project root
-
-### 9.4 localStorage Keys
-
-- `pictos_v19_storage`: Persisted rows array
-- `pictos_v19_config`: Persisted global configuration
-
-### 9.5 Default Global Configuration
+### GlobalConfig por defecto
 
 ```typescript
 {
-  lang: 'es',                    // Spanish default
-  aspectRatio: '1:1',            // Square images
-  imageModel: 'flash',           // Fast model
+  lang: 'es-419',
+  aspectRatio: '1:1',
+  imageModel: 'flash',
   author: 'PICTOS.NET',
   license: 'CC BY 4.0',
-  visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados...",
-  geoContext: {
-    lat: '40.4168',
-    lng: '-3.7038',
-    region: 'Madrid, ES'
-  }
+  visualStylePrompt: 'Siluetas sobre fondo blanco plano...',
+  geoContext: { lat: '-33.4489', lng: '-70.6693', region: 'Santiago, CL' }
 }
 ```
 
 ---
 
-## 10. Build & Deployment
+## 10. Build y deployment
 
-### 10.1 Build Scripts
-
-```json
-{
-  "dev": "vite",                 // Start dev server at port 3000
-  "build": "vite build",         // Production build
-  "preview": "vite preview"      // Preview production build
-}
+```bash
+npm run dev          # → http://localhost:3000 (HMR)
+npm run build        # → dist/ (ES modules, ES2022)
+npm run preview      # preview del build de producción
+npm run validate-i18n # verifica consistencia de traducciones
 ```
 
-### 10.2 Development Workflow
+### Deployment automático
 
-1. Install dependencies: `npm install`
-2. Set environment: Create `.env` with `GEMINI_API_KEY`
-3. Start dev server: `npm run dev`
-4. Access at: `http://localhost:3000`
-5. Production build: `npm run build`
+GitHub Actions (`.github/workflows/deploy.yml`) despliega a GitHub Pages desde la rama `main`. Requiere el secret `GEMINI_API_KEY` configurado en el repositorio.
 
-### 10.3 Build Output
+### Submodules
 
-- **Directory**: `dist/`
-- **Format**: ES modules
-- **Target**: Modern browsers (ES2022)
+```bash
+git clone --recurse-submodules https://github.com/hspencer/pictos-net.git
+# o post-clone:
+git submodule update --init --recursive
+```
 
----
-
-## 11. Key Insights
-
-### 11.1 Design Principles
-
-1. **Semantic-First Architecture**: Everything flows from semantic analysis (NLU)
-2. **Graph-Based Composition**: Nodes = semantic intentions; edges = relationships
-3. **MediaFranca Compliance**: Follows mediafranca/nlu-schema and NSM primitives
-4. **Iterative Refinement**: Manual editing at each stage with downstream invalidation
-5. **Cognitive Accessibility**: Designed for non-verbal users and cognitive disabilities
-6. **Language Agnostic**: Supports multiple languages with auto-detection
-
-### 11.2 Technical Decisions
-
-1. **React Hooks Only**: No Redux/Context API; lightweight state management
-2. **TypeScript**: Full type safety across codebase
-3. **Tailwind CSS**: Utility-first styling for rapid development
-4. **Browser-Based**: No backend server (direct API calls)
-5. **localStorage**: Ephemeral persistence (session-based)
-6. **Vite**: Fast builds and HMR
-7. **CDN Dependencies**: Reduced build complexity
-
-### 11.3 Current Limitations
-
-- Single-browser storage (no cloud sync)
-- No user authentication/accounts
-- Sequential API calls (no batching)
-- Limited to Gemini API rate limits
-
-### 11.4 Dual Storage Architecture
-
-PICTOS v2.8 implements a **dual storage pattern** that separates bitmap and vector data:
-
-#### RowData Storage (Primary Pipeline)
-
-- Contains: Utterance, NLU, elements, prompt, bitmap (Base64 PNG), evaluation
-- Purpose: Main generative pipeline with full semantic traceability
-- Format: JSON array in localStorage (`pictos_v19_storage`)
-- Export: Complete graphs with embedded Base64 images
-
-#### SVG Library Storage (Quality-Gated Artifacts)
-
-- Contains: Structured SVGs following mf-svg-schema
-- Eligibility: ICAP ≥ 4.0 only (quality threshold)
-- Principle: Single Source of Truth (SSoT) - each SVG is self-contained
-- Format: JSON array in localStorage (`pictos_svg_library`)
-- Export: Individual SVG files with embedded metadata
-- Relationship: 1:1 with RowData via `sourceRowId`
-
-#### Benefits of Dual Storage
-
-1. **Performance**: Bitmaps for quick iteration; SVGs only for production-ready pictograms
-2. **Independence**: SVGs are portable artifacts that work outside PICTOS
-3. **Semantics**: Full metadata embedded in SVG (NSM, ICAP, accessibility)
-4. **Interoperability**: mf-svg-schema compliance enables external tool integration
-5. **Storage Efficiency**: Generate SVGs selectively rather than storing both formats for all items
-
-### 11.5 Potential Extensions
-
-- Backend with database for persistent projects
-- Multi-user collaboration features
-- Batch processing pipeline for SVG generation
-- Vector search for semantic similarity
-- Export to AAC device formats (optimized SVG, PDF)
-- Version control for project iterations
-- Visual SVG editor with semantic group manipulation
-- Bulk SVG export as research datasets
-- Integration with existing pictogram libraries (ARASAAC, Mulberry)
+Los submodules (`nlu-schema`, `mf-svg-schema`, `ICAP`) se copian a `public/schemas/` automáticamente en `postinstall`.
 
 ---
 
-## 12. Version History
+## Referencias cruzadas
 
-Recent commits:
-
-- `ae3a740`: Visual style prompt improvement
-- `de75c2d`: NLUFrameRole type additions
-- `9b29e08`: ICAP evaluation metrics and UI
-- `f6ceb92`: NLU primitives refinement
-- `30c4574`: Initial project structure
-
----
-
-## Summary
-
-**PICTOS.NET** is a sophisticated semantic pictogram generation system combining:
-
-1. **NLP**: Gemini-powered NLU analysis using NSM primitives
-2. **Visual Design**: Hierarchical element composition with spatial articulation
-3. **Image Generation**: Multi-model synthesis (flash/pro)
-4. **User Evaluation**: Manual ICAP metrics for quality assessment
-5. **Accessibility Focus**: Designed for AAC and cognitive accessibility
-
-The architecture emphasizes **semantic consistency** across a 4-stage pipeline, **user control** through an editable workbench, and **research capability** through detailed logging and metrics.
-
-All code is React/TypeScript with a focus on rapid iteration and semantic precision in service of accessibility and linguistic research.
+| Documento | Cubre |
+|-----------|-------|
+| `docs/CONTRIBUTING.md` | Setup local, submodules, i18n, flujo de contribución |
+| `docs/SECURITY.md` | API key management, consideraciones de seguridad |
+| `docs/CSS_STYLING_ARCHITECTURE.md` | Modelo de estilos SVG (dos niveles, overrides, garbage collection) |
+| `docs/UI_MAP.md` | Todos los IDs semánticos de la interfaz |
+| `docs/UI_CONVENTIONS.md` | Reglas de diseño, tokens, componentes |
+| `docs/WCAG_ROADMAP.md` | Estado de conformidad WCAG 2.1 AA |
+| `docs/PROMPT_MAESTRO.md` | Prompt para sesiones de diseño con Claude Code |
 
 ---
 
-**Document Generated**: 2026-01-27
-**Repository**: `/Users/hspencer/Sites/pictos-net`
-**Branch**: `local-dev`
-**Main Branch**: `main`
+*Licencia: Apache 2.0 (código) · CC-BY-4.0 (pictogramas generados)*

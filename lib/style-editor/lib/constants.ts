@@ -66,39 +66,6 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   },
   {
     id: generateId(),
-    selectors: ['.st-dark'],
-    description: 'Stroke modifier: Dark',
-    rules: [
-      { id: generateId(), property: 'stroke', value: '#000000' },
-      { id: generateId(), property: 'stroke-width', value: '3pt' },
-      { id: generateId(), property: 'vector-effect', value: 'non-scaling-stroke' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.st-light'],
-    description: 'Stroke modifier: Light',
-    rules: [
-      { id: generateId(), property: 'stroke', value: '#ffffff' },
-      { id: generateId(), property: 'stroke-width', value: '3pt' },
-      { id: generateId(), property: 'fill', value: 'none' },
-      { id: generateId(), property: 'vector-effect', value: 'non-scaling-stroke' },
-    ],
-  },
-  {
-    id: generateId(),
-    selectors: ['.dashed'],
-    description: 'Stroke modifier: Dashed Round',
-    rules: [
-      { id: generateId(), property: 'stroke-dasharray', value: '4 8' },
-      { id: generateId(), property: 'fill', value: 'none' },
-      { id: generateId(), property: 'stroke', value: '#636363' },
-      { id: generateId(), property: 'stroke-width', value: '3pt' },
-      { id: generateId(), property: 'stroke-linecap', value: 'round' },
-    ],
-  },
-  {
-    id: generateId(),
     selectors: ['.glow'],
     description: 'Effect: Blue Glow',
     rules: [
@@ -299,8 +266,38 @@ export const INITIAL_STYLES: StyleDefinition[] = [
       { id: generateId(), property: 'stroke', value: '#0f766e' },
     ],
   },
+  {
+    id: generateId(),
+    selectors: ['.navy', '.blue-dark'],
+    description: 'Chromatic: Navy blue',
+    rules: [
+      { id: generateId(), property: 'fill', value: '#12379b' },
+      { id: generateId(), property: 'stroke', value: '#0c2568' },
+    ],
+  },
 
   // === STROKE MODIFIERS ===
+  {
+    id: generateId(),
+    selectors: ['.st-dark'],
+    description: 'Stroke modifier: Dark',
+    rules: [
+      { id: generateId(), property: 'stroke', value: '#000000' },
+      { id: generateId(), property: 'stroke-width', value: '3pt' },
+      { id: generateId(), property: 'vector-effect', value: 'non-scaling-stroke' },
+    ],
+  },
+  {
+    id: generateId(),
+    selectors: ['.st-light'],
+    description: 'Stroke modifier: Light',
+    rules: [
+      { id: generateId(), property: 'stroke', value: '#ffffff' },
+      { id: generateId(), property: 'stroke-width', value: '3pt' },
+      { id: generateId(), property: 'fill', value: 'none' },
+      { id: generateId(), property: 'vector-effect', value: 'non-scaling-stroke' },
+    ],
+  },
   {
     id: generateId(),
     selectors: ['.st-thin'],
@@ -325,6 +322,18 @@ export const INITIAL_STYLES: StyleDefinition[] = [
     description: 'Stroke modifier: No stroke',
     rules: [
       { id: generateId(), property: 'stroke', value: 'none' },
+    ],
+  },
+  {
+    id: generateId(),
+    selectors: ['.dashed'],
+    description: 'Stroke modifier: Dashed Round',
+    rules: [
+      { id: generateId(), property: 'stroke-dasharray', value: '4 8' },
+      { id: generateId(), property: 'fill', value: 'none' },
+      { id: generateId(), property: 'stroke', value: '#636363' },
+      { id: generateId(), property: 'stroke-width', value: '3pt' },
+      { id: generateId(), property: 'stroke-linecap', value: 'round' },
     ],
   },
   {

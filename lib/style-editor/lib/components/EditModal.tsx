@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Square, Circle, Triangle, Slash, Activity, Heart } from 'lucide-react';
 import { StyleDefinition, CssRule, ShapeType, KeyframeDefinition } from '../types';
 import { SVG_CSS_PROPERTIES } from '../utils/svgProperties';
+import { useDialogA11y } from '../../../../hooks/useDialogA11y';
 
 interface Props {
   styleDef: StyleDefinition | null;
@@ -31,6 +32,7 @@ const shapeIcons: Record<ShapeType, React.ComponentType<{ size?: number }>> = {
 };
 
 const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelete, currentShape = 'square', keyframes }) => {
+  const { dialogProps } = useDialogA11y({ isOpen, onClose, label: styleDef ? `Edit: ${styleDef.selectors.join(', ')}` : 'New class' });
   const [selectors, setSelectors] = useState('');
   const [rules, setRules] = useState<CssRule[]>([]);
   const [description, setDescription] = useState('');
@@ -216,7 +218,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
         className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
-      <div id="style-edit-modal" className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col min-h-[80vh]">
+      <div id="style-edit-modal" className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col min-h-[80vh]" {...dialogProps}>
 
         {/* Header */}
         <div id="style-edit-modal-header" className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
@@ -292,14 +294,14 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
                           className="w-full p-2 bg-gray-50 border border-gray-200 rounded-md font-mono text-sm focus:bg-white focus:ring-1 focus:ring-blue-500 outline-none"
                         />
                       </div>
-                      <span className="text-gray-400 font-mono">:</span>
+                      <span className="text-gray-500 font-mono">:</span>
 
                       {renderValueInput(rule)}
 
-                      <span className="text-gray-400 font-mono">;</span>
+                      <span className="text-gray-500 font-mono">;</span>
                       <button
                         onClick={() => removeRule(rule.id)}
-                        className="p-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="p-2 text-gray-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -307,7 +309,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
                   ))}
 
                   {rules.length === 0 && (
-                    <div className="text-center py-8 text-gray-400 text-sm italic border-2 border-dashed border-gray-100 rounded-xl">
+                    <div className="text-center py-8 text-gray-500 text-sm italic border-2 border-dashed border-gray-100 rounded-xl">
                       Sin propiedades CSS definidas.
                     </div>
                   )}
@@ -353,20 +355,20 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
 
           {/* RIGHT: Preview */}
           <div id="style-edit-modal-preview" className="w-56 flex-none bg-gray-100 border-l border-gray-200 p-4 flex flex-col items-center gap-4 overflow-y-auto">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider self-start">Vista previa</h3>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider self-start">Vista previa</h3>
 
             {/* Keyframe parameter sliders */}
             {keyframeParams.length > 0 && (
               <div className="w-full space-y-3">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Parámetros</span>
+                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Parámetros</span>
                 {keyframeParams.map(param => {
                   const val = getParamValue(param.variable, param.default);
                   const stepVal = param.step ?? (param.unit === '' ? 0.05 : 1);
                   return (
                     <div key={param.variable} className="space-y-1">
                       <div className="flex justify-between items-baseline">
-                        <label className="text-[10px] text-gray-500 font-medium">{param.label}</label>
-                        <span className="text-[10px] font-mono text-gray-400">{val}{param.unit}</span>
+                        <label className="text-xs text-gray-500 font-medium">{param.label}</label>
+                        <span className="text-xs font-mono text-gray-500">{val}{param.unit}</span>
                       </div>
                       <input
                         type="range"
@@ -392,7 +394,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
                     key={shape}
                     onClick={() => setLocalShape(shape)}
                     title={shape}
-                    className={`p-1.5 rounded-md transition-all ${localShape === shape ? 'bg-white shadow text-blue-600' : 'text-gray-400 hover:text-gray-700'}`}
+                    className={`p-1.5 rounded-md transition-all ${localShape === shape ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     <Icon size={14} />
                   </button>
@@ -413,7 +415,7 @@ const EditModal: React.FC<Props> = ({ styleDef, isOpen, onClose, onSave, onDelet
               </svg>
             </div>
 
-            <p className="text-[10px] font-mono text-gray-400 text-center break-all leading-relaxed">
+            <p className="text-xs font-mono text-gray-500 text-center break-all leading-relaxed">
               {selectors || 'sin selector'}
             </p>
           </div>
