@@ -11,7 +11,7 @@ PICTOS.NET transforma intenciones comunicativas expresadas en lenguaje natural e
 
 La rama de desarrollo `lab` contiene la siguiente versión:
 
-* ver: [PICTOS-NEXT](pictos-next.netlify.app)
+* ver: [PICTOS-NEXT](https://pictos-next.netlify.app)
 * [![Netlify Status](https://api.netlify.com/api/v1/badges/c3a0cb25-110a-49a6-9d9b-05ccf7a72347/deploy-status)](https://app.netlify.com/projects/pictos-next/deploys)
 
 ---
