@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser } from 'lucide-react';
+import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser, Trash2 } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
 import { structureSVG, canVectorize, canStructureSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
@@ -41,6 +41,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [elapsedTime, setElapsedTime] = useState(0);
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
+    const [confirmingDelete, setConfirmingDelete] = useState<'raw' | 'structured' | null>(null);
 
     // row.structuredSvg is the authoritative source (updated by parent via updateRow).
     // The local SVG library may be stale because each useSVGLibrary() instance has
@@ -346,7 +347,34 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             >
                                 <Download size={12} />
                             </button>
+                            <button
+                                onClick={() => setConfirmingDelete('raw')}
+                                className="p-1.5 bg-black/60 hover:bg-rose-600 text-white rounded-full shadow-lg"
+                                title={t('actions.delete')}
+                            >
+                                <Trash2 size={12} />
+                            </button>
                         </div>
+                        {confirmingDelete === 'raw' && (
+                            <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
+                                <button
+                                    onClick={() => {
+                                        setRawSvg(null);
+                                        onUpdate({ rawSvg: undefined });
+                                        setConfirmingDelete(null);
+                                    }}
+                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold uppercase tracking-wider rounded"
+                                >
+                                    {t('actions.delete')}
+                                </button>
+                                <button
+                                    onClick={() => setConfirmingDelete(null)}
+                                    className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold uppercase tracking-wider rounded"
+                                >
+                                    {t('actions.cancel')}
+                                </button>
+                            </div>
+                        )}
                         <div
                             dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
                             className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
@@ -377,7 +405,39 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         >
                             <Download size={14} />
                         </button>
+                        <button
+                            onClick={() => setConfirmingDelete('structured')}
+                            className="p-2 bg-black/60 hover:bg-rose-600 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
+                            title={t('actions.delete')}
+                        >
+                            <Trash2 size={14} />
+                        </button>
                     </div>
+                    {confirmingDelete === 'structured' && (
+                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
+                            <button
+                                onClick={() => {
+                                    removeSVGByRowId(row.id);
+                                    onUpdate({ structuredSvg: undefined });
+                                    setConfirmingDelete(null);
+                                    if (rawSvg) {
+                                        setStatus('traced');
+                                    } else {
+                                        setStatus('idle');
+                                    }
+                                }}
+                                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold uppercase tracking-wider rounded"
+                            >
+                                {t('actions.delete')}
+                            </button>
+                            <button
+                                onClick={() => setConfirmingDelete(null)}
+                                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold uppercase tracking-wider rounded"
+                            >
+                                {t('actions.cancel')}
+                            </button>
+                        </div>
+                    )}
                     <div
                         dangerouslySetInnerHTML={{ __html: injectSvgA11y(displaySvg, row.UTTERANCE, row.prompt) }}
                         onClick={handleSvgInteraction}
@@ -430,7 +490,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.traceSvg')}
                     </div>
-                    {/* Download & Edit overlay — bottom on hover */}
+                    {/* Download, Edit & Delete overlay — bottom on hover */}
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
                         {onOpenEditor && (
                             <button
@@ -448,7 +508,35 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         >
                             <Download size={14} />
                         </button>
+                        <button
+                            onClick={() => setConfirmingDelete('raw')}
+                            className="p-2 bg-black/60 hover:bg-rose-600 text-white rounded-full shadow-lg"
+                            title={t('actions.delete')}
+                        >
+                            <Trash2 size={14} />
+                        </button>
                     </div>
+                    {confirmingDelete === 'raw' && (
+                        <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
+                            <button
+                                onClick={() => {
+                                    setRawSvg(null);
+                                    onUpdate({ rawSvg: undefined });
+                                    setConfirmingDelete(null);
+                                    setStatus('idle');
+                                }}
+                                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold uppercase tracking-wider rounded"
+                            >
+                                {t('actions.delete')}
+                            </button>
+                            <button
+                                onClick={() => setConfirmingDelete(null)}
+                                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold uppercase tracking-wider rounded"
+                            >
+                                {t('actions.cancel')}
+                            </button>
+                        </div>
+                    )}
                     <div
                         dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"

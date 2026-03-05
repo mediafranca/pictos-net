@@ -59,7 +59,7 @@
     "loadLibraryWarning": "Tiene {count} pictograma(s) en su biblioteca. Cargar una nueva biblioteca sobreescribirá su trabajo actual. ¿Desea continuar?",
     "aboutProject": "Acerca de este proyecto",
     "exampleLibraries": "Bibliotecas de Ejemplo",
-    "exampleLibrariesDescription": "Colecciones curadas de pictogramas con evaluaciones completas",
+    "exampleLibrariesDescription": "Librerías de ejemplo con diferentes estilos gráficos",
     "loadLibrary": "Cargar biblioteca",
     "items": "elementos",
     "emptyLibrary": "Tu librería está vacía",
