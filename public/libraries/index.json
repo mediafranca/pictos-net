@@ -1,6 +1,6 @@
 {
-  "generated": "2026-03-05T09:08:18.333Z",
-  "count": 8,
+  "generated": "2026-03-05T09:54:13.275Z",
+  "count": 9,
   "libraries": [
     {
       "filename": "dibujo_graph_2026-03-05.json",
@@ -55,6 +55,15 @@
       "items": 6,
       "description": "pictonet_graph_dump",
       "filesize": 374781
+    },
+    {
+      "filename": "pictos___tr_mites_graph_2026-03-05.json",
+      "name": "PICTOS - Trámites",
+      "location": "Santiago, Región Metropolitana de Santiago, Chile",
+      "language": "es-419",
+      "items": 10,
+      "description": "pictonet_graph_dump",
+      "filesize": 3102781
     },
     {
       "filename": "se_al_tica_color_graph_2026-03-05.json",
