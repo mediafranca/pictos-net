@@ -1387,17 +1387,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="mt-8 text-center">
-              <a
-                href="https://github.com/hspencer/pictos-net#readme"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-600 transition-colors font-medium"
-              >
-                <ExternalLink size={14} />
-                {t('home.aboutProject')}
-              </a>
-            </div>
           </div>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 animate-in fade-in duration-700">
@@ -1463,6 +1452,49 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-200 bg-slate-50 px-8 py-10 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">{t('footer.research')}</h4>
+            <p className="leading-relaxed">{t('footer.researchDesc')}</p>
+          </div>
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">{t('footer.collaborate')}</h4>
+            <p className="leading-relaxed mb-3">{t('footer.collaborateDesc')}</p>
+            <a
+              href={lang === 'es-419' ? 'https://forms.gle/DaFLWAjfj7sGCD3s7' : 'https://forms.gle/CCZHejJ71F3REE2P6'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-medium transition-colors"
+            >
+              <ExternalLink size={12} /> {t('footer.collaborate')}
+            </a>
+          </div>
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">
+              <a href="https://herbertspencer.net" target="_blank" rel="noopener noreferrer" className="hover:text-violet-600 transition-colors">
+                {t('footer.author')}
+              </a>
+            </h4>
+            <p className="leading-relaxed">{t('footer.affiliation1')}<br />{t('footer.affiliation2')}</p>
+            <div className="flex items-center gap-4 mt-3">
+              <a
+                href="https://github.com/hspencer/pictos-net"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-medium transition-colors"
+              >
+                <Code size={12} /> {t('footer.openSource')}
+              </a>
+              <span className="text-slate-300">|</span>
+              <span>{t('footer.license')}</span>
+            </div>
+            <p className="mt-3 text-slate-400">v{APP_VERSION}</p>
+          </div>
+        </div>
+      </footer>
 
       {showConsole && (
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-500 mono text-xs p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">

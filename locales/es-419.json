@@ -455,5 +455,16 @@
     "success": "✓ Pictograma \"{utterance}\" compartido exitosamente con PICTOS",
     "exception": "Error al compartir pictograma: {error}",
     "thanksMessage": "Gracias por compartir tu pictograma con PICTOS. Este pictograma será visible por toda la comunidad."
+  },
+  "footer": {
+    "research": "Investigación",
+    "researchDesc": "PICTOS.net es un proyecto de investigación en diseño generativo para la comunicación aumentativa y alternativa (CAA). Desarrollado como parte de una investigación doctoral en accesibilidad cognitiva.",
+    "openSource": "Código abierto",
+    "collaborate": "Colaborar",
+    "collaborateDesc": "Participa en la investigación evaluando pictogramas generados por el sistema.",
+    "author": "Herbert Spencer González",
+    "affiliation1": "MediaFranca — e[ad] Escuela de Arquitectura y Diseño, PUCV",
+    "affiliation2": "AUT University, Auckland",
+    "license": "MIT License"
   }
 }
