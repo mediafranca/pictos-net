@@ -1344,45 +1344,52 @@ const App: React.FC = () => {
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
-                <div id="example-libraries" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {availableLibraries.map((library: LibraryMetadata) => (
-                    <div
-                      key={library.filename}
-                      onClick={() => loadLibrary(library.filename)}
-                      className="bg-slate-50 border border-slate-200 p-6 text-left space-y-3 hover:border-violet-600 hover:bg-white transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="text-violet-600 group-hover:scale-110 transition-transform">
-                          <Library size={24} />
+                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {availableLibraries.map((library: LibraryMetadata) => {
+                    const slug = library.filename.replace(/_graph.*\.json$/, '');
+                    return (
+                      <div
+                        key={library.filename}
+                        onClick={() => loadLibrary(library.filename)}
+                        className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-violet-400 hover:shadow-lg transition-all cursor-pointer group"
+                      >
+                        {/* Thumbnail strip */}
+                        <div className="flex h-24 bg-slate-100">
+                          {[0, 1, 2].map(i => (
+                            <img
+                              key={i}
+                              src={`/libraries/thumbs/${slug}_${i}.jpg`}
+                              alt=""
+                              className="w-1/3 h-full object-cover"
+                              loading="lazy"
+                            />
+                          ))}
                         </div>
-                        <div className="flex gap-1">
-                          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5">
-                            {library.language}
-                          </span>
+
+                        {/* Info */}
+                        <div className="p-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-bold text-sm text-slate-900 leading-tight">{library.name}</h4>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                              {library.language}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
+                            <Globe size={10} />
+                            <span className="truncate">{library.location}</span>
+                          </div>
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+                            <span className="text-xs text-violet-600 font-semibold">
+                              {library.items} {t('home.items')}
+                            </span>
+                            <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium group-hover:text-violet-600 transition-colors">
+                              {t('home.loadLibrary')}
+                            </span>
+                          </div>
                         </div>
                       </div>
-
-                      <div>
-                        <h4 className="font-bold text-sm uppercase tracking-wide text-slate-900">{library.name}</h4>
-                        <div className="text-xs text-slate-500 font-mono mt-0.5">{library.location}</div>
-                      </div>
-
-                      {/* {library.description && (
-                      <p className="text-xs text-slate-500 leading-relaxed">{library.description}</p>
-                    )} */}
-
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                        <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">
-                          {t('home.loadLibrary')}
-                        </span>
-                        {library.items && (
-                          <span className="text-xs text-violet-600 font-bold">
-                            {library.items} {t('home.items')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
