@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "npm run copy-schemas && vite",
     "build": "npm run copy-schemas && vite build",
-    "preview": "vite preview",
+    "preview": "npm run copy-schemas && vite preview",
+    "generate-index": "node scripts/generate-libraries-index.cjs",
     "validate-i18n": "node scripts/validateTranslations.cjs",
     "copy-schemas": "sh scripts/copy-submodule-data.sh",
     "postinstall": "(git submodule update --init --recursive || echo '⚠️ Git submodule update failed, skipping...') && npm run copy-schemas"

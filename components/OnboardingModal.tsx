@@ -114,7 +114,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
                   onClick={() => setStep(i + 1)}
                   className={`w-2.5 h-2.5 rounded-full transition-all ${
                     i + 1 === step ? 'bg-violet-500 scale-125' :
-                    i + 1 < step ? 'bg-emerald-400' : 'bg-slate-300'
+                    i + 1 < step ? 'bg-orange-400' : 'bg-slate-300'
                   }`}
                 />
               ))}
