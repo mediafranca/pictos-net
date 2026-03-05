@@ -59,7 +59,7 @@
     "loadLibraryWarning": "You have {count} pictogram(s) in your library. Loading a new library will overwrite your current work. Do you want to continue?",
     "aboutProject": "About this project",
     "exampleLibraries": "Example Libraries",
-    "exampleLibrariesDescription": "Curated collections of pictograms with complete evaluations",
+    "exampleLibrariesDescription": "Example libraries showcasing different graphic styles",
     "loadLibrary": "Load library",
     "items": "items",
     "emptyLibrary": "Your library is empty",
