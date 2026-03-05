@@ -27,6 +27,7 @@ import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
 import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import { VectorizerModal } from './components/VectorizerModal';
+import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
 
@@ -142,10 +143,10 @@ const SearchComponent: React.FC<{
 
 
 const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, tooltip }) => (
-  <label className="text-xs font-medium uppercase text-slate-500 mb-2 flex items-center gap-1">
+  <label className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
     {label}
     <div className="group/tooltip relative">
-      <HelpCircle size={10} className="text-slate-500 hover:text-violet-600 cursor-help" />
+      <HelpCircle size={14} className="text-orange-400 hover:text-orange-600 cursor-help" />
       <div className="invisible group-hover/tooltip:visible absolute left-0 bottom-full mb-2 w-64 bg-slate-900 text-white text-xs p-2 rounded shadow-lg z-[56] leading-relaxed">
         {tooltip}
       </div>
@@ -173,7 +174,7 @@ const App: React.FC = () => {
     lang: 'es-419',
     aspectRatio: '1:1',
     imageModel: 'flash',
-    author: 'PICTOS.NET',
+    name: 'PICTOS.NET',
     credits: '',
     license: 'CC BY 4.0',
     visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados, sin sombras, sin texturas y sin contornos. Geometría: Usa trazos gruesos y consistentes y simplificación geométrica. Todas las extremidades y terminales deben tener puntas redondeadas y vértices suavizados. Composición: Representación plana 2D centrada. Usa el espacio negativo (blanco) para definir la separación interna entre formas negras superpuestas (por ejemplo, el espacio entre una cabeza y un torso). Claridad: Maximiza la legibilidad y el reconocimiento semántico a escalas pequeñas. Evita cualquier rasgo facial o detalles intrincados. Usa color solo en el elemento distintivo, si es necesario.",
@@ -206,6 +207,9 @@ const App: React.FC = () => {
     localStorage.setItem('pictonet_high_contrast', String(highContrast));
     document.documentElement.classList.toggle('high-contrast', highContrast);
   }, [highContrast]);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('pictonet_onboarding_done');
+  });
   const [isInitialized, setIsInitialized] = useState(false);
   const [availableLibraries, setAvailableLibraries] = useState<LibraryMetadata[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -466,7 +470,7 @@ const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const safeFilename = config.author.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'pictonet';
+    const safeFilename = config.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'pictonet';
     a.download = `${safeFilename}_graph_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
@@ -498,6 +502,11 @@ const App: React.FC = () => {
           setRows(sanitized);
           if (parsed.config) {
             const newConfig = { ...parsed.config };
+            // Retrocompatibilidad: author → name
+            if (!newConfig.name && newConfig.author) {
+              newConfig.name = newConfig.author;
+              delete newConfig.author;
+            }
             if (!newConfig.aspectRatio) newConfig.aspectRatio = '1:1';
             if (!newConfig.imageModel) newConfig.imageModel = 'flash';
             if (!newConfig.credits) newConfig.credits = '';
@@ -597,7 +606,13 @@ const App: React.FC = () => {
 
         // Load config if available
         if (data.config) {
-          setConfig(prev => ({ ...prev, ...data.config }));
+          const loadedConfig = { ...data.config };
+          // Retrocompatibilidad: author → name
+          if (!loadedConfig.name && loadedConfig.author) {
+            loadedConfig.name = loadedConfig.author;
+            delete loadedConfig.author;
+          }
+          setConfig(prev => ({ ...prev, ...loadedConfig }));
         }
 
         setRows(data.rows as RowData[]);
@@ -864,7 +879,7 @@ const App: React.FC = () => {
         visualStatus: row.visualStatus,
         bitmapStatus: row.bitmapStatus,
         source: 'pictos.net',
-        author: config.author,
+        name: config.name,
         timestamp: new Date().toISOString()
       };
       console.log('[SHARE] Enviando a función serverless', { payloadSize: JSON.stringify(payload).length });
@@ -1004,7 +1019,7 @@ const App: React.FC = () => {
         <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewMode('home'); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
-            <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.author}</h1>
+            <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.name}</h1>
             <span id="tagline" className="text-xs text-slate-500 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
           </div>
         </div>
@@ -1067,20 +1082,20 @@ const App: React.FC = () => {
       {showConfig && (
         <>
         <div className="fixed inset-0 z-[39]" onClick={() => setShowConfig(false)} />
-        <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-8 animate-in slide-in-from-top duration-200">
-          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div id="globalSettings" className="fixed top-20 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b shadow-2xl p-6 animate-in slide-in-from-top duration-200">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
 
-            {/* ── Columna izquierda ── */}
-            <div className="flex flex-col gap-6">
+            {/* ── Col 1: Identidad ── */}
+            <div className="flex flex-col gap-4">
 
               {/* field-author */}
               <div id="field-author">
                 <FieldLabel label={t('config.spaceName')} tooltip={t('config.spaceNameTooltip')} />
                 <input
                   type="text"
-                  value={config.author}
-                  onChange={e => setConfig({ ...config, author: e.target.value })}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  value={config.name}
+                  onChange={e => setConfig({ ...config, name: e.target.value })}
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
                   placeholder="My Pictogram Library"
                 />
               </div>
@@ -1095,7 +1110,7 @@ const App: React.FC = () => {
                   value={config.credits || ''}
                   onChange={e => setConfig({ ...config, credits: e.target.value })}
                   placeholder={t('config.creditsPlaceholder')}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
                 />
               </div>
 
@@ -1108,7 +1123,7 @@ const App: React.FC = () => {
                 <select
                   value={config.license}
                   onChange={e => setConfig({ ...config, license: e.target.value })}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
                 >
                   <option value="copyright">{t('config.licenses.copyright')}</option>
                   <option value="cc0">{t('config.licenses.cc0')}</option>
@@ -1126,7 +1141,7 @@ const App: React.FC = () => {
                   tooltip={t('config.geoContextTooltip')}
                 />
                 <div className="flex flex-col gap-2">
-                  <div className="border p-3 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
+                  <div className="border p-2.5 bg-slate-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-violet-200 transition-colors">
                     <div className="flex items-center gap-2">
                       <Globe size={14} className="text-slate-500" />
                       <select
@@ -1155,11 +1170,11 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Columna derecha ── */}
-            <div className="flex flex-col gap-6">
+            {/* ── Col 2: Estilo visual ── */}
+            <div className="flex flex-col gap-4">
 
               {/* field-visual-style */}
-              <div id="field-visual-style">
+              <div id="field-visual-style" className="flex-1 flex flex-col">
                 <FieldLabel
                   label={t('config.visualStylePrompt')}
                   tooltip={t('config.visualStylePromptTooltip')}
@@ -1167,9 +1182,27 @@ const App: React.FC = () => {
                 <textarea
                   value={config.visualStylePrompt}
                   onChange={e => setConfig({ ...config, visualStylePrompt: e.target.value })}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors h-32 resize-none"
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors flex-1 min-h-[10rem] resize-none"
                 />
               </div>
+
+              {/* field-style-editor */}
+              <div id="field-style-editor">
+                <FieldLabel
+                  label={t('config.styles')}
+                  tooltip={t('config.stylesTooltip')}
+                />
+                <button
+                  onClick={() => setShowStyleEditor(true)}
+                  className="w-full text-sm font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3.5 rounded transition-colors flex items-center justify-center gap-2"
+                >
+                  <Palette size={16} aria-hidden="true" /> {t('config.openEditor')}
+                </button>
+              </div>
+            </div>
+
+            {/* ── Col 3: Generación y preferencias ── */}
+            <div className="flex flex-col gap-4">
 
               {/* field-aspect-ratio */}
               <div id="field-aspect-ratio">
@@ -1180,7 +1213,7 @@ const App: React.FC = () => {
                 <select
                   value={config.aspectRatio}
                   onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
                 >
                   <option value="1:1">{t('config.aspectRatios.square')}</option>
                   <option value="4:3">{t('config.aspectRatios.standard')}</option>
@@ -1199,25 +1232,11 @@ const App: React.FC = () => {
                 <select
                   value={config.imageModel || 'flash'}
                   onChange={e => setConfig({ ...config, imageModel: e.target.value })}
-                  className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors"
+                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
                 >
                   <option value="flash">{t('config.imageModels.flash')}</option>
                   <option value="pro">{t('config.imageModels.pro')}</option>
                 </select>
-              </div>
-
-              {/* field-style-editor */}
-              <div id="field-style-editor">
-                <FieldLabel
-                  label={t('config.styles')}
-                  tooltip={t('config.stylesTooltip')}
-                />
-                <button
-                  onClick={() => setShowStyleEditor(true)}
-                  className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3 rounded transition-colors flex items-center justify-center gap-2"
-                >
-                  <Palette size={14} aria-hidden="true" /> {t('config.openEditor')}
-                </button>
               </div>
 
               {/* field-reduce-motion */}
@@ -1226,7 +1245,7 @@ const App: React.FC = () => {
                   label={t('config.animations')}
                   tooltip={t('config.animationsTooltip')}
                 />
-                <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
+                <label className="flex items-center gap-3 cursor-pointer p-2.5 border bg-slate-50 hover:bg-white transition-colors">
                   <input
                     type="checkbox"
                     checked={!reduceMotion}
@@ -1245,7 +1264,7 @@ const App: React.FC = () => {
                   label={t('config.highContrast')}
                   tooltip={t('config.highContrastTooltip')}
                 />
-                <label className="flex items-center gap-3 cursor-pointer p-3 border bg-slate-50 hover:bg-white transition-colors">
+                <label className="flex items-center gap-3 cursor-pointer p-2.5 border bg-slate-50 hover:bg-white transition-colors">
                   <input
                     type="checkbox"
                     checked={highContrast}
@@ -1256,6 +1275,17 @@ const App: React.FC = () => {
                     {highContrast ? t('config.highContrastEnabled') : t('config.highContrastDisabled')}
                   </span>
                 </label>
+              </div>
+
+              {/* field-tutorial */}
+              <div id="field-tutorial" className="mt-auto pt-2">
+                <button
+                  onClick={() => { setShowOnboarding(true); setShowConfig(false); }}
+                  className="w-full text-xs font-medium text-slate-500 bg-slate-100 hover:bg-slate-200 border border-slate-200 p-2.5 rounded transition-colors flex items-center justify-center gap-2"
+                  title={t('config.tutorialTooltip')}
+                >
+                  <HelpCircle size={14} aria-hidden="true" /> {t('config.tutorial')}
+                </button>
               </div>
             </div>
 
@@ -1288,7 +1318,7 @@ const App: React.FC = () => {
               <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-xs font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
                 <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
               </div>
-              <p className="text-8xl font-black tracking-tighter text-slate-900 leading-none" aria-hidden="true">{config.author}</p>
+              <p className="text-8xl font-black tracking-tighter text-slate-900 leading-none" aria-hidden="true">{config.name}</p>
               <p className="text-slate-500 text-xl font-medium max-w-2xl mx-auto leading-relaxed">
                 {t('home.description')}
               </p>
@@ -1357,17 +1387,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="mt-8 text-center">
-              <a
-                href="https://github.com/hspencer/pictos-net#readme"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-600 transition-colors font-medium"
-              >
-                <ExternalLink size={14} />
-                {t('home.aboutProject')}
-              </a>
-            </div>
           </div>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 animate-in fade-in duration-700">
@@ -1434,6 +1453,49 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* Footer */}
+      <footer className="border-t border-slate-200 bg-slate-50 px-8 py-10 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">{t('footer.research')}</h4>
+            <p className="leading-relaxed">{t('footer.researchDesc')}</p>
+          </div>
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">{t('footer.collaborate')}</h4>
+            <p className="leading-relaxed mb-3">{t('footer.collaborateDesc')}</p>
+            <a
+              href={lang === 'es-419' ? 'https://forms.gle/DaFLWAjfj7sGCD3s7' : 'https://forms.gle/CCZHejJ71F3REE2P6'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-medium transition-colors"
+            >
+              <ExternalLink size={12} /> {t('footer.collaborate')}
+            </a>
+          </div>
+          <div>
+            <h4 className="text-slate-900 font-semibold text-sm mb-2">
+              <a href="https://herbertspencer.net" target="_blank" rel="noopener noreferrer" className="hover:text-violet-600 transition-colors">
+                {t('footer.author')}
+              </a>
+            </h4>
+            <p className="leading-relaxed">{t('footer.affiliation1')}<br />{t('footer.affiliation2')}</p>
+            <div className="flex items-center gap-4 mt-3">
+              <a
+                href="https://github.com/hspencer/pictos-net"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-medium transition-colors"
+              >
+                <Code size={12} /> {t('footer.openSource')}
+              </a>
+              <span className="text-slate-300">|</span>
+              <span>{t('footer.license')}</span>
+            </div>
+            <p className="mt-3 text-slate-400">v{APP_VERSION}</p>
+          </div>
+        </div>
+      </footer>
+
       {showConsole && (
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-500 mono text-xs p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
@@ -1464,6 +1526,27 @@ const App: React.FC = () => {
           onOpenEditor={() => openSVGEditor(focusMode!.rowId)}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
+        />
+      )}
+
+      {/* Onboarding Modal */}
+      {showOnboarding && (
+        <OnboardingModal
+          t={t}
+          lang={lang as 'es-419' | 'en-GB'}
+          onClose={() => {
+            setShowOnboarding(false);
+            localStorage.setItem('pictonet_onboarding_done', '1');
+          }}
+          onSelectPreset={(stylePrompt) => {
+            setConfig(prev => ({ ...prev, visualStylePrompt: stylePrompt }));
+          }}
+          onImportPhrases={() => appendPhrasesInputRef.current?.click()}
+          onGoHome={() => setViewMode('home')}
+          onFocusSearch={() => {
+            setViewMode('list');
+            setIsSearching(true);
+          }}
         />
       )}
 
@@ -1583,8 +1666,8 @@ const App: React.FC = () => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
-                a.download = `${safeAuthor}_pngs_${new Date().toISOString().split('T')[0]}.zip`;
+                const safeName = sanitizeFilename(config.name) || 'pictonet';
+                a.download = `${safeName}_pngs_${new Date().toISOString().split('T')[0]}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
                 setShowLibraryMenu(false);
@@ -1608,8 +1691,8 @@ const App: React.FC = () => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                const safeAuthor = sanitizeFilename(config.author) || 'pictonet';
-                a.download = `${safeAuthor}_svgs_${new Date().toISOString().split('T')[0]}.zip`;
+                const safeName = sanitizeFilename(config.name) || 'pictonet';
+                a.download = `${safeName}_svgs_${new Date().toISOString().split('T')[0]}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
                 setShowLibraryMenu(false);

@@ -189,7 +189,9 @@
     "highContrast": "Alto contraste",
     "highContrastTooltip": "Activar modo de alto contraste: bordes reforzados, texto mas oscuro y fondos blancos puros. Recomendado para accesibilidad (WCAG 1.4.11).",
     "highContrastEnabled": "Alto contraste activado",
-    "highContrastDisabled": "Alto contraste desactivado"
+    "highContrastDisabled": "Alto contraste desactivado",
+    "tutorial": "Tutorial",
+    "tutorialTooltip": "Ver el tutorial de introducción a PICTOS.net"
   },
   "console": {
     "title": "Consola PICTOS",
@@ -394,6 +396,53 @@
     "groupName": "Nombre del grupo",
     "presentationAttrs": "Atributos de presentacion"
   },
+  "onboarding": {
+    "skipAll": "Saltar todo",
+    "back": "Atrás",
+    "seeHow": "Ver cómo funciona",
+    "makeItYours": "Ahora hazlo tuyo",
+    "saveStyle": "Guardar estilo y empezar",
+    "useDefault": "Usar default",
+    "startWithout": "Empezar sin guía",
+    "step1": {
+      "title": "Bienvenido a ",
+      "highlight": "PICTOS.net",
+      "intro": "Un sistema generativo de pictogramas para la comunicación aumentativa y alternativa (CAA). No es una biblioteca fija: crea pictogramas a partir de lo que escribes.",
+      "generative": "Generativo",
+      "generativeDesc": "Cada pictograma se crea desde tu frase, no se busca en un catálogo.",
+      "customizable": "Personalizable",
+      "customizableDesc": "Cambia el estilo visual con un prompt de texto. Tú defines la estética.",
+      "open": "Abierto",
+      "openDesc": "Tu vocabulario, tu idioma, tu contexto cultural. Sin restricciones.",
+      "codesign": "En construcción contigo",
+      "codesignDesc": "Esto es un prototipo activo. Tu trabajo alimenta la investigación."
+    },
+    "step2": {
+      "title": "Mira lo que puede hacer",
+      "intro": "La misma frase, cuatro estilos distintos. Solo cambia el ",
+      "introHighlight": "prompt de estilo",
+      "note": "Nota:",
+      "noteText": "Estos son ejemplos pre-generados. En tu espacio, cada frase se procesa en tiempo real con el modelo que elijas."
+    },
+    "step3": {
+      "title": "Define tu espacio",
+      "subtitle": "Elige un estilo base para tu biblioteca. Podrás cambiarlo o personalizarlo después.",
+      "noteLabel": "Esto se guarda como tu visualStylePrompt.",
+      "noteText": "Es un texto libre que describe cómo deben verse tus pictogramas. Puedes editarlo manualmente después en los ajustes."
+    },
+    "step4": {
+      "title": "Tres caminos para empezar",
+      "subtitle": "Elige cómo quieres comenzar. No hay orden correcto.",
+      "import": "Importar",
+      "importDesc": "Sube un archivo .txt con frases (una por línea) y genera pictogramas en lote.",
+      "explore": "Explorar",
+      "exploreDesc": "Carga una de las bibliotecas de ejemplo y observa cómo funciona el sistema.",
+      "create": "Crear",
+      "createDesc": "Escribe tu primera frase en el buscador y observa el pipeline paso a paso.",
+      "note": "Esto lo estamos construyendo contigo.",
+      "noteText": "Tu trabajo puede convertirse en ejemplo para otros."
+    }
+  },
   "share": {
     "shareWithPictos": "Compartir con PICTOS",
     "requiresEvaluation": "Se requiere evaluación para compartir el pictograma",
@@ -406,5 +455,16 @@
     "success": "✓ Pictograma \"{utterance}\" compartido exitosamente con PICTOS",
     "exception": "Error al compartir pictograma: {error}",
     "thanksMessage": "Gracias por compartir tu pictograma con PICTOS. Este pictograma será visible por toda la comunidad."
+  },
+  "footer": {
+    "research": "Investigación",
+    "researchDesc": "PICTOS.net es un proyecto de investigación en diseño generativo para la comunicación aumentativa y alternativa (CAA). Desarrollado como parte de una investigación doctoral en accesibilidad cognitiva.",
+    "openSource": "Código abierto",
+    "collaborate": "Colaborar",
+    "collaborateDesc": "Participa en la investigación evaluando pictogramas generados por el sistema.",
+    "author": "Herbert Spencer González",
+    "affiliation1": "MediaFranca — e[ad] Escuela de Arquitectura y Diseño, PUCV",
+    "affiliation2": "AUT University, Auckland",
+    "license": "MIT License"
   }
 }
