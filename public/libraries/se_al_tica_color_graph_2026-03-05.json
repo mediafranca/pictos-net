@@ -6,7 +6,7 @@
     "lang": "es",
     "aspectRatio": "1:1",
     "imageModel": "pro",
-    "author": "Señalética Color",
+    "name": "Señalética Color",
     "license": "cc-by-sa",
     "visualStylePrompt": "Pictographic style inspired by the AIGA/DOT public signage system. High abstraction, geometric synthesis, instant readability at small sizes.\nFigures and objects built from simple geometric primitives: circles, rectangles, rounded shapes. No organic curves, no hand-drawn feel. Clean, mechanical precision.\nUniform stroke weight throughout; prefer filled shapes over outlines. Where outlines are necessary, use a single consistent weight with rounded caps.\nColor palette: 3-5 flat, saturated colors with high contrast against white background. Use color semantically: one color per role (e.g., blue for person, orange for object, green for action/context). No gradients, no textures, no patterns.\nHuman figures: simplified to essential posture and gesture. No facial features, no fingers, no clothing detail. Differentiate actions through body angle, arm position, and relationship to objects.\nComposition: single concept per image, centered, generous negative space. No ground line, no environment, no decorative elements.\nExclude: shadows, depth, perspective, text, labels, frames, ornaments, texture fills.",
     "geoContext": {

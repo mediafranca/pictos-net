@@ -123,7 +123,7 @@ export interface GlobalConfig {
   annotatedContext?: string;
   aspectRatio: string; // '1:1', '3:4', '4:3', '9:16', '16:9'
   imageModel: string; // 'flash' | 'pro'
-  author: string;
+  name: string;
   credits?: string; // Autores/institución para atribución de la librería
   license: string;
   visualStylePrompt: string;
