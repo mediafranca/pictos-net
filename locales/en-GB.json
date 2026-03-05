@@ -189,7 +189,9 @@
     "highContrast": "High contrast",
     "highContrastTooltip": "Enable high contrast mode: reinforced borders, darker text and pure white backgrounds. Recommended for accessibility (WCAG 1.4.11).",
     "highContrastEnabled": "High contrast enabled",
-    "highContrastDisabled": "High contrast disabled"
+    "highContrastDisabled": "High contrast disabled",
+    "tutorial": "Tutorial",
+    "tutorialTooltip": "View the PICTOS.net introductory tutorial"
   },
   "console": {
     "title": "PICTOS Console",
@@ -393,6 +395,53 @@
     "inlineOpacity": "Inline opacity",
     "groupName": "Group name",
     "presentationAttrs": "Presentation attributes"
+  },
+  "onboarding": {
+    "skipAll": "Skip all",
+    "back": "Back",
+    "seeHow": "See how it works",
+    "makeItYours": "Now make it yours",
+    "saveStyle": "Save style and start",
+    "useDefault": "Use default",
+    "startWithout": "Start without guide",
+    "step1": {
+      "title": "Welcome to ",
+      "highlight": "PICTOS.net",
+      "intro": "A generative pictogram system for augmentative and alternative communication (AAC). It is not a fixed library: it creates pictograms from what you write.",
+      "generative": "Generative",
+      "generativeDesc": "Each pictogram is created from your phrase, not fetched from a catalogue.",
+      "customizable": "Customisable",
+      "customizableDesc": "Change the visual style with a text prompt. You define the aesthetics.",
+      "open": "Open",
+      "openDesc": "Your vocabulary, your language, your cultural context. No restrictions.",
+      "codesign": "Built with you",
+      "codesignDesc": "This is an active prototype. Your work feeds the research."
+    },
+    "step2": {
+      "title": "See what it can do",
+      "intro": "The same phrase, four different styles. Only the ",
+      "introHighlight": "style prompt",
+      "note": "Note:",
+      "noteText": "These are pre-generated examples. In your space, each phrase is processed in real time with the model you choose."
+    },
+    "step3": {
+      "title": "Define your space",
+      "subtitle": "Choose a base style for your library. You can change or customise it later.",
+      "noteLabel": "This is saved as your visualStylePrompt.",
+      "noteText": "It is a free-form text describing how your pictograms should look. You can edit it manually later in settings."
+    },
+    "step4": {
+      "title": "Three ways to start",
+      "subtitle": "Choose how you want to begin. There is no right order.",
+      "import": "Import",
+      "importDesc": "Upload a .txt file with phrases (one per line) and generate pictograms in batch.",
+      "explore": "Explore",
+      "exploreDesc": "Load one of the example libraries and see how the system works.",
+      "create": "Create",
+      "createDesc": "Type your first phrase in the search bar and watch the pipeline step by step.",
+      "note": "We are building this with you.",
+      "noteText": "Your work can become an example for others."
+    }
   },
   "share": {
     "shareWithPictos": "Share with PICTOS",
