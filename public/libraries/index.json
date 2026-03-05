@@ -1,0 +1,78 @@
+{
+  "generated": "2026-03-05T09:08:18.333Z",
+  "count": 8,
+  "libraries": [
+    {
+      "filename": "dibujo_graph_2026-03-05.json",
+      "name": "Dibujo",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 3561386
+    },
+    {
+      "filename": "escena_descriptiva_graph_2026-03-05.json",
+      "name": "Escena descriptiva",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 1963086
+    },
+    {
+      "filename": "icap_50_v2_graph_2026-03-05.json",
+      "name": "ICAP 50 V2",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 50,
+      "description": "pictonet_graph_dump",
+      "filesize": 24371291
+    },
+    {
+      "filename": "ilustraci_n_moderna_graph_2026-03-05.json",
+      "name": "Ilustración moderna",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 2921704
+    },
+    {
+      "filename": "inclusi_n_laboral_graph_2026-03-05.json",
+      "name": "Inclusión Laboral",
+      "location": "Quilpué, Región de Valparaíso, Chile",
+      "language": "es",
+      "items": 20,
+      "description": "pictonet_graph_dump",
+      "filesize": 17601811
+    },
+    {
+      "filename": "kitchen_graph_2026-02-03.json",
+      "name": "Kitchen",
+      "location": "Dunedin, Otago, Nueva Zelanda",
+      "language": "en",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 374781
+    },
+    {
+      "filename": "se_al_tica_color_graph_2026-03-05.json",
+      "name": "Señalética Color",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 2586463
+    },
+    {
+      "filename": "transporte_graph_2026-03-05.json",
+      "name": "Transporte",
+      "location": "Viña del Mar, Región de Valparaíso, Chile",
+      "language": "es",
+      "items": 22,
+      "description": "pictonet_graph_dump",
+      "filesize": 6521578
+    }
+  ]
+}
