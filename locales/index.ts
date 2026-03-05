@@ -207,4 +207,13 @@ export type TranslationKey =
   | 'onboarding.step4.note'
   | 'onboarding.step4.noteText'
   | 'config.tutorial'
-  | 'config.tutorialTooltip';
+  | 'config.tutorialTooltip'
+  | 'footer.research'
+  | 'footer.researchDesc'
+  | 'footer.openSource'
+  | 'footer.collaborate'
+  | 'footer.collaborateDesc'
+  | 'footer.author'
+  | 'footer.affiliation1'
+  | 'footer.affiliation2'
+  | 'footer.license';
