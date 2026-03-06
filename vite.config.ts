@@ -14,14 +14,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
     ],
-    // SECURITY WARNING: These API keys are being exposed to client-side code
-    // and will be visible in the browser. For production environments,
-    // consider implementing a backend proxy to handle API calls securely.
-    define: {
+    // In development, the API key is injected for direct Gemini calls.
+    // In production, calls go through Netlify Functions (key stays server-side).
+    define: mode === 'development' ? {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      // GITHUB_TOKEN is now handled securely by Netlify Function
-    },
+    } : {},
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -1,11 +1,6 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
 import { NLUData, GlobalConfig, RowData, VisualElement, VOCAB_NSM, VOCAB } from "../types";
-
-// SECURITY WARNING: API key is exposed in client-side code
-// This is acceptable for development/research, but for production
-// you should use a backend proxy to protect your API credentials
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+import { generateContent } from "./aiClient";
 
 const cleanJSONResponse = (text: string): string => {
   if (!text) return '{}';
@@ -91,7 +86,6 @@ const buildNSMPrimesBlock = (langTag: string): string => {
 };
 
 export const generateNLU = async (utterance: string, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void, config?: GlobalConfig): Promise<NLUData> => {
-  const ai = getAI();
   onLog?.('info', `[NLU] Iniciando análisis semántico de: "${utterance.substring(0, 50)}..."`);
 
   const geoRegion = config?.geoContext?.region || 'No especificado';
@@ -190,7 +184,7 @@ Tu salida debe adherirse *estrictamente* a este esquema.
 3.  Asegura JSON válido.`;
 
   onLog?.('info', `[NLU] Enviando solicitud a Gemini 2.5 Flash...`);
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: "gemini-2.5-flash",
     contents: `UTTERANCE: "${utterance}"`,
     config: {
@@ -205,7 +199,6 @@ Tu salida debe adherirse *estrictamente* a este esquema.
 };
 
 export const generateVisualBlueprint = async (nlu: NLUData, config: GlobalConfig, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<Partial<RowData>> => {
-  const ai = getAI();
   const targetLang = nlu.lang || config.lang || 'en';
 
   onLog?.('info', `[VISUAL] Iniciando generación de blueprint visual (idioma: ${targetLang})...`);
@@ -246,7 +239,7 @@ These classes will be applied to SVG elements later. You may suggest a \`suggest
 **Final Output:** A single valid JSON object containing \`elements\` and \`prompt\`.`;
 
   onLog?.('info', `[VISUAL] Enviando contexto NLU a Gemini 2.5 Flash...`);
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: "gemini-2.5-flash",
     contents: `NLU Semantics: ${JSON.stringify(nlu)}`,
     config: {
@@ -275,7 +268,6 @@ These classes will be applied to SVG elements later. You may suggest a \`suggest
 };
 
 export const generateSpatialPrompt = async (nlu: NLUData, elements: VisualElement[], config: GlobalConfig, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<string> => {
-  const ai = getAI();
   const targetLang = nlu.lang || config.lang || 'en';
 
   onLog?.('info', `[PROMPT] Generando prompt de articulación espacial (idioma: ${targetLang})...`);
@@ -321,7 +313,7 @@ Do NOT define style (that's handled elsewhere).`;
   const nluText = JSON.stringify(nlu, null, 2);
 
   onLog?.('info', `[PROMPT] Enviando contexto (NLU + ${elements.length} elementos) a Gemini 2.5 Flash...`);
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: "gemini-2.5-flash",
     contents: `
 NLU SEMANTIC CONTEXT:
@@ -337,14 +329,13 @@ Generate a spatial composition prompt that describes how these elements should b
   });
 
   onLog?.('info', `[PROMPT] Respuesta recibida, extrayendo prompt...`);
-  const prompt = response.text.trim();
+  const prompt = (response.text || '').trim();
 
   onLog?.('success', `[PROMPT] Prompt espacial generado: ${prompt.substring(0, 80)}...`);
   return prompt;
 };
 
 export const generateImage = async (elements: VisualElement[], prompt: string, row: any, config: GlobalConfig, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<string> => {
-  const ai = getAI();
 
   // Validate that elements is actually an array
   if (!Array.isArray(elements)) {
@@ -416,7 +407,7 @@ export const generateImage = async (elements: VisualElement[], prompt: string, r
   onLog?.('info', `[BITMAP] Modelo seleccionado: ${modelName} (${config.aspectRatio})`);
   onLog?.('info', `[BITMAP] Enviando prompt completo a Gemini...`);
 
-  const response = await ai.models.generateContent({
+  const response = await generateContent({
     model: modelName,
     contents: {
       parts: [
@@ -425,7 +416,7 @@ export const generateImage = async (elements: VisualElement[], prompt: string, r
     },
     config: {
       imageConfig: {
-        aspectRatio: config.aspectRatio // Usamos el valor seleccionado por el usuario ('1:1', '3:4', etc.)
+        aspectRatio: config.aspectRatio
       }
     }
   });

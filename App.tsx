@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
-  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -30,6 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
+import { AuthGate, getCurrentUser, logout } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -1076,6 +1077,19 @@ const App: React.FC = () => {
 
           <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')} aria-label={t('header.settingsTooltip')}><Settings size={18} aria-hidden="true" /></button>
           <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')} aria-label={t('header.consoleTooltip')}><Terminal size={18} aria-hidden="true" /></button>
+
+          {!(import.meta as any).env?.DEV && getCurrentUser() && (
+            <>
+              <div className="w-px h-8 bg-slate-200 mx-1"></div>
+              <button
+                onClick={() => logout()}
+                className="p-2.5 hover:bg-slate-50 text-slate-400 hover:text-rose-500 border border-transparent hover:border-slate-200 rounded-md transition-all"
+                title={getCurrentUser()?.email || 'Logout'}
+              >
+                <LogOut size={16} aria-hidden="true" />
+              </button>
+            </>
+          )}
         </nav>
       </header>
 
@@ -2778,4 +2792,10 @@ const FocusViewModal: React.FC<{
   )
 };
 
-export default App;
+const AuthenticatedApp: React.FC = () => (
+  <AuthGate>
+    <App />
+  </AuthGate>
+);
+
+export default AuthenticatedApp;
