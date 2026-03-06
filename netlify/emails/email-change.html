@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Invitacion a Pictos.net</title>
+  <title>Cambio de correo - Pictos.net</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f1f0f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f0f5;padding:40px 20px;">
@@ -25,28 +25,28 @@
               </p>
             </td>
           </tr>
-          <!-- Divider -->
           <tr><td style="padding:0 40px;"><div style="border-top:1px solid #f1f5f9;"></div></td></tr>
           <!-- Body -->
           <tr>
             <td style="padding:32px 40px 40px;">
               <h2 style="margin:0 0 16px;color:#1e293b;font-size:20px;font-weight:600;">
-                Has sido invitado
+                Confirmar cambio de correo
               </h2>
               <p style="margin:0 0 24px;color:#64748b;font-size:15px;line-height:1.6;">
-                Has recibido una invitacion para acceder a <strong style="color:#1e293b;">Pictos.net</strong>,
-                la plataforma de creacion de pictogramas aumentativos con inteligencia artificial.
+                Se ha solicitado cambiar el correo de tu cuenta en
+                <strong style="color:#1e293b;">Pictos.net</strong>
+                de <strong style="color:#1e293b;">{{ .Email }}</strong>
+                a <strong style="color:#1e293b;">{{ .NewEmail }}</strong>.
               </p>
               <p style="margin:0 0 32px;color:#64748b;font-size:15px;line-height:1.6;">
-                Haz clic en el boton para aceptar la invitacion y configurar tu acceso.
+                Haz clic en el boton para confirmar este cambio.
               </p>
-              <!-- CTA -->
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
                 <tr>
                   <td style="background-color:#40069e;border-radius:9999px;">
-                    <a href="{{ .SiteURL }}/accept-invite#invite_token={{ .Token }}"
+                    <a href="{{ .ConfirmationURL }}"
                        style="display:inline-block;padding:14px 36px;color:#ffffff;font-size:13px;font-weight:700;text-decoration:none;letter-spacing:1.5px;text-transform:uppercase;">
-                      Aceptar invitacion
+                      Confirmar cambio
                     </a>
                   </td>
                 </tr>
@@ -60,7 +60,7 @@
                 Escuela de Arquitectura y Diseno · PUCV
               </p>
               <p style="margin:6px 0 0;color:#cbd5e1;font-size:11px;">
-                Si no esperabas esta invitacion, puedes ignorar este correo.
+                Si no solicitaste este cambio, puedes ignorar este correo.
               </p>
             </td>
           </tr>
