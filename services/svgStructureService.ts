@@ -8,13 +8,10 @@
  * @module services/svgStructureService
  */
 
-import { GoogleGenAI } from "@google/genai";
 import type { NLUData, VisualElement, GlobalConfig } from "../types";
 import { SVG_STYLESHEET } from "./svgStyles";
 import { generateCssString } from "../lib/style-editor/lib/utils/cssGenerator";
-
-// Reuse the AI client pattern from geminiService
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+import { generateContentStream } from "./aiClient";
 
 /**
  * Returns the CSS stylesheet to embed in SVGs.
@@ -390,8 +387,6 @@ function cleanSVGResponse(text: string): string {
  */
 export async function structureSVG(input: SVGStructureInput): Promise<SVGStructureResult> {
     try {
-        const ai = getAI();
-
         // Build the metadata JSON
         const metadata = buildMetadataJSON(input);
 
@@ -417,7 +412,7 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
         if (input.onProgress) input.onProgress('[SVG FORMAT] Enviando imagen + SVG + elementos a Gemini 3 Pro...');
 
         // Call Gemini with MULTIMODAL input (image + text)
-        const result = await ai.models.generateContentStream({
+        const result = generateContentStream({
             model: "gemini-3-pro-preview",
             contents: {
                 parts: [
