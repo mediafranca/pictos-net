@@ -26,6 +26,9 @@ export default defineConfig(({ mode }) => {
         '@schema': path.resolve(__dirname, './lib/mf-schema')
       }
     },
+    build: {
+      sourcemap: mode === 'development',
+    },
     optimizeDeps: {
       exclude: []
     }

@@ -1,122 +1,91 @@
 /**
  * Netlify Function: Share Pictogram
- * Envía pictogramas a mediafranca/pictogram-collector via GitHub Dispatches
+ * Sends pictogram data to hspencer/pictogram-collector via GitHub Dispatches.
+ * Requires Netlify Identity JWT.
  */
 
-exports.handler = async (event) => {
-  // Solo permitir POST
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: 'Method Not Allowed' })
-    };
-  }
+const ALLOWED_ORIGINS = [
+  'https://pictos.net',
+  'https://pictos-next.netlify.app',
+];
 
-  // CORS headers
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+function corsHeaders(origin) {
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
   };
+}
 
-  // Handle preflight
+const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+
+exports.handler = async (event, context) => {
+  const origin = event.headers?.origin || '';
+  const headers = corsHeaders(origin);
+
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+  }
+
+  // Auth: require Netlify Identity JWT
+  const { user } = context.clientContext || {};
+  if (!user) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
+  // Validate payload size
+  if (event.body && Buffer.byteLength(event.body, 'utf8') > MAX_PAYLOAD_BYTES) {
+    return { statusCode: 413, headers, body: JSON.stringify({ error: 'Payload too large' }) };
+  }
+
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (!githubToken) {
+    console.error('[share-pictogram] GITHUB_TOKEN not configured');
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
 
   try {
     const payload = JSON.parse(event.body);
 
-    console.log('[SHARE-FUNCTION] Recibida petición de compartir:', payload.UTTERANCE);
-
-    // Validar que el token esté configurado
-    const githubToken = process.env.GITHUB_TOKEN;
-    if (!githubToken) {
-      console.error('[SHARE-FUNCTION] Error: GITHUB_TOKEN no configurado');
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: 'Server configuration error: GITHUB_TOKEN not set' })
-      };
+    // Minimal validation
+    if (!payload.UTTERANCE || !payload.id) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing required fields: id, UTTERANCE' }) };
     }
 
-    // Construir payload para GitHub
-    const githubPayload = {
-      event_type: 'append-row',
-      client_payload: payload
-    };
+    console.log(`[share-pictogram] user=${user.email} utterance="${payload.UTTERANCE}"`);
 
-    // Log detallado del payload
-    console.log('[SHARE-FUNCTION] Payload para GitHub:', JSON.stringify({
-      event_type: githubPayload.event_type,
-      client_payload_keys: Object.keys(githubPayload.client_payload),
-      payload_size: JSON.stringify(githubPayload).length
-    }));
-
-    // Log de tamaños individuales de campos
-    console.log('[SHARE-FUNCTION] Tamaños de campos:', {
-      id: payload.id?.length || 0,
-      UTTERANCE: payload.UTTERANCE?.length || 0,
-      bitmap: payload.bitmap?.length || 0,
-      NLU: JSON.stringify(payload.NLU || {}).length,
-      elements: JSON.stringify(payload.elements || []).length,
-      prompt: payload.prompt?.length || 0,
-      evaluation: JSON.stringify(payload.evaluation || {}).length
-    });
-
-    // Log de estructura del payload (sin bitmap para no saturar logs)
-    const payloadWithoutBitmap = { ...payload };
-    if (payloadWithoutBitmap.bitmap) {
-      payloadWithoutBitmap.bitmap = `[BITMAP: ${payloadWithoutBitmap.bitmap.length} chars]`;
-    }
-    console.log('[SHARE-FUNCTION] Estructura del payload:', JSON.stringify(payloadWithoutBitmap, null, 2));
-
-    // Enviar dispatch a GitHub
     const response = await fetch('https://api.github.com/repos/hspencer/pictogram-collector/dispatches', {
       method: 'POST',
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'Authorization': `Bearer ${githubToken}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'PictoNet-Netlify-Function'
+        'User-Agent': 'PictoNet-Netlify-Function',
       },
-      body: JSON.stringify(githubPayload)
+      body: JSON.stringify({
+        event_type: 'append-row',
+        client_payload: payload,
+      }),
     });
 
-    console.log('[SHARE-FUNCTION] Respuesta GitHub:', response.status, response.statusText);
-
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[SHARE-FUNCTION] Error desde GitHub:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorText,
-        headers: Object.fromEntries(response.headers.entries())
-      });
+      console.error(`[share-pictogram] GitHub API ${response.status}`);
       return {
-        statusCode: response.status,
+        statusCode: 502,
         headers,
-        body: JSON.stringify({
-          error: `GitHub API error: ${response.status} - ${errorText}`
-        })
+        body: JSON.stringify({ error: 'Upstream service error' }),
       };
     }
 
-    console.log('[SHARE-FUNCTION] ✓ Pictograma compartido exitosamente');
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ success: true })
-    };
+    return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
   } catch (error) {
-    console.error('[SHARE-FUNCTION] Excepción:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({
-        error: error.message || 'Internal server error'
-      })
-    };
+    console.error('[share-pictogram] Error:', error.message);
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Internal server error' }) };
   }
 };
