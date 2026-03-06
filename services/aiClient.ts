@@ -2,13 +2,13 @@
  * AI Client — Dual-mode abstraction for Gemini API calls.
  *
  * - Development: calls Gemini directly (API key from .env via Vite define)
- * - Production: proxies through Netlify Function with JWT auth
- *
- * This module replaces the per-service `getAI()` pattern and ensures the
- * API key never appears in the production bundle.
+ * - Production: proxies through Netlify Function with JWT auth.
+ *   If the user is not logged in, the Identity widget opens automatically
+ *   and the call proceeds after successful authentication.
  */
 
 import { GoogleGenAI } from "@google/genai";
+import { getCurrentUser, requestLogin } from "../components/AuthGate";
 
 const isDev = (import.meta as any).env?.DEV;
 
@@ -24,13 +24,14 @@ interface GenerateContentResponse {
 }
 
 /**
- * Get a fresh JWT from Netlify Identity widget (auto-refreshes if expired).
+ * Get a fresh JWT. If the user is not logged in, opens the login widget
+ * and waits for them to authenticate before returning the token.
  */
 async function getAuthToken(): Promise<string> {
-    const widget = (window as any).netlifyIdentity;
-    const user = widget?.currentUser?.();
-    if (!user) throw new Error("Not authenticated");
-    // .jwt() returns a Promise that auto-refreshes expired tokens
+    let user = getCurrentUser();
+    if (!user) {
+        user = await requestLogin();
+    }
     const token = await user.jwt();
     return token;
 }
@@ -60,7 +61,6 @@ async function proxyCall(params: GenerateContentParams): Promise<GenerateContent
 
 /**
  * Generate content via Gemini (direct in dev, proxied in prod).
- * Drop-in replacement for `ai.models.generateContent(params)`.
  */
 export async function generateContent(params: GenerateContentParams): Promise<GenerateContentResponse> {
     if (isDev) {
@@ -75,7 +75,6 @@ export async function generateContent(params: GenerateContentParams): Promise<Ge
  * Stream content via Gemini.
  * - Dev: real streaming via SDK
  * - Prod: non-streaming proxy, yielded as a single chunk
- *   (streaming not supported through Netlify Functions 10s timeout)
  */
 export async function* generateContentStream(
     params: GenerateContentParams
@@ -89,7 +88,6 @@ export async function* generateContentStream(
         return;
     }
 
-    // Production: single-chunk fallback via proxy
     const result = await proxyCall(params);
     yield { text: result.text };
 }

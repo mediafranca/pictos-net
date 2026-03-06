@@ -18,87 +18,78 @@ interface IdentityWidget {
 }
 
 let _widget: IdentityWidget | null = null;
+let _initPromise: Promise<IdentityWidget> | null = null;
 
-async function getWidget(): Promise<IdentityWidget> {
-    if (!_widget) {
-        _widget = (await import('netlify-identity-widget')).default as unknown as IdentityWidget;
-    }
-    return _widget;
+/** Lazily load and init the widget (singleton). */
+export async function ensureWidget(): Promise<IdentityWidget> {
+    if (_widget) return _widget;
+    if (_initPromise) return _initPromise;
+    _initPromise = (async () => {
+        const mod = await import('netlify-identity-widget');
+        _widget = mod.default as unknown as IdentityWidget;
+        _widget.init();
+        return _widget;
+    })();
+    return _initPromise;
 }
 
-/** Get current user (available globally for aiClient and other modules) */
+/** Get current user (may be null). */
 export function getCurrentUser(): IdentityUser | null {
     return _widget?.currentUser?.() ?? null;
 }
 
-/** Trigger logout */
+/** Trigger logout. */
 export function logout(): void {
     _widget?.logout();
 }
 
-interface AuthGateProps {
-    children: React.ReactNode;
+/**
+ * Open login and return a Promise that resolves with the user once they log in.
+ * Rejects if the user closes the dialog without logging in.
+ */
+export function requestLogin(): Promise<IdentityUser> {
+    return new Promise(async (resolve, reject) => {
+        const widget = await ensureWidget();
+        const current = widget.currentUser();
+        if (current) { resolve(current); return; }
+
+        const onLogin = (u?: IdentityUser) => {
+            widget.close();
+            if (u) resolve(u);
+            else reject(new Error('Login cancelled'));
+        };
+        widget.on('login', onLogin);
+        widget.open('login');
+    });
 }
 
-export const AuthGate: React.FC<AuthGateProps> = ({ children }) => {
-    const [user, setUser] = useState<IdentityUser | null>(null);
-    const [loading, setLoading] = useState(!isDev);
+interface AuthProviderProps {
+    children: React.ReactNode;
+    onUserChange?: (user: IdentityUser | null) => void;
+}
 
+/**
+ * AuthProvider — initializes the Identity widget in the background.
+ * Does NOT block rendering. The app is always accessible.
+ */
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onUserChange }) => {
     useEffect(() => {
         if (isDev) return;
 
-        getWidget().then(widget => {
-            widget.init();
-
+        ensureWidget().then(widget => {
+            // Notify parent of initial state
             const current = widget.currentUser();
-            if (current) {
-                setUser(current);
-            }
-            setLoading(false);
+            onUserChange?.(current);
 
             widget.on('login', (u) => {
-                setUser(u ?? null);
                 widget.close();
+                onUserChange?.(u ?? null);
             });
-
             widget.on('logout', () => {
-                setUser(null);
+                onUserChange?.(null);
             });
         });
-    }, []);
-
-    // Dev mode: skip auth entirely
-    if (isDev) return <>{children}</>;
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-slate-50">
-                <div className="w-6 h-6 rounded-full border-2 border-slate-200 border-t-violet-600 animate-spin" />
-            </div>
-        );
-    }
-
-    if (!user) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-slate-50">
-                <div className="text-center max-w-sm">
-                    <h1 className="text-2xl font-bold text-slate-800 mb-2">Pictos.net</h1>
-                    <p className="text-sm text-slate-500 mb-6">
-                        Inicia sesion para acceder a la aplicacion.
-                    </p>
-                    <button
-                        onClick={async () => {
-                            const w = await getWidget();
-                            w.open('login');
-                        }}
-                        className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2.5 rounded-full font-bold text-sm uppercase tracking-widest transition-colors shadow-md"
-                    >
-                        Iniciar sesion
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return <>{children}</>;
 };

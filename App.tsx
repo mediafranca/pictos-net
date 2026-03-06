@@ -30,7 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
-import { AuthGate, getCurrentUser, logout } from './components/AuthGate';
+import { AuthProvider, getCurrentUser, logout } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -2792,10 +2792,10 @@ const FocusViewModal: React.FC<{
   )
 };
 
-const AuthenticatedApp: React.FC = () => (
-  <AuthGate>
+const AppWithAuth: React.FC = () => (
+  <AuthProvider>
     <App />
-  </AuthGate>
+  </AuthProvider>
 );
 
-export default AuthenticatedApp;
+export default AppWithAuth;
