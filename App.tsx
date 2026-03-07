@@ -6,7 +6,7 @@ import {
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown,
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
-  Library, ScreenShare, Globe, HelpCircle, CheckCircle, ExternalLink, Palette, GripVertical, ImageUp, Edit,
+  Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
   ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
@@ -741,7 +741,7 @@ const App: React.FC = () => {
         [durationKey]: duration,
         ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated' } : {}),
         ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated' } : {}),
-        ...(step === 'bitmap' ? { bitmap: result, status: 'completed', shared: false } : {})
+        ...(step === 'bitmap' ? { bitmap: result, status: 'completed' } : {})
       });
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
 
@@ -847,76 +847,6 @@ const App: React.FC = () => {
     if (row.elements && row.prompt && row.visualStatus === 'completed') count++;
     if (row.bitmap && row.bitmapStatus === 'completed') count++;
     return count;
-  };
-
-  const sharePictogram = async (index: number): Promise<boolean> => {
-    const row = rows[index];
-    console.log('[SHARE] Iniciando proceso de compartir pictograma', { index, utterance: row?.UTTERANCE });
-
-    if (!row) {
-      addLog('error', t('messages.rowNotFound'));
-      return false;
-    }
-
-    if (row.shared) {
-      console.log('[SHARE] El pictograma ya fue compartido previamente');
-      addLog('info', t('share.alreadyShared'));
-      return false;
-    }
-
-    try {
-      console.log('[SHARE] Preparando datos para enviar a PICTOS');
-      addLog('info', t('share.sharing', { utterance: row.UTTERANCE }));
-
-      const payload = {
-        id: row.id,
-        UTTERANCE: row.UTTERANCE,
-        status: row.status,
-        NLU: row.NLU,
-        elements: row.elements,
-        prompt: row.prompt,
-        bitmap: row.bitmap, // 1024x1024 PNG in memory; compressed to JPEG on IndexedDB save
-        nluStatus: row.nluStatus,
-        visualStatus: row.visualStatus,
-        bitmapStatus: row.bitmapStatus,
-        source: 'pictos.net',
-        name: config.name,
-        timestamp: new Date().toISOString()
-      };
-      console.log('[SHARE] Enviando a función serverless', { payloadSize: JSON.stringify(payload).length });
-
-      // Llamar a la función de Netlify (protege el GITHUB_TOKEN)
-      const response = await fetch('/.netlify/functions/share-pictogram', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      console.log('[SHARE] Respuesta recibida', { status: response.status, statusText: response.statusText });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[SHARE] Error en respuesta', { status: response.status, error: errorText });
-        addLog('error', t('share.error', { status: response.status, error: errorText }));
-        return false;
-      }
-
-      console.log('[SHARE] ✓ Pictograma compartido exitosamente');
-      updateRow(index, { shared: true });
-      addLog('success', t('share.success', { utterance: row.UTTERANCE }));
-
-      // Mostrar mensaje de agradecimiento al usuario
-      alert(t('share.thanksMessage'));
-
-      return true;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Error desconocido';
-      console.error('[SHARE] Excepción capturada', { error: msg });
-      addLog('error', t('share.exception', { error: msg }));
-      return false;
-    }
   };
 
   const openSVGEditor = (rowId: string) => {
@@ -1461,7 +1391,6 @@ const App: React.FC = () => {
                     }
                   }}
                   onFocus={step => setFocusMode({ step, rowId: row.id })}
-                  onShare={() => sharePictogram(globalIndex)}
                   onLog={addLog}
                   config={config}
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
@@ -1539,7 +1468,6 @@ const App: React.FC = () => {
           row={focusedRowData}
           onClose={() => setFocusMode(null)}
           onUpdate={updates => updateRowById(focusMode.rowId, updates)}
-          onShare={() => sharePictogram(rows.findIndex(r => r.id === focusMode.rowId))}
           onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
           config={config}
           onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
@@ -1764,13 +1692,12 @@ const RowComponent: React.FC<{
   onRegeneratePrompt: () => void;
   onStop: () => void; onCascade: () => void; onDelete: () => void;
   onFocus: (step: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
-  onShare: () => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: () => void;
   onOpenVectorizer: () => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onShare, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -1780,23 +1707,36 @@ const RowComponent: React.FC<{
 
   return (
     <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
-      <div id={`row-header-${row.id}`} className="p-6 flex items-center gap-8 group">
-        <textarea
-          value={row.UTTERANCE}
-          onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
-          rows={1}
-          onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }}
-          className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light resize-none overflow-hidden hover:bg-amber-50 hover:cursor-text focus:bg-amber-50 transition-colors rounded"
-          style={{ maxHeight: '4.2em', lineHeight: '1.4em' }}
-        />
-        <div id={`pipeline-badges-${row.id}`} className="flex gap-1.5 cursor-pointer" aria-label="Estado del pipeline" onClick={() => setIsOpen(!isOpen)}>
-          <Badge step={1} label={t('pipeline.understand')} status={row.nluStatus} />
-          <Badge step={2} label={t('pipeline.compose')} status={row.visualStatus} />
-          <Badge step={3} label={t('pipeline.produce')} status={row.bitmapStatus} />
+      <div id={`row-header-${row.id}`} className="flex items-stretch pr-0 group min-h-[5rem]">
+        <div className="pl-6 py-6 pr-6 flex-1 flex items-center gap-6">
+          <textarea
+            value={row.UTTERANCE}
+            onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
+            rows={1}
+            onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }}
+            className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light resize-none overflow-hidden hover:bg-amber-50 hover:cursor-text focus:bg-amber-50 transition-colors rounded"
+            style={{ maxHeight: '4.2em', lineHeight: '1.4em' }}
+          />
+          <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
+            {row.status === 'processing' ? (
+              <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title={t('actions.stopProcess')} aria-label={t('actions.stopProcess')}>
+                <Square size={18} aria-hidden="true" />
+              </button>
+            ) : (
+              <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border-2 border-orange-400 hover:border-orange-600 text-orange-500 hover:text-orange-700 transition-all rounded-full bg-white shadow-sm" title={t('actions.runFullPipeline')} aria-label={t('actions.runFullPipeline')}>
+                <Play size={18} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <div id={`pipeline-badges-${row.id}`} className="flex gap-1.5 cursor-pointer" aria-label="Estado del pipeline" onClick={() => setIsOpen(!isOpen)}>
+            <Badge step={1} label={t('pipeline.understand')} status={row.nluStatus} />
+            <Badge step={2} label={t('pipeline.compose')} status={row.visualStatus} />
+            <Badge step={3} label={t('pipeline.produce')} status={row.bitmapStatus} />
+          </div>
         </div>
         <div
           id={`picto-thumbnail-${row.id}`}
-          className="w-14 h-14 border border-slate-200 bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
+          className="w-24 bg-slate-50 flex items-center justify-center group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
           {(row.structuredSvg || row.rawSvg) ? (
@@ -1810,18 +1750,7 @@ const RowComponent: React.FC<{
             <div className="text-slate-200"><ImageIcon size={20} /></div>
           )}
         </div>
-        <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
-          {row.status === 'processing' ? (
-            <button onClick={e => { e.stopPropagation(); onStop(); }} className="p-2 bg-orange-600 text-white hover:bg-orange-700 transition-all rounded-full shadow-sm animate-pulse" title={t('actions.stopProcess')} aria-label={t('actions.stopProcess')}>
-              <Square size={18} aria-hidden="true" />
-            </button>
-          ) : (
-            <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all rounded-full bg-white shadow-sm" title={t('actions.runFullPipeline')} aria-label={t('actions.runFullPipeline')}>
-              <Play size={18} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className={`text-slate-500 transition-transform duration-500 cursor-pointer ${isOpen ? 'rotate-180 text-violet-950' : ''}`} />
+        <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 transition-transform duration-500 cursor-pointer self-center mx-6" />
       </div>
 
       {isOpen && (
@@ -1853,7 +1782,7 @@ const RowComponent: React.FC<{
                   <div id="hierarchical-elements">
                     <label className="text-xs font-medium uppercase text-slate-500 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
                     <ElementsEditor elements={row.elements || []} onUpdate={val => {
-                      onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
+                      onUpdate({ elements: val, bitmapStatus: 'outdated' });
                       setElementsManuallyEdited(true);
                     }} />
                     {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
@@ -1891,7 +1820,7 @@ const RowComponent: React.FC<{
                       <textarea
                         value={row.prompt || ""}
                         onChange={e => {
-                          onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', shared: false });
+                          onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' });
                           setPromptManuallyEdited(true);
                         }}
                         onBlur={() => setIsPromptEditing(false)}
@@ -2540,7 +2469,6 @@ const FocusViewModal: React.FC<{
   row: RowData;
   onClose: () => void;
   onUpdate: (updates: Partial<RowData>) => void;
-  onShare: () => void;
   onRegeneratePrompt: () => void;
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
@@ -2548,7 +2476,7 @@ const FocusViewModal: React.FC<{
   onOpenEditor?: () => void;
   onOpenVectorizer?: () => void;
   onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
-}> = ({ mode, row, onClose, onUpdate, onShare, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -2606,7 +2534,7 @@ const FocusViewModal: React.FC<{
           <div>
             <label className="text-xs font-medium uppercase text-slate-500 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
             <ElementsEditor elements={row.elements || []} onUpdate={val => {
-              onUpdate({ elements: val, bitmapStatus: 'outdated', shared: false });
+              onUpdate({ elements: val, bitmapStatus: 'outdated' });
               setElementsManuallyEdited(true);
             }} />
             {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
@@ -2642,7 +2570,7 @@ const FocusViewModal: React.FC<{
             {isPromptEditing ? (
               <textarea
                 value={row.prompt || ""}
-                onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated', shared: false })}
+                onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' })}
                 onBlur={() => setIsPromptEditing(false)}
                 autoFocus
                 className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
@@ -2703,24 +2631,8 @@ const FocusViewModal: React.FC<{
         // Has SVG(s): show SVGGenerator (handles both raw+structured internally) + share
         return (
           <div className="flex flex-col h-full bg-slate-50 p-6">
-            <div className="flex justify-between items-center mb-3">
+            <div className="mb-3">
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
-              {(() => {
-                const isShared = row.shared;
-                return (
-                  <button
-                    onClick={onShare}
-                    disabled={isShared}
-                    className={`p-2 transition-all shadow-sm ${isShared
-                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                      : 'bg-slate-50 text-emerald-600 border border-emerald-500 hover:bg-emerald-50 hover:border-emerald-600'
-                      }`}
-                    title={isShared ? t('share.alreadyShared') : t('share.shareWithPictos')}
-                  >
-                    {isShared ? <CheckCircle size={14} /> : <ImageUp size={14} />}
-                  </button>
-                );
-              })()}
             </div>
             <div className="flex-1 overflow-hidden">
               <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
