@@ -60,6 +60,39 @@ function _notifyLogin(user: IdentityUser) {
 }
 
 /**
+ * Inject a spam warning banner into the Netlify Identity widget modal.
+ * The widget renders into a container with class "netlifyIdentityButton" or
+ * creates an iframe. We watch for the modal to appear and prepend our notice.
+ */
+function injectSpamNotice() {
+    const NOTICE_ID = 'pictos-identity-notice';
+    if (document.getElementById(NOTICE_ID)) return;
+
+    const observer = new MutationObserver(() => {
+        const modal = document.querySelector('.netlifyIdentityButton, [class*="netlify"]');
+        // The widget creates a div with role="dialog" or a visible modal
+        const dialog = document.querySelector('[class*="modalContainer"], [class*="Modal"]');
+        const target = dialog || modal;
+        if (!target || document.getElementById(NOTICE_ID)) return;
+
+        const notice = document.createElement('div');
+        notice.id = NOTICE_ID;
+        notice.style.cssText = 'background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin:8px 16px;font-size:12px;color:#92400e;line-height:1.5;text-align:center;';
+        notice.innerHTML = `
+            <strong>Importante:</strong> Si creas una cuenta con correo,
+            recibiras un email de <code style="background:#fde68a;padding:1px 4px;border-radius:3px;">no-reply@netlify.com</code>
+            para confirmar. <strong>Revisa tu carpeta de SPAM.</strong>
+            <br>Recomendamos usar <strong>Iniciar sesion con Google</strong>.
+        `;
+        target.parentElement?.insertBefore(notice, target);
+        observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Auto-cleanup after 30s in case the widget never appears
+    setTimeout(() => observer.disconnect(), 30000);
+}
+
+/**
  * Open login and return a Promise that resolves with the user once they log in.
  * Rejects if the user closes the dialog without logging in.
  */
@@ -71,10 +104,13 @@ export function requestLogin(): Promise<IdentityUser> {
 
         const onLogin = (u?: IdentityUser) => {
             widget.close();
+            // Remove notice when widget closes
+            document.getElementById('pictos-identity-notice')?.remove();
             if (u) resolve(u);
             else reject(new Error('Login cancelled'));
         };
         widget.on('login', onLogin);
+        injectSpamNotice();
         widget.open('login');
     });
 }
