@@ -30,7 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
-import { AuthProvider, getCurrentUser, logout, onLogin } from './components/AuthGate';
+import { AuthProvider, logout, onLogin } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -164,7 +164,11 @@ function getDefaultStylePrompt(lang: string): string {
   return DEFAULT_STYLE_PROMPTS[lang] || DEFAULT_STYLE_PROMPTS['es-419'];
 }
 
-const App: React.FC = () => {
+interface AppProps {
+  authUser?: { email: string; user_metadata?: { full_name?: string } } | null;
+}
+
+const App: React.FC<AppProps> = ({ authUser }) => {
   const { t, lang, setLang } = useTranslation();
   const { svgs, exportSVGs, importSVGs, clearLibrary, addSVG } = useSVGLibrary();
   const [rows, setRows] = useState<RowData[]>([]);
@@ -710,8 +714,7 @@ const App: React.FC = () => {
         prompt: newPrompt,
         visualStatus: 'completed',
         visualDuration: duration,
-        bitmapStatus: 'outdated',
-        shared: false
+        bitmapStatus: 'outdated'
       });
       addLog('success', `Prompt regenerado en ${duration.toFixed(1)}s: "${newPrompt.substring(0, 50)}..."`);
       return true;
@@ -838,7 +841,6 @@ const App: React.FC = () => {
       finalUpdates.bitmapDuration = (Date.now() - bitmapStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 3, total: 3, duration: finalUpdates.bitmapDuration.toFixed(1) }));
 
-      finalUpdates.shared = false;
       finalUpdates.status = 'completed';
       updateRow(index, finalUpdates);
 
@@ -1037,13 +1039,13 @@ const App: React.FC = () => {
           <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')} aria-label={t('header.settingsTooltip')}><Settings size={18} aria-hidden="true" /></button>
           <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')} aria-label={t('header.consoleTooltip')}><Terminal size={18} aria-hidden="true" /></button>
 
-          {!(import.meta as any).env?.DEV && getCurrentUser() && (
+          {!(import.meta as any).env?.DEV && authUser && (
             <>
               <div className="w-px h-8 bg-slate-200 mx-1"></div>
               <button
                 onClick={() => logout()}
                 className="p-2.5 hover:bg-slate-50 text-slate-400 hover:text-rose-500 border border-transparent hover:border-slate-200 rounded-md transition-all"
-                title={getCurrentUser()?.email || 'Logout'}
+                title={authUser.email || 'Logout'}
               >
                 <LogOut size={16} aria-hidden="true" />
               </button>
@@ -1325,7 +1327,7 @@ const App: React.FC = () => {
 
                 <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {availableLibraries.map((library: LibraryMetadata) => {
-                    const slug = library.filename.replace(/_graph.*\.json$/, '');
+                    const slug = library.filename.replace(/(_graph.*)?\.json$/, '');
                     return (
                       <div
                         key={library.filename}
@@ -1771,7 +1773,7 @@ const RowComponent: React.FC<{
         </div>
         <div
           id={`picto-thumbnail-${row.id}`}
-          className="w-24 bg-slate-50 flex items-center justify-center group-hover:scale-110 transition-all cursor-pointer overflow-hidden"
+          className="w-24 bg-slate-50 flex items-center justify-center group-hover:scale-110 group-hover:rounded group-hover:shadow-[0_2px_12px_rgba(0,0,0,0.1)] transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
           {(row.structuredSvg || row.rawSvg) ? (
@@ -2744,11 +2746,13 @@ const FocusViewModal: React.FC<{
   )
 };
 
-const AppWithAuth: React.FC = () => (
-  <AuthProvider>
-    <App />
-  </AuthProvider>
-
-);
+const AppWithAuth: React.FC = () => {
+  const [authUser, setAuthUser] = useState<{ email: string; user_metadata?: { full_name?: string } } | null>(null);
+  return (
+    <AuthProvider onUserChange={setAuthUser}>
+      <App authUser={authUser} />
+    </AuthProvider>
+  );
+};
 
 export default AppWithAuth;
