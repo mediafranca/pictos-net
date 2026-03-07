@@ -64,32 +64,34 @@ function _notifyLogin(user: IdentityUser) {
  * The widget renders into a container with class "netlifyIdentityButton" or
  * creates an iframe. We watch for the modal to appear and prepend our notice.
  */
-function injectSpamNotice() {
+/**
+ * Show a fixed banner above the Identity widget iframe.
+ * The widget renders inside an iframe we can't modify, so we overlay our own notice.
+ */
+function showSpamNotice() {
     const NOTICE_ID = 'pictos-identity-notice';
     if (document.getElementById(NOTICE_ID)) return;
 
-    const observer = new MutationObserver(() => {
-        const modal = document.querySelector('.netlifyIdentityButton, [class*="netlify"]');
-        // The widget creates a div with role="dialog" or a visible modal
-        const dialog = document.querySelector('[class*="modalContainer"], [class*="Modal"]');
-        const target = dialog || modal;
-        if (!target || document.getElementById(NOTICE_ID)) return;
+    const notice = document.createElement('div');
+    notice.id = NOTICE_ID;
+    notice.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+        background: #fef3c7; border-bottom: 2px solid #f59e0b;
+        padding: 12px 20px; font-size: 13px; color: #92400e;
+        line-height: 1.5; text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    `;
+    notice.innerHTML = `
+        <strong>Importante:</strong> Si creas una cuenta con correo,
+        recibiras un email de <code style="background:#fde68a;padding:2px 5px;border-radius:3px;">no-reply@netlify.com</code>
+        para confirmar. <strong>Revisa tu carpeta de SPAM.</strong>
+        &mdash; Recomendamos usar <strong>Iniciar sesion con Google</strong>.
+    `;
+    document.body.appendChild(notice);
+}
 
-        const notice = document.createElement('div');
-        notice.id = NOTICE_ID;
-        notice.style.cssText = 'background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin:8px 16px;font-size:12px;color:#92400e;line-height:1.5;text-align:center;';
-        notice.innerHTML = `
-            <strong>Importante:</strong> Si creas una cuenta con correo,
-            recibiras un email de <code style="background:#fde68a;padding:1px 4px;border-radius:3px;">no-reply@netlify.com</code>
-            para confirmar. <strong>Revisa tu carpeta de SPAM.</strong>
-            <br>Recomendamos usar <strong>Iniciar sesion con Google</strong>.
-        `;
-        target.parentElement?.insertBefore(notice, target);
-        observer.disconnect();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    // Auto-cleanup after 30s in case the widget never appears
-    setTimeout(() => observer.disconnect(), 30000);
+function removeSpamNotice() {
+    document.getElementById('pictos-identity-notice')?.remove();
 }
 
 /**
@@ -104,13 +106,12 @@ export function requestLogin(): Promise<IdentityUser> {
 
         const onLogin = (u?: IdentityUser) => {
             widget.close();
-            // Remove notice when widget closes
-            document.getElementById('pictos-identity-notice')?.remove();
+            removeSpamNotice();
             if (u) resolve(u);
             else reject(new Error('Login cancelled'));
         };
         widget.on('login', onLogin);
-        injectSpamNotice();
+        showSpamNotice();
         widget.open('login');
     });
 }
