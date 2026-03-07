@@ -14,6 +14,9 @@
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    X-XSS-Protection = "1; mode=block"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
 [[headers]]
   for = "/assets/*.js"
@@ -32,5 +35,3 @@
 
 [build.environment]
   NODE_VERSION = "18"
-  # Permitir ambas keys en el scanner (GEMINI_API_KEY se usa en cliente, GITHUB_TOKEN solo en función)
-  SECRETS_SCAN_OMIT_KEYS = "GEMINI_API_KEY,GITHUB_TOKEN"
