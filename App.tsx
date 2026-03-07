@@ -30,7 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
-import { AuthProvider, getCurrentUser, logout } from './components/AuthGate';
+import { AuthProvider, getCurrentUser, logout, onLogin } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -207,6 +207,18 @@ const App: React.FC = () => {
   const announce = useCallback((msg: string) => {
     setStatusAnnouncement(msg);
     setTimeout(() => setStatusAnnouncement(''), 5000);
+  }, []);
+
+  // Populate credits field on first login (name + email or just email)
+  useEffect(() => {
+    return onLogin((user) => {
+      setConfig(prev => {
+        if (prev.credits) return prev; // don't overwrite user-set credits
+        const name = user.user_metadata?.full_name;
+        const credit = name ? `${name} <${user.email}>` : user.email;
+        return { ...prev, credits: credit };
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -2736,6 +2748,7 @@ const AppWithAuth: React.FC = () => (
   <AuthProvider>
     <App />
   </AuthProvider>
+
 );
 
 export default AppWithAuth;

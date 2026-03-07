@@ -43,6 +43,22 @@ export function logout(): void {
     _widget?.logout();
 }
 
+type LoginListener = (user: IdentityUser) => void;
+const _loginListeners: LoginListener[] = [];
+
+/** Subscribe to login events. Returns an unsubscribe function. */
+export function onLogin(listener: LoginListener): () => void {
+    _loginListeners.push(listener);
+    return () => {
+        const idx = _loginListeners.indexOf(listener);
+        if (idx >= 0) _loginListeners.splice(idx, 1);
+    };
+}
+
+function _notifyLogin(user: IdentityUser) {
+    _loginListeners.forEach(fn => fn(user));
+}
+
 /**
  * Open login and return a Promise that resolves with the user once they log in.
  * Rejects if the user closes the dialog without logging in.
@@ -84,6 +100,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, onUserChan
             widget.on('login', (u) => {
                 widget.close();
                 onUserChange?.(u ?? null);
+                if (u) _notifyLogin(u);
             });
             widget.on('logout', () => {
                 onUserChange?.(null);
