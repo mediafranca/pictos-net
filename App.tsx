@@ -742,6 +742,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (step === 'nlu') {
         result = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       } else if (step === 'visual') {
+        if (!row.NLU) throw new Error('No NLU data — run COMPRENDER first');
         let nluObj;
         try {
           nluObj = typeof row.NLU === 'string' ? JSON.parse(row.NLU) : row.NLU;

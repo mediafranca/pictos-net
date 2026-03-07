@@ -199,7 +199,8 @@ Tu salida debe adherirse *estrictamente* a este esquema.
 };
 
 export const generateVisualBlueprint = async (nlu: NLUData, config: GlobalConfig, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<Partial<RowData>> => {
-  const targetLang = nlu.lang || config.lang || 'en';
+  if (!nlu) throw new Error('NLU data is required — run the COMPRENDER step first');
+  const targetLang = nlu.lang || config?.lang || 'en';
 
   onLog?.('info', `[VISUAL] Iniciando generación de blueprint visual (idioma: ${targetLang})...`);
   onLog?.('info', `[VISUAL] Contexto semántico: ${nlu.metadata?.intent || 'N/A'}`);
@@ -268,7 +269,8 @@ These classes will be applied to SVG elements later. You may suggest a \`suggest
 };
 
 export const generateSpatialPrompt = async (nlu: NLUData, elements: VisualElement[], config: GlobalConfig, onLog?: (type: 'info' | 'error' | 'success', msg: string) => void): Promise<string> => {
-  const targetLang = nlu.lang || config.lang || 'en';
+  if (!nlu) throw new Error('NLU data is required — run the COMPRENDER step first');
+  const targetLang = nlu.lang || config?.lang || 'en';
 
   onLog?.('info', `[PROMPT] Generando prompt de articulación espacial (idioma: ${targetLang})...`);
 
