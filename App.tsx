@@ -155,6 +155,15 @@ const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, toolt
   </label>
 );
 
+const DEFAULT_STYLE_PROMPTS: Record<string, string> = {
+  'es-419': 'Un pictograma universal y limpio de estilo vectorial, diseñado para una alta accesibilidad cognitiva, inspirado en la señalética AIGA/DOT pero con detalles contextuales concretos añadidos. Diseño gráfico plano 2D, icono minimalista. Siluetas negras sólidas y contornos gruesos y uniformes sobre un fondo blanco puro. Usar un único color de acento tenue (como un gris neutro o un azul suave) estrictamente para resaltar el objeto principal de interacción o el contexto específico. Las figuras humanas deben ser figuras simplificadas y robustas con extremidades y articulaciones claras, sin rasgos faciales. Es crucial incluir utilería ambiental básica y literal (por ejemplo, un mueble específico, una puerta, un objeto distintivo) para definir inequívocamente el escenario. Sin sombreado, sin degradados, sin efectos 3D, sin iluminación realista. Alto contraste, centrado enteramente en acciones literales y claras. Sin texto.',
+  'en-GB': 'A clean, universal vector-style pictogram designed for high cognitive accessibility, inspired by AIGA/DOT symbol signs but with added concrete contextual details. Flat 2D graphic design, minimalist icon. Solid black silhouettes and thick, uniform outlines on a pure white background. Use a single muted accent colour (like a calm grey or soft blue) strictly to highlight the primary object of interaction or specific context. Human figures must be simplified, robust stick-figures with clear limbs and joints, lacking facial features. Crucially, include basic, literal environmental props (e.g., a specific piece of furniture, a door, a distinct object) to unambiguously define the scenario. No shading, no gradients, no 3D effects, no realistic lighting. High contrast, focusing entirely on literal, clear actions. No text.',
+};
+
+function getDefaultStylePrompt(lang: string): string {
+  return DEFAULT_STYLE_PROMPTS[lang] || DEFAULT_STYLE_PROMPTS['es-419'];
+}
+
 const App: React.FC = () => {
   const { t, lang, setLang } = useTranslation();
   const { svgs, exportSVGs, importSVGs, clearLibrary, addSVG } = useSVGLibrary();
@@ -178,7 +187,7 @@ const App: React.FC = () => {
     name: 'PICTOS.NET',
     credits: '',
     license: 'CC BY 4.0',
-    visualStylePrompt: "Siluetas sobre un fondo blanco plano. Sin degradados, sin sombras, sin texturas y sin contornos. Geometría: Usa trazos gruesos y consistentes y simplificación geométrica. Todas las extremidades y terminales deben tener puntas redondeadas y vértices suavizados. Composición: Representación plana 2D centrada. Usa el espacio negativo (blanco) para definir la separación interna entre formas negras superpuestas (por ejemplo, el espacio entre una cabeza y un torso). Claridad: Maximiza la legibilidad y el reconocimiento semántico a escalas pequeñas. Evita cualquier rasgo facial o detalles intrincados. Usa color solo en el elemento distintivo, si es necesario.",
+    visualStylePrompt: getDefaultStylePrompt('es-419'),
     geoContext: { lat: '40.4168', lng: '-3.7038', region: 'Madrid, ES' },
     annotatedContext: '',
     svgStyleDefs: INITIAL_STYLES,
@@ -976,7 +985,15 @@ const App: React.FC = () => {
             onChange={(e) => {
               const newLang = e.target.value as Locale;
               setLang(newLang);
-              setConfig(prev => ({ ...prev, lang: newLang, uiLang: newLang }));
+              setConfig(prev => {
+                const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(prev.visualStylePrompt);
+                return {
+                  ...prev,
+                  lang: newLang,
+                  uiLang: newLang,
+                  ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
+                };
+              });
             }}
             className="p-2.5 text-xs border border-slate-200 bg-white hover:border-violet-200 rounded-md transition-all text-slate-600 font-medium cursor-pointer shadow-sm"
             title="UI Language"
@@ -1092,7 +1109,13 @@ const App: React.FC = () => {
                         value={config.lang}
                         onChange={(e) => {
                           const newLang = e.target.value as Locale;
-                          setConfig({ ...config, lang: newLang, uiLang: newLang });
+                          const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(config.visualStylePrompt);
+                          setConfig({
+                            ...config,
+                            lang: newLang,
+                            uiLang: newLang,
+                            ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
+                          });
                           setLang(newLang);
                         }}
                         className="w-full text-xs bg-transparent border-none outline-none font-medium cursor-pointer"
@@ -2106,7 +2129,12 @@ const SmartNLUEditor: React.FC<{
               value={config.lang}
               onChange={e => {
                 const newLang = e.target.value;
-                onConfigChange({ lang: newLang, uiLang: newLang as 'es-419' | 'en-GB' });
+                const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(config.visualStylePrompt);
+                onConfigChange({
+                  lang: newLang,
+                  uiLang: newLang as 'es-419' | 'en-GB',
+                  ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
+                });
                 setLang(newLang as Locale);
               }}
               className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
