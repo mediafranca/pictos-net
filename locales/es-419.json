@@ -405,7 +405,7 @@
     "useDefault": "Usar default",
     "startWithout": "Empezar sin guía",
     "step1": {
-      "title": "Bienvenido a ",
+      "title": "Hola, esto es ",
       "highlight": "PICTOS.net",
       "intro": "Un sistema generativo de pictogramas para la comunicación aumentativa y alternativa (CAA). No es una biblioteca fija: crea pictogramas a partir de lo que escribes.",
       "generative": "Generativo",

@@ -14,7 +14,7 @@ const INDEX_FILE = path.join(LIBRARIES_DIR, 'index.json');
 const THUMBS_PER_LIBRARY = 3;
 
 function generateThumbs(filename, data) {
-  const slug = filename.replace(/_graph.*\.json$/, '');
+  const slug = filename.replace(/(_graph.*)?\.json$/, '');
   const existing = Array.from({ length: THUMBS_PER_LIBRARY }, (_, i) =>
     path.join(THUMBS_DIR, `${slug}_${i}.jpg`)
   );

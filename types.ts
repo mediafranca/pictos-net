@@ -76,7 +76,6 @@ export interface RowData {
   bitmap?: string; // Base64 data URL
   rawSvg?: string; // Vectorized SVG from vtracer (raw)
   structuredSvg?: string; // mf-svg-schema compliant SVG (Gemini-processed)
-  shared?: boolean; // Whether this pictogram has been shared with PICTOS
 
   // Global Pipeline Status
   status: 'idle' | 'processing' | 'completed' | 'error';
