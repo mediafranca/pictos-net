@@ -54,7 +54,9 @@ GEMINI_API_KEY=tu_api_key_aquí
 
 - **NUNCA** subas el archivo `.env` a Git (ya está en `.gitignore`)
 - **NO COMPARTAS** tu API key públicamente
-- **ADVERTENCIA**: Esta aplicación expone la API key en el código del cliente (navegador). Para más detalles, consulta [SECURITY.md](./SECURITY.md)
+- En **desarrollo local**, la API key se inyecta via Vite y las llamadas van directo a Gemini
+- En **produccion**, las llamadas pasan por una Netlify Function (`api-gemini.js`) con JWT auth; la API key nunca llega al cliente
+- Para mas detalles, consulta [SECURITY.md](./SECURITY.md)
 
 ### 3. Ejecutar el Proyecto
 
@@ -82,7 +84,7 @@ Genera los archivos optimizados en el directorio `dist/`:
 
 - JavaScript minificado y bundled
 - Assets optimizados
-- **NOTA**: La API key seguirá expuesta en el código compilado (ver [SECURITY.md](./SECURITY.md))
+- **NOTA**: En produccion la API key NO se incluye en el bundle (las llamadas pasan por proxy server-side)
 
 #### Vista Previa del Build
 
@@ -108,33 +110,23 @@ node scripts/generate-libraries-index.cjs
 
 Regenera el archivo `public/libraries/index.json` escaneando todos los archivos JSON en `public/libraries/`. Este comando se ejecuta automáticamente durante el build, pero puedes ejecutarlo manualmente si agregas o modificas bibliotecas de ejemplo.
 
-## Despliegue en GitHub Pages
+## Despliegue en Netlify
 
-El proyecto incluye un workflow de GitHub Actions (`.github/workflows/deploy.yml`) que despliega automáticamente a GitHub Pages desde la rama `local-dev`.
+El proyecto se despliega en Netlify desde la rama `main`. El branch `lab` despliega a `pictos-next.netlify.app` para pruebas.
 
-### Configuración inicial:
+### Configuracion:
 
-1. **Habilitar GitHub Pages**:
-   - Ve a Settings → Pages en tu repositorio
-   - En "Source", selecciona "GitHub Actions"
+1. **Netlify Identity**: Habilitado con Google SSO para autenticacion de usuarios
+2. **Variable de entorno**: `GEMINI_API_KEY` configurada en Netlify (server-side only)
+3. **Netlify Functions**: `api-gemini.js` proxea las llamadas a Gemini con validacion JWT
+4. **Dominio**: `pictos.net` (produccion), `pictos-next.netlify.app` (staging/lab)
 
-2. **Configurar el secreto GEMINI_API_KEY**:
-   - Ve a Settings → Secrets and variables → Actions
-   - Crea un nuevo "Repository secret" llamado `GEMINI_API_KEY`
-   - Pega tu API key de Google Gemini como valor
+### Branches
 
-3. **Configurar dominio personalizado** (opcional):
-   - Edita el archivo `/public/CNAME` con tu dominio
-   - Configura los registros DNS de tu dominio para apuntar a GitHub Pages
-
-4. **Desplegar**:
-   - Haz push a la rama `local-dev`
-   - El workflow se ejecutará automáticamente
-   - La aplicación estará disponible en tu dominio o en `https://<tu-usuario>.github.io/pictos-net/`
-
-También puedes ejecutar el workflow manualmente desde la pestaña "Actions" en GitHub.
-
-**NOTA DE SEGURIDAD**: Aunque la API key está configurada como secreto de GitHub, seguirá siendo visible en el código JavaScript compilado del navegador. Consulta [SECURITY.md](./SECURITY.md) para más información.
+- `main` — produccion (pictos.net)
+- `dev` — desarrollo activo, destino de PRs
+- `lab` — staging (pictos-next.netlify.app)
+- Feature branches — se crean desde `dev` y se mergean via PR a `dev`
 
 ## Verificación de Servicios de IA
 
@@ -364,7 +356,7 @@ addLog('success', t('messages.importSuccess', { count: phrases.length }));
 4. Ejecuta `npm run build` para verificar que no hay errores
 5. Ejecuta `npm run validate-i18n` si modificaste traducciones
 6. Push a tu fork: `git push origin feature/mi-feature`
-7. Abre un Pull Request a la rama `local-dev`
+7. Abre un Pull Request a la rama `dev`
 
 ### Convenciones de código
 

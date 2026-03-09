@@ -2,27 +2,34 @@
 
 ## Gestion de API Keys
 
-### Estado Actual (v1.2.3)
+### Arquitectura Actual (v1.2.6)
 
-Este proyecto expone la API key de Google Gemini en el cliente (navegador). Flujo de deployment:
+El proyecto implementa un modelo dual para las llamadas a la API de Google Gemini:
 
-1. **Desarrollo local:** la key se lee desde `.env`
-2. **GitHub Actions:** se inyecta desde GitHub Secrets (`GEMINI_API_KEY`) durante el build
-3. **Produccion:** el bundle JavaScript en [pictos.net](https://pictos.net) contiene la key embebida
+**Desarrollo local (`npm run dev`):**
+- La key se lee desde `.env` y se inyecta via Vite (`process.env.API_KEY`)
+- Las llamadas van directamente a la API de Gemini desde el navegador
+- Flujo rapido sin autenticacion, ideal para iterar
 
-**Implicaciones:**
+**Produccion (Netlify):**
+- La key `GEMINI_API_KEY` esta configurada como variable de entorno en Netlify (server-side)
+- Las llamadas pasan por la Netlify Function `api-gemini.js` que actua como proxy
+- El bundle JavaScript **no contiene** la API key
+- El proxy valida JWT (Netlify Identity) antes de reenviar la solicitud a Gemini
 
-- La API key **no está** en el repositorio Git
-- Los contribuidores necesitan su propia key para desarrollo local
-- La key es visible en el JavaScript compilado en produccion
-- No hay rate limiting del lado del servidor
-- La clave podria ser extraida y usada en otros proyectos
+### Protecciones del proxy (`netlify/functions/api-gemini.js`)
 
-### Uso aceptable
+- **Autenticacion JWT**: Solo usuarios autenticados via Netlify Identity pueden usar el proxy
+- **CORS whitelist**: Solo `pictos.net` y `pictos-next.netlify.app`
+- **Model whitelist**: Solo 4 modelos Gemini permitidos (previene abuso)
+- **Errores genericos**: No se exponen detalles internos al cliente
 
-Esta configuracion es apropiada para desarrollo local, prototipos de investigacion, proyectos academicos y herramientas de investigacion linguistica como PICTOS.NET.
+### Autenticacion (Netlify Identity + Google SSO)
 
-**No recomendado** para aplicaciones comerciales o de alto trafico. En ese caso, implementar un backend proxy o usar variables de entorno protegidas del lado del servidor.
+- Login lazy: la app es completamente accesible sin autenticacion
+- Se requiere login solo al generar pictogramas (llamadas a Gemini)
+- Google SSO como metodo principal, email/password como alternativa
+- JWT se obtiene del widget de Netlify Identity y se envia como `Authorization: Bearer`
 
 ## Configuracion
 
@@ -38,17 +45,19 @@ Esta configuracion es apropiada para desarrollo local, prototipos de investigaci
 3. Edita `.env` con tu key
 4. Ejecuta `npm run dev`
 
-### GitHub Actions Deployment
+### Netlify (Produccion)
 
-1. Ve a Settings > Secrets and variables > Actions
-2. Crea un secret `GEMINI_API_KEY`
-3. El workflow `.github/workflows/deploy.yml` inyecta la key durante el build
+1. Configura `GEMINI_API_KEY` en Settings > Environment variables
+2. Habilita Identity con Google SSO
+3. La Netlify Function `api-gemini.js` se despliega automaticamente
 
-**Importante:** esta key sera embebida en el JavaScript publico. Usa una key con quotas y restricciones apropiadas.
+## Headers de Seguridad (netlify.toml)
 
-### Dominio Personalizado
-
-Configurado mediante `/public/CNAME` (`pictos.net`), DNS apuntando a GitHub Pages, y base path `/` en `vite.config.ts`.
+- `Strict-Transport-Security`: HSTS con includeSubDomains
+- `X-Frame-Options`: SAMEORIGIN
+- `X-Content-Type-Options`: nosniff
+- `Referrer-Policy`: strict-origin-when-cross-origin
+- `Permissions-Policy`: camara, microfono y geolocalizacion deshabilitados
 
 ## Variables de Entorno
 
@@ -56,7 +65,7 @@ Configurado mediante `/public/CNAME` (`pictos.net`), DNS apuntando a GitHub Page
 - Usar `.env` para desarrollo local
 - Mantener `.env` en `.gitignore` (ya configurado)
 - Proporcionar `.env.example` sin valores reales
-- Configurar `GEMINI_API_KEY` como GitHub Secret
+- Configurar `GEMINI_API_KEY` como variable de entorno en Netlify
 
 **No hacer:**
 - Commitear archivos `.env` a Git
@@ -71,16 +80,15 @@ Configurado mediante `/public/CNAME` (`pictos.net`), DNS apuntando a GitHub Page
 ### Rotacion de Keys
 
 1. Generar nueva key en [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Actualizar `.env` local y el secret `GEMINI_API_KEY` en GitHub
-3. Ejecutar nuevo deployment
-4. Verificar que la app funciona
-5. Revocar la key antigua
+2. Actualizar `.env` local y la variable `GEMINI_API_KEY` en Netlify
+3. Verificar que la app funciona
+4. Revocar la key antigua
 
 ## Recursos
 
-- [README.md](./README.md) - Setup y desarrollo
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Setup y desarrollo
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Arquitectura del sistema
+- [SSO_IMPLEMENTATION_PLAN.md](./SSO_IMPLEMENTATION_PLAN.md) - Plan de implementacion SSO
 - [Google Gemini API Docs](https://ai.google.dev/docs)
-- [GitHub Actions Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
-- [Best Practices para API Keys](https://cloud.google.com/docs/authentication/api-keys)
+- [Netlify Identity Docs](https://docs.netlify.com/security/secure-access-to-sites/identity/)
 - [OWASP Top Ten](https://owasp.org/www-project-top-ten/)
