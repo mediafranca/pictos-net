@@ -8,12 +8,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
+import { useTranslation } from '../../hooks/useTranslation';
 import { normalizeSVG, parseSVGToDOM } from '../../utils/svgNormalizer';
 import BoundingBox from './BoundingBox';
 import PathEditor from './PathEditor';
 import { updateDynamicStyles } from '../../lib/style-editor/lib/utils/cssGenerator';
 
 export default function SVGCanvas() {
+    const { t } = useTranslation();
     const {
         svgDocument,
         loadSVG,
@@ -31,6 +33,7 @@ export default function SVGCanvas() {
         zoomToFit,
         zoomToPoint,
         pathEditMode,
+        outlineMode,
     } = useSVGEditorStore();
 
     const [refreshKey, setRefreshKey] = useState(0);
@@ -103,14 +106,39 @@ export default function SVGCanvas() {
                     width = 300;
                     height = 150;
                 }
+                console.debug('[SVGCanvas] detected canvas size:', width, 'x', height,
+                    '| attr w:', svg.getAttribute('width'),
+                    '| attr h:', svg.getAttribute('height'),
+                    '| viewBox:', svg.getAttribute('viewBox'));
                 setCanvasSize(prev =>
                     prev && prev.width === width && prev.height === height
                         ? prev
                         : { width, height }
                 );
+
+                // Ensure animated elements use their own bounding box as transform
+                // reference, not the SVG viewBox (the default for SVG elements).
+                // We look up each element's classes against styleDefinitions to
+                // detect animation usage, then set transform-box/origin inline.
+                svg.querySelectorAll('[class]').forEach(el => {
+                    const classes = (el.getAttribute('class') || '').split(/\s+/);
+                    let animOrigin: string | null = null;
+                    for (const cls of classes) {
+                        const def = styleDefinitions.find(s => s.selectors.includes(`.${cls}`));
+                        if (def?.rules.some(r => r.property === 'animation')) {
+                            const toRule = def.rules.find(r => r.property === 'transform-origin');
+                            animOrigin = toRule?.value ?? 'center';
+                            break;
+                        }
+                    }
+                    if (animOrigin) {
+                        (el as HTMLElement).style.transformBox = 'fill-box';
+                        (el as HTMLElement).style.transformOrigin = animOrigin;
+                    }
+                });
             }
         }
-    }, [svgDocument, svgSource, updateSVGDOM]);
+    }, [svgDocument, svgSource, updateSVGDOM, styleDefinitions]);
 
     // Dynamic style injection
     useEffect(() => {
@@ -133,6 +161,38 @@ export default function SVGCanvas() {
             }
         }
     }, [styleDefinitions, keyframes, svgSource]);
+
+    // Outline mode: inject/remove high-specificity override CSS
+    useEffect(() => {
+        const STYLE_ID = 'svg-outline-mode-styles';
+        let styleEl = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
+
+        if (outlineMode) {
+            if (!styleEl) {
+                styleEl = document.createElement('style');
+                styleEl.id = STYLE_ID;
+                document.head.appendChild(styleEl);
+            }
+            styleEl.textContent = `
+                #canvas-stage svg * {
+                    fill: none !important;
+                    stroke: #000000 !important;
+                    stroke-width: 1px !important;
+                    vector-effect: non-scaling-stroke !important;
+                    opacity: 1 !important;
+                    filter: none !important;
+                    animation: none !important;
+                }
+            `;
+        } else if (styleEl) {
+            styleEl.remove();
+        }
+
+        return () => {
+            const el = document.getElementById(STYLE_ID);
+            if (el) el.remove();
+        };
+    }, [outlineMode]);
 
     // Set canvas dimensions in viewport and fit on *initial* load only
     const initialFitDone = useRef(false);
@@ -466,13 +526,13 @@ export default function SVGCanvas() {
             <div className="h-full flex items-center justify-center bg-slate-100">
                 <div className="text-center">
                     <Upload className="w-16 h-16 mx-auto text-slate-500 mb-4" />
-                    <h2 className="text-xl font-semibold mb-2 text-slate-900">Import SVG</h2>
+                    <h2 className="text-xl font-semibold mb-2 text-slate-900">{t('svgEditor.importSvg')}</h2>
                     <p className="text-sm text-slate-500 mb-4">
-                        Upload a generative SVG to begin refining
+                        {t('svgEditor.importSvgHint')}
                     </p>
                     <div className="flex gap-2 justify-center">
                         <Button onClick={handleUploadClick}>
-                            Choose File
+                            {t('svgEditor.chooseFile')}
                         </Button>
                     </div>
                     <input

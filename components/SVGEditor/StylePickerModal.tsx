@@ -106,7 +106,7 @@ export const StylePickerModal: React.FC<StylePickerModalProps> = ({
                                 <button
                                     key={styleDef.id}
                                     onClick={() => handleToggle(cls, isCited)}
-                                    title={isCited ? `quitar .${cls}` : `citar .${cls}`}
+                                    title={isCited ? `${t('svgEditor.uncite')} .${cls}` : `${t('svgEditor.cite')} .${cls}`}
                                     className={`relative rounded-lg p-2 transition-all text-left ${
                                         isCited
                                             ? 'ring-2 ring-violet-500 bg-violet-50'
@@ -114,7 +114,7 @@ export const StylePickerModal: React.FC<StylePickerModalProps> = ({
                                     }`}
                                 >
                                     {isLocal && (
-                                        <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-400" title="local" />
+                                        <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-400" title={t('svgEditor.localIndicator')} />
                                     )}
                                     <StylePreviewCard
                                         styleDef={styleDef}

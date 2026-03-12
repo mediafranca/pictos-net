@@ -79,8 +79,16 @@ interface PathInfo {
 interface PathInventory {
     paths: PathInfo[];
     vtracerGroups: Record<string, string[]>;
+    /** CSS classes applied to each group/path by the user in the editor */
+    groupClasses: Record<string, string>;
+    /** CSS classes applied to individual paths by the user */
+    pathClasses: Record<string, string>;
     standalonePathIds: string[];
     viewBox: string;
+    /** User-defined CSS rules from the raw SVG's <style> block */
+    rawStyleRules: string;
+    /** CSS-derived fill values resolved from <style> rules (class → fill) */
+    cssFillMap: Record<string, string>;
 }
 
 function getFillRole(fill: string): 'dark' | 'light' | 'accent' | 'unknown' {
@@ -109,6 +117,53 @@ function getFillRole(fill: string): 'dark' | 'light' | 'accent' | 'unknown' {
     return 'unknown';
 }
 
+/**
+ * Map a fill role to a library CSS class for automatic color assignment.
+ * This ensures structured SVGs are not all-black by giving each group
+ * a visual class based on its dominant path fill color.
+ */
+function fillRoleToColorClass(role: 'dark' | 'light' | 'accent' | 'unknown'): string {
+    switch (role) {
+        case 'dark': return 'main';
+        case 'light': return 'w';
+        case 'accent': return 'accent';
+        default: return 'main';
+    }
+}
+
+/**
+ * Determine the dominant fill role for a group's paths.
+ * Returns the role that appears most frequently (excluding 'unknown').
+ */
+function getDominantFillRole(
+    pathIds: string[],
+    pathInfoMap: Map<string, PathInfo>,
+): 'dark' | 'light' | 'accent' | 'unknown' {
+    const counts: Record<string, number> = { dark: 0, light: 0, accent: 0, unknown: 0 };
+    for (const id of pathIds) {
+        const info = pathInfoMap.get(id);
+        if (info) counts[info.fillRole]++;
+    }
+    // Prefer non-unknown roles
+    if (counts.dark >= counts.light && counts.dark >= counts.accent && counts.dark > 0) return 'dark';
+    if (counts.light >= counts.accent && counts.light > 0) return 'light';
+    if (counts.accent > 0) return 'accent';
+    return 'dark'; // default to dark (main) for fully unknown
+}
+
+/**
+ * Collect all path ids from an assignment node (including children).
+ */
+function collectAllPathIds(node: AssignmentNode): string[] {
+    const ids = [...(node.paths ?? [])];
+    if (node.children) {
+        for (const child of Object.values(node.children)) {
+            ids.push(...collectAllPathIds(child));
+        }
+    }
+    return ids;
+}
+
 function getTranslateOffset(transform: string | null): [number, number] {
     if (!transform) return [0, 0];
     const m = transform.match(/translate\(\s*([^,\s]+)[\s,]+([^)\s]+)\s*\)/);
@@ -126,6 +181,77 @@ function getCentroid(d: string, tx: number, ty: number): [number, number] {
     ];
 }
 
+/**
+ * Offset all absolute coordinates in a path d string by (tx, ty).
+ * Relative commands (lowercase) are left unchanged since they're already relative.
+ */
+function offsetPathD(d: string, tx: number, ty: number): string {
+    // Tokenize: split into commands + number sequences
+    const tokens = d.match(/[A-Za-z]|[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?/g);
+    if (!tokens) return d;
+
+    const result: string[] = [];
+    let cmd = '';
+    let argIndex = 0;
+
+    for (const tok of tokens) {
+        if (/^[A-Za-z]$/.test(tok)) {
+            cmd = tok;
+            argIndex = 0;
+            result.push(tok);
+            continue;
+        }
+
+        const val = parseFloat(tok);
+        const isRelative = cmd === cmd.toLowerCase();
+
+        if (isRelative) {
+            // Relative commands: don't offset
+            result.push(tok);
+            argIndex++;
+            continue;
+        }
+
+        // Absolute commands: offset x,y pairs
+        const upper = cmd.toUpperCase();
+        let offsetVal = val;
+
+        if (upper === 'H') {
+            // H takes only x
+            offsetVal = val + tx;
+        } else if (upper === 'V') {
+            // V takes only y
+            offsetVal = val + ty;
+        } else if (upper === 'A') {
+            // A: rx ry rotation large-arc sweep x y (7 params)
+            const ai = argIndex % 7;
+            if (ai === 5) offsetVal = val + tx;
+            else if (ai === 6) offsetVal = val + ty;
+        } else {
+            // M, L, C, S, Q, T, Z — alternating x,y pairs
+            if (argIndex % 2 === 0) offsetVal = val + tx;
+            else offsetVal = val + ty;
+        }
+
+        // Preserve precision
+        const str = Number.isInteger(offsetVal) ? String(offsetVal) : offsetVal.toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+        result.push(str);
+        argIndex++;
+    }
+
+    // Reconstruct with spaces
+    let out = '';
+    for (let i = 0; i < result.length; i++) {
+        const tok = result[i];
+        if (/^[A-Za-z]$/.test(tok)) {
+            out += (i > 0 ? ' ' : '') + tok;
+        } else {
+            out += ' ' + tok;
+        }
+    }
+    return out.trim();
+}
+
 /** Extract fill from either fill="..." attribute or style="fill: ...;" */
 function extractFill(el: Element): string {
     const fillAttr = el.getAttribute('fill');
@@ -133,6 +259,45 @@ function extractFill(el: Element): string {
     const style = el.getAttribute('style') ?? '';
     const m = style.match(/fill:\s*([^;]+)/);
     return m?.[1]?.trim() ?? '#000000';
+}
+
+/**
+ * Ensure every <path> in the SVG has a unique id attribute.
+ * VTracer output doesn't assign ids, so we generate them here
+ * before the inventory/assembly pipeline needs them.
+ */
+export function ensurePathIds(svg: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svg, 'image/svg+xml');
+    const svgEl = doc.querySelector('svg');
+    if (!svgEl) return svg;
+
+    const existingIds = new Set<string>();
+    svgEl.querySelectorAll('[id]').forEach(el => {
+        existingIds.add(el.getAttribute('id')!);
+    });
+
+    let counter = 0;
+    svgEl.querySelectorAll('path').forEach(p => {
+        if (!p.getAttribute('id')) {
+            let newId: string;
+            do { newId = `p${counter++}`; } while (existingIds.has(newId));
+            p.setAttribute('id', newId);
+            existingIds.add(newId);
+        }
+    });
+
+    // Also ensure groups have ids
+    svgEl.querySelectorAll('g').forEach(g => {
+        if (!g.getAttribute('id')) {
+            let newId: string;
+            do { newId = `g${counter++}`; } while (existingIds.has(newId));
+            g.setAttribute('id', newId);
+            existingIds.add(newId);
+        }
+    });
+
+    return new XMLSerializer().serializeToString(svgEl);
 }
 
 export function buildPathInventory(svg: string): PathInventory {
@@ -144,10 +309,53 @@ export function buildPathInventory(svg: string): PathInventory {
 
     const paths: PathInfo[] = [];
     const vtracerGroups: Record<string, string[]> = {};
+    const groupClasses: Record<string, string> = {};
+    const pathClasses: Record<string, string> = {};
     const standalonePathIds: string[] = [];
 
     const svgEl = doc.querySelector('svg');
-    if (!svgEl) return { paths, vtracerGroups, standalonePathIds, viewBox };
+    if (!svgEl) return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, viewBox, rawStyleRules: '', cssFillMap: {} };
+
+    // Extract user-defined CSS rules from <style> blocks in the raw SVG
+    let rawStyleRules = '';
+    svgEl.querySelectorAll('style').forEach(styleEl => {
+        const text = styleEl.textContent?.trim();
+        if (text) rawStyleRules += (rawStyleRules ? '\n' : '') + text;
+    });
+
+    // Build a CSS class → fill map so we can resolve fills for elements
+    // whose inline fill was converted to a CSS class in the editor
+    const cssFillMap: Record<string, string> = {};
+    if (rawStyleRules) {
+        const ruleRe = /([^{]+)\{([^}]+)\}/g;
+        let m: RegExpExecArray | null;
+        while ((m = ruleRe.exec(rawStyleRules)) !== null) {
+            const selector = m[1].trim();
+            const decls = m[2];
+            const fillMatch = decls.match(/fill\s*:\s*([^;}\s]+)/);
+            if (!fillMatch) continue;
+            // Extract class names from selectors like ".azul", ".w", "#id.azul"
+            const classMatches = [...selector.matchAll(/\.([a-zA-Z][\w-]*)/g)];
+            for (const cm of classMatches) {
+                cssFillMap[cm[1]] = fillMatch[1].trim();
+            }
+        }
+    }
+
+    /** Resolve fill: inline attr > style attr > CSS class fill > fallback */
+    function resolveFill(el: Element): string {
+        const inline = extractFill(el);
+        if (inline !== '#000000') return inline; // extractFill found something meaningful
+
+        // Check if element has classes that map to a known fill
+        const cls = el.getAttribute('class')?.trim();
+        if (cls) {
+            for (const c of cls.split(/\s+/)) {
+                if (cssFillMap[c]) return cssFillMap[c];
+            }
+        }
+        return inline;
+    }
 
     // Walk direct children of the SVG
     for (const child of Array.from(svgEl.children)) {
@@ -159,14 +367,22 @@ export function buildPathInventory(svg: string): PathInventory {
 
         if (tag === 'g') {
             const groupPaths: string[] = [];
+            // Capture user-applied CSS classes on the group
+            const cls = child.getAttribute('class')?.trim();
+            if (cls && id) groupClasses[id] = cls;
+
             for (const p of Array.from(child.querySelectorAll('path'))) {
                 const pid = p.getAttribute('id') ?? '';
                 if (!pid) continue;
-                const fill = extractFill(p);
+                const fill = resolveFill(p);
                 const d = p.getAttribute('d') ?? '';
                 const transform = p.getAttribute('transform') ?? '';
                 const [tx, ty] = getTranslateOffset(transform);
                 const [cx, cy] = getCentroid(d, tx, ty);
+
+                // Capture path-level classes
+                const pCls = p.getAttribute('class')?.trim();
+                if (pCls) pathClasses[pid] = pCls;
 
                 paths.push({ id: pid, fill, fillRole: getFillRole(fill), cx, cy, vtracerGroup: id });
                 groupPaths.push(pid);
@@ -177,18 +393,22 @@ export function buildPathInventory(svg: string): PathInventory {
         } else if (tag === 'path') {
             const pid = id;
             if (!pid) continue;
-            const fill = extractFill(child);
+            const fill = resolveFill(child);
             const d = child.getAttribute('d') ?? '';
             const transform = child.getAttribute('transform') ?? '';
             const [tx, ty] = getTranslateOffset(transform);
             const [cx, cy] = getCentroid(d, tx, ty);
+
+            // Capture path-level classes
+            const pCls = child.getAttribute('class')?.trim();
+            if (pCls) pathClasses[pid] = pCls;
 
             paths.push({ id: pid, fill, fillRole: getFillRole(fill), cx, cy, vtracerGroup: null });
             standalonePathIds.push(pid);
         }
     }
 
-    return { paths, vtracerGroups, standalonePathIds, viewBox };
+    return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, viewBox, rawStyleRules, cssFillMap };
 }
 
 // ─── Gemini Prompt (v2: JSON assignment) ─────────────────────────────────────
@@ -233,7 +453,8 @@ correspondiente, usando las señales de color y posición.
 6. Preservar los group-ids de vtracer cuando coincidan con la jerarquía del NLU
 7. Si un path no encaja en ningún grupo semántico, asígnalo a un grupo "contexto" con concept="Context"
 8. NO incluir paths con id vacío o nulo
-9. Emitir SOLO el JSON. Sin markdown, sin explicaciones, sin backticks.`;
+9. Emitir SOLO el JSON. Sin markdown, sin explicaciones, sin backticks, sin comentarios.
+10. JSON estricto: sin trailing commas, comillas dobles para keys y strings.`;
 }
 
 function formatElements(els: VisualElement[], depth = 0): string {
@@ -310,10 +531,47 @@ function cleanGeminiJSON(text: string): string {
     let clean = text.trim();
     // Strip markdown fences
     clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    // Find first { and last }
+    // Find first {
     const start = clean.indexOf('{');
-    const end = clean.lastIndexOf('}');
-    if (start !== -1 && end !== -1) return clean.slice(start, end + 1);
+    if (start !== -1) clean = clean.slice(start);
+    // Remove single-line comments (// ...)
+    clean = clean.replace(/\/\/[^\n]*/g, '');
+    // Remove multi-line comments (/* ... */)
+    clean = clean.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Remove trailing commas before } or ] (common LLM artifact)
+    clean = clean.replace(/,\s*([\]}])/g, '$1');
+
+    // Repair truncated JSON (output cut off mid-stream)
+    // Close unterminated strings
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < clean.length; i++) {
+        const ch = clean[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') inString = !inString;
+    }
+    if (inString) clean += '"';
+
+    // Close unclosed brackets/braces
+    const stack: string[] = [];
+    inString = false;
+    escaped = false;
+    for (let i = 0; i < clean.length; i++) {
+        const ch = clean[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') stack.push('}');
+        else if (ch === '[') stack.push(']');
+        else if (ch === '}' || ch === ']') stack.pop();
+    }
+    // Remove any trailing comma before we close
+    clean = clean.replace(/,\s*$/, '');
+    // Close all unclosed brackets/braces in reverse order
+    while (stack.length > 0) clean += stack.pop();
+
     return clean;
 }
 
@@ -339,6 +597,7 @@ interface OriginalPathData {
     d: string;
     transform: string;
     fill: string;
+    className: string;
     otherAttrs: string;
 }
 
@@ -354,6 +613,7 @@ function extractOriginalPaths(rawSvg: string): Map<string, OriginalPathData> {
         const fill = extractFill(p);
         const d = p.getAttribute('d') ?? '';
         const transform = p.getAttribute('transform') ?? '';
+        const className = p.getAttribute('class')?.trim() ?? '';
 
         // Collect other attributes we might want to preserve
         const skipAttrs = new Set(['id', 'd', 'transform', 'fill', 'style', 'class']);
@@ -364,7 +624,7 @@ function extractOriginalPaths(rawSvg: string): Map<string, OriginalPathData> {
             }
         }
 
-        map.set(id, { d, transform, fill, otherAttrs: otherParts.join(' ') });
+        map.set(id, { d, transform, fill, className, otherAttrs: otherParts.join(' ') });
     });
 
     return map;
@@ -378,9 +638,25 @@ function renderNode(
     groupId: string,
     node: AssignmentNode,
     originalPaths: Map<string, OriginalPathData>,
+    groupClasses: Record<string, string>,
+    pathInfoMap: Map<string, PathInfo>,
+    cssFillMap: Record<string, string> = {},
     indent = '  ',
 ): string {
-    const cls = node.class ?? 'f';
+    // Determine color class from dominant fill of this group's paths
+    const allIds = collectAllPathIds(node);
+    const dominantRole = getDominantFillRole(allIds, pathInfoMap);
+    const colorCls = fillRoleToColorClass(dominantRole);
+
+    // Merge: semantic class (k/f) + auto color class + user-applied classes
+    // Skip auto color class if user classes already define a fill
+    const semanticCls = node.class ?? 'f';
+    const userCls = groupClasses[groupId] ?? '';
+    const userHasFill = userCls.split(/\s+/).some(c => cssFillMap[c]);
+    const clsParts = [semanticCls];
+    if (!userHasFill) clsParts.push(colorCls);
+    if (userCls) clsParts.push(userCls);
+    const cls = clsParts.join(' ');
     const label = escapeXmlAttr(node.label);
     const concept = escapeXmlAttr(node.concept);
     const openTag = `${indent}<g id="${groupId}" role="group" tabindex="0" data-concept="${concept}" aria-label="${label}" class="${cls}">`;
@@ -399,10 +675,14 @@ function renderNode(
             const subpaths = node.paths.map(id => {
                 const p = originalPaths.get(id);
                 if (!p) return '';
-                // Include transform offset in the path data for correct positioning
+                // Bake translate offset into d so merged paths share one coordinate space
                 if (p.transform) {
-                    // For evenodd, transforms need to be baked — for now just concatenate d values
-                    return p.d;
+                    const tm = p.transform.match(/translate\(\s*([^,\s]+)[\s,]+([^)\s]+)\s*\)/);
+                    if (tm) {
+                        const tx = parseFloat(tm[1]);
+                        const ty = parseFloat(tm[2]);
+                        if (tx !== 0 || ty !== 0) return offsetPathD(p.d, tx, ty);
+                    }
                 }
                 return p.d;
             }).filter(Boolean).join(' ');
@@ -413,8 +693,9 @@ function renderNode(
                 const p = originalPaths.get(pathId);
                 if (!p) { console.warn(`[assemble] path not found: ${pathId}`); continue; }
                 const transformAttr = p.transform ? ` transform="${p.transform}"` : '';
+                const classAttr = p.className ? ` class="${p.className}"` : '';
                 const otherAttrs = p.otherAttrs ? ` ${p.otherAttrs}` : '';
-                lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${transformAttr}${otherAttrs}/>`);
+                lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${classAttr}${transformAttr}${otherAttrs}/>`);
             }
         }
     }
@@ -422,7 +703,7 @@ function renderNode(
     // Render children
     if (node.children) {
         for (const [childId, childNode] of Object.entries(node.children)) {
-            lines.push(renderNode(childId, childNode, originalPaths, indent + '  '));
+            lines.push(renderNode(childId, childNode, originalPaths, groupClasses, pathInfoMap, cssFillMap, indent + '  '));
         }
     }
 
@@ -437,6 +718,9 @@ function assembleSVGFromAssignment(
     metadata: object,
     filteredCSS: string,
     viewBox: string,
+    groupClasses: Record<string, string>,
+    pathInfoMap: Map<string, PathInfo>,
+    cssFillMap: Record<string, string> = {},
 ): string {
     const originalPaths = extractOriginalPaths(rawSvg);
 
@@ -466,7 +750,7 @@ function assembleSVGFromAssignment(
     }
 
     const bodyLines = Object.entries(assignment.groups).map(([gid, node]) =>
-        renderNode(gid, node, originalPaths)
+        renderNode(gid, node, originalPaths, groupClasses, pathInfoMap, cssFillMap)
     );
 
     const body = bodyLines.join('\n');
@@ -706,8 +990,11 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
     try {
         if (input.onProgress) input.onProgress('[ESTRUCTURAR] Iniciando pre-procesamiento local...');
 
+        // ── Step 0: Ensure all paths/groups have ids ─────────────────────
+        const rawSvgWithIds = ensurePathIds(input.rawSvg);
+
         // ── Step 1: Build path inventory (local) ────────────────────────
-        const inventory = buildPathInventory(input.rawSvg);
+        const inventory = buildPathInventory(rawSvgWithIds);
 
         if (inventory.paths.length === 0) {
             return { svg: '', success: false, error: 'No se encontraron paths en el SVG' };
@@ -738,7 +1025,8 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
             config: {
                 systemInstruction,
                 temperature: 0.1,
-                maxOutputTokens: 2048,
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json',
             },
         });
 
@@ -776,25 +1064,50 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
         const viewBox = inventory.viewBox;
         const metadata = buildMetadataJSON(input);
 
-        // Build filtered CSS based on classes used in the assignment
+        // Build path info map for color class calculation
+        const pathInfoMapForCSS = new Map<string, PathInfo>();
+        for (const p of inventory.paths) pathInfoMapForCSS.set(p.id, p);
+
+        // Build filtered CSS based on classes used in assignment + auto color classes + user classes
         const usedClassesFromAssignment = new Set<string>();
         function collectClasses(node: AssignmentNode) {
             if (node.class) node.class.split(/\s+/).forEach(c => usedClassesFromAssignment.add(c));
+            // Auto color class based on fill analysis
+            const allIds = collectAllPathIds(node);
+            const role = getDominantFillRole(allIds, pathInfoMapForCSS);
+            usedClassesFromAssignment.add(fillRoleToColorClass(role));
             if (node.children) Object.values(node.children).forEach(collectClasses);
         }
         Object.values(assignment.groups).forEach(collectClasses);
+        // Also include user-applied classes from raw SVG groups and paths
+        for (const cls of Object.values(inventory.groupClasses)) {
+            cls.split(/\s+/).forEach(c => c && usedClassesFromAssignment.add(c));
+        }
+        for (const cls of Object.values(inventory.pathClasses)) {
+            cls.split(/\s+/).forEach(c => c && usedClassesFromAssignment.add(c));
+        }
 
         const fullCSS = generateStylesheet(input.config);
-        const filteredCSS = buildFilteredCSS(fullCSS, usedClassesFromAssignment);
+        let filteredCSS = buildFilteredCSS(fullCSS, usedClassesFromAssignment);
+
+        // Merge user-defined CSS rules from the raw SVG's <style> block
+        if (inventory.rawStyleRules) {
+            filteredCSS = filteredCSS
+                ? `${filteredCSS}\n\n/* User-defined styles */\n${inventory.rawStyleRules}`
+                : inventory.rawStyleRules;
+        }
 
         // ── Step 6: Assemble SVG locally ─────────────────────────────────
         let svgContent = assembleSVGFromAssignment(
-            input.rawSvg,
+            rawSvgWithIds,
             assignment,
             input,
             metadata,
             filteredCSS,
             viewBox,
+            inventory.groupClasses,
+            pathInfoMapForCSS,
+            inventory.cssFillMap,
         );
 
         // ── Step 7: Post-process ─────────────────────────────────────────

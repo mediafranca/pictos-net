@@ -395,7 +395,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact mb-2" style={{ flex: '2 1 0%', minHeight: 80 }}>
                         <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                         <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
-                            {t('svg.traceSvg')}
+                            {t('svg.traceLabel')}
                         </div>
                         <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
                             {onOpenEditor && (
@@ -562,7 +562,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview">
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                     <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
-                        {t('svg.traceSvg')}
+                        {t('svg.traceLabel')}
                     </div>
                     {/* Download, Edit & Delete overlay — bottom on hover */}
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
@@ -661,7 +661,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 >
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none" />
                     <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
-                        {t('svg.traceSvg')}
+                        {t('svg.traceLabel')}
                     </div>
                     <div
                         dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}

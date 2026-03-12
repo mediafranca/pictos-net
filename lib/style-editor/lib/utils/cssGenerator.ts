@@ -33,13 +33,9 @@ export const generateCssString = (styles: StyleDefinition[], keyframes: Keyframe
 };
 
 export const updateDynamicStyles = (styles: StyleDefinition[], keyframes: KeyframeDefinition[]) => {
-  // Scope selectors with "svg" prefix so SVG style classes don't collide
-  // with GUI classes (e.g. .fade-in used by both the app and SVG styles).
-  const scopedStyles = styles.map(s => ({
-    ...s,
-    selectors: s.selectors.map(sel => `svg ${sel}`),
-  }));
-  const css = generateCssString(scopedStyles, keyframes);
+  // generateCssString already adds the "svg " prefix to selectors,
+  // so we don't need to scope them here (avoids double "svg svg .class").
+  const css = generateCssString(styles, keyframes);
   let styleTag = document.getElementById('dynamic-svg-styles');
   if (!styleTag) {
     styleTag = document.createElement('style');

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
+import { useTranslation } from '../../hooks/useTranslation';
 
 interface BoundingBoxProps {
     svgElement: SVGSVGElement;
@@ -326,6 +327,7 @@ function transformPathData(
 }
 
 export default function BoundingBox({ svgElement, elementId, containerElement, onTransformComplete }: BoundingBoxProps) {
+    const { t } = useTranslation();
     const zoom = useSVGEditorStore(state => state.viewport.zoom);
     const [bbox, setBbox] = useState<BBox | null>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -966,7 +968,7 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
                     boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
                 }}
                 onMouseDown={(e) => handleMouseDown(e, 'rotate')}
-                title="Rotate"
+                title={t('svgEditor.rotate')}
             >
                 <svg width={rotIconSvg} height={rotIconSvg} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21.5 2v6h-6M21.34 5.5A10 10 0 1 1 11.26 2.8" />

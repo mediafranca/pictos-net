@@ -83,6 +83,7 @@ const PathEditToolbar: React.FC = () => {
     const selectedNodeIndex = useSVGEditorStore(state => state.selectedNodeIndex);
     const pathEditTool = useSVGEditorStore(state => state.pathEditTool);
     const setPathEditTool = useSVGEditorStore(state => state.setPathEditTool);
+    const toggleNodeSmooth = useSVGEditorStore(state => state.toggleNodeSmooth);
 
     const centerX = LEFT_PANEL + (window.innerWidth - LEFT_PANEL - RIGHT_PANEL) / 2;
     const btnClass = "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-violet-800 rounded transition-colors";
@@ -91,7 +92,7 @@ const PathEditToolbar: React.FC = () => {
     return (
         <div
             role="toolbar"
-            aria-label="Path edit"
+            aria-label={t('svgEditor.pathEditToolbar')}
             className="fixed z-[15] flex items-center gap-1 bg-violet-900 rounded-lg shadow-xl border border-violet-700 px-2 py-1.5 text-white"
             style={{ top: 76, left: centerX, transform: 'translateX(-50%)' }}
             onKeyDown={handleToolbarKeyDown}
@@ -106,7 +107,7 @@ const PathEditToolbar: React.FC = () => {
             <button
                 onClick={() => setPathEditTool('select')}
                 className={pathEditTool === 'select' ? activeBtnClass : btnClass}
-                title="Select"
+                title={t('svgEditor.select')}
                 data-toolbar-item
                 tabIndex={0}
             >
@@ -138,6 +139,7 @@ const PathEditToolbar: React.FC = () => {
             <div className="w-px h-5 bg-violet-600" />
 
             <button
+                onClick={toggleNodeSmooth}
                 disabled={selectedNodeIndex == null}
                 className={`${btnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
                 title={t('svgEditor.toggleSmooth')}
@@ -249,7 +251,7 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
         <>
             <div
                 role="toolbar"
-                aria-label="Selection"
+                aria-label={t('svgEditor.selectionToolbar')}
                 className="fixed z-[15] flex items-center gap-1 bg-white rounded-lg shadow-xl border border-slate-200 px-2 py-1.5"
                 style={{ top: 76, left: centerX, transform: 'translateX(-50%)' }}
                 onKeyDown={handleToolbarKeyDown}

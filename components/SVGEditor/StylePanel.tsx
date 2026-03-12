@@ -155,6 +155,7 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
     onRestore,
     onOverrideChange,
 }) => {
+    const { t } = useTranslation();
     const hasOverrides = Object.entries(resolvedValues).some(
         ([prop, val]) => libraryValues[prop] !== undefined && val !== libraryValues[prop]
     );
@@ -172,19 +173,19 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
                         <button
                             onClick={onRestore}
                             className="flex items-center gap-0.5 text-xs text-amber-600 hover:text-amber-800 hover:bg-amber-50 px-1.5 py-0.5 rounded transition-colors"
-                            title="Restore to library original"
+                            title={t('svgEditor.restoreToLibrary')}
                         >
                             <RotateCcw size={9} />
-                            restaurar
+                            {t('svgEditor.restoreToLibrary')}
                         </button>
                     )}
                     <button
                         onClick={onUncite}
                         className="flex items-center gap-0.5 text-xs text-slate-500 hover:text-red-500 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors"
-                        title="Remove class from element"
+                        title={t('svgEditor.uncite')}
                     >
                         <X size={9} />
-                        quitar
+                        {t('svgEditor.uncite')}
                     </button>
                 </div>
             </div>
@@ -199,11 +200,11 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
                         onChange={onOverrideChange}
                     />
                 )) : (
-                    <p className="text-xs text-slate-500 italic">sin propiedades visuales</p>
+                    <p className="text-xs text-slate-500 italic">{t('svgEditor.noVisualProps')}</p>
                 )}
                 {hasOverrides && (
                     <p className="text-xs text-amber-500 mt-1">
-                        * modificado — distinto del original de biblioteca
+                        {t('svgEditor.modifiedFromLibrary')}
                     </p>
                 )}
             </div>
@@ -217,6 +218,56 @@ interface InlineAttrsPanelProps {
     onConvertToClass?: (declarations: Record<string, string>) => void;
 }
 
+/** Parse both presentation attributes AND the style attribute for visual props */
+function collectInlineAttrs(el: Element, t: (k: any) => string) {
+    const LABELS: Record<string, (t: any) => string> = {
+        'fill': (t) => t('svgEditor.inlineFill'),
+        'stroke': (t) => t('svgEditor.inlineStroke'),
+        'stroke-width': (t) => t('svgEditor.strokeWidth'),
+        'opacity': (t) => t('svgEditor.inlineOpacity'),
+    };
+    const PROPS = Object.keys(LABELS);
+    const found: Record<string, string> = {};
+
+    // 1. Presentation attributes (fill="...", stroke="...", etc.)
+    for (const prop of PROPS) {
+        const val = el.getAttribute(prop);
+        if (val) found[prop] = val;
+    }
+
+    // 2. CSS style attribute (style="fill:blue; stroke:red")
+    const styleAttr = el.getAttribute('style');
+    if (styleAttr) {
+        for (const decl of styleAttr.split(';')) {
+            const [rawProp, ...rest] = decl.split(':');
+            const prop = rawProp?.trim().toLowerCase();
+            const val = rest.join(':').trim();
+            if (prop && val && PROPS.includes(prop) && !found[prop]) {
+                found[prop] = val;
+            }
+        }
+    }
+
+    return PROPS
+        .filter(p => found[p])
+        .map(p => ({ label: LABELS[p](t), prop: p, value: found[p] }));
+}
+
+/** For groups, collect dominant fills from child paths */
+function collectChildFills(el: Element): string[] {
+    const fills = new Set<string>();
+    el.querySelectorAll('path, rect, circle, ellipse, polygon, polyline').forEach(child => {
+        const fill = child.getAttribute('fill');
+        if (fill && fill !== 'none') fills.add(fill);
+        const style = child.getAttribute('style');
+        if (style) {
+            const m = style.match(/fill\s*:\s*([^;]+)/i);
+            if (m && m[1].trim() !== 'none') fills.add(m[1].trim());
+        }
+    });
+    return [...fills];
+}
+
 const InlineAttrsPanel: React.FC<InlineAttrsPanelProps> = ({ elementId, onConvertToClass }) => {
     const { t } = useTranslation();
     const { svgDocument, updateElementAttributes, stripInlineStyles } = useSVGEditorStore();
@@ -228,38 +279,56 @@ const InlineAttrsPanel: React.FC<InlineAttrsPanelProps> = ({ elementId, onConver
     const el = doc.getElementById(elementId);
     if (!el) return null;
 
-    const fill = el.getAttribute('fill');
-    const stroke = el.getAttribute('stroke');
-    const opacity = el.getAttribute('opacity');
-    const strokeWidth = el.getAttribute('stroke-width');
+    const attrs = collectInlineAttrs(el, t);
+    const isGroup = el.tagName.toLowerCase() === 'g';
+    const childFills = isGroup ? collectChildFills(el) : [];
 
-    const attrs = [
-        fill && { label: t('svgEditor.inlineFill'), prop: 'fill', value: fill },
-        stroke && { label: t('svgEditor.inlineStroke'), prop: 'stroke', value: stroke },
-        strokeWidth && { label: t('svgEditor.strokeWidth'), prop: 'stroke-width', value: strokeWidth },
-        opacity && { label: t('svgEditor.inlineOpacity'), prop: 'opacity', value: opacity },
-    ].filter(Boolean) as { label: string; prop: string; value: string }[];
-
-    if (attrs.length === 0) return null;
+    if (attrs.length === 0 && childFills.length === 0) return null;
 
     return (
         <div className="px-4 py-3 space-y-2">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 {t('svgEditor.presentationAttrs')}
             </label>
-            <div className="space-y-1.5">
-                {attrs.map(a => (
-                    <PropertyRow
-                        key={a.prop}
-                        label={a.label}
-                        property={a.prop}
-                        value={a.value}
-                        onChange={(prop, val) => updateElementAttributes(elementId, { [prop]: val })}
-                    />
-                ))}
-            </div>
 
-            {onConvertToClass && (
+            {attrs.length > 0 && (
+                <div className="space-y-1.5">
+                    {attrs.map(a => (
+                        <PropertyRow
+                            key={a.prop}
+                            label={a.label}
+                            property={a.prop}
+                            value={a.value}
+                            onChange={(prop, val) => updateElementAttributes(elementId, { [prop]: val })}
+                        />
+                    ))}
+                </div>
+            )}
+
+            {/* Child fills summary for groups */}
+            {childFills.length > 0 && (
+                <div className="space-y-1.5">
+                    <span className="text-xs text-slate-500">{t('svgEditor.childFills')}</span>
+                    <div className="flex flex-wrap gap-1.5">
+                        {childFills.map(fill => (
+                            <button
+                                key={fill}
+                                onClick={() => onConvertToClass?.({ fill })}
+                                className="flex items-center gap-1 px-2 py-1 text-xs font-mono border border-slate-200 rounded hover:border-violet-300 hover:bg-violet-50 transition-colors"
+                                title={t('svgEditor.convertToClass')}
+                            >
+                                <span
+                                    className="w-3.5 h-3.5 rounded-sm border border-slate-300 shrink-0"
+                                    style={{ backgroundColor: fill }}
+                                />
+                                {fill}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {onConvertToClass && attrs.length > 0 && (
                 <button
                     onClick={() => onConvertToClass(attrs.reduce((acc, a) => ({ ...acc, [a.prop]: a.value }), {} as Record<string, string>))}
                     className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
@@ -571,7 +640,7 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
                                 title={t('svgEditor.defineNewClass')}
                             >
                                 <Plus size={10} aria-hidden="true" />
-                                Define
+                                {t('svgEditor.define')}
                             </button>
                             <button
                                 onClick={() => setIsPickerOpen(true)}

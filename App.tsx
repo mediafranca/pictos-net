@@ -422,25 +422,31 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   useEffect(() => {
     if (!openRowId || scrollToRowRef.current !== openRowId) return;
     scrollToRowRef.current = null;
-    // Delay to let the row DOM render (including expanded content)
-    requestAnimationFrame(() => {
+
+    // Scroll the new row into view, offset below the sticky toolbar.
+    // Double rAF + setTimeout fallback: React may need >1 frame to render
+    // the expanded row content after state change.
+    const doScroll = () => {
       const el = document.getElementById(`picto-row-${openRowId}`);
-      if (el) {
-        const headerHeight = document.getElementById('toolbar')?.offsetHeight ?? 80;
-        const top = el.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
-        window.scrollTo({ top, behavior: 'smooth' });
-      }
-    });
+      if (!el) return;
+      const headerHeight = document.getElementById('toolbar')?.offsetHeight ?? 80;
+      const top = el.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
+      window.scrollTo({ top, behavior: 'smooth' });
+    };
+
+    requestAnimationFrame(() => requestAnimationFrame(doScroll));
+    // Safety net: if rAF fires before layout settles, retry after paint
+    const timer = setTimeout(doScroll, 150);
+    return () => clearTimeout(timer);
   }, [openRowId]);
 
   // Auto-cascade: when a new row with real text is added, start the pipeline
   useEffect(() => {
     const targetId = autoCascadeRef.current;
     if (!targetId) return;
-    const idx = rows.findIndex(r => r.id === targetId);
-    if (idx === -1) return;
+    if (!rows.some(r => r.id === targetId)) return;
     autoCascadeRef.current = null;
-    processCascade(idx);
+    processCascade(targetId);
   }, [rows]);
 
   const addLog = (type: 'info' | 'error' | 'success', message: string) => {
@@ -710,15 +716,15 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   };
 
-  const regeneratePrompt = async (index: number): Promise<boolean> => {
-    const row = rows[index];
+  const regeneratePrompt = async (rowId: string): Promise<boolean> => {
+    const row = rows.find(r => r.id === rowId);
     if (!row || !row.NLU || !row.elements) {
       addLog('error', 'Se requiere NLU y elementos para regenerar el prompt');
       return false;
     }
 
-    stopFlags.current[row.id] = false;
-    updateRow(index, { visualStatus: 'processing' });
+    stopFlags.current[rowId] = false;
+    updateRowById(rowId, { visualStatus: 'processing' });
     const startTime = Date.now();
 
     try {
@@ -732,14 +738,14 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       addLog('info', `[PROMPT] Regenerando prompt espacial a partir de elementos modificados...`);
       const newPrompt = await Gemini.generateSpatialPrompt(nluObj as NLUData, ensureElementsArray(row.elements), config, addLog);
 
-      if (stopFlags.current[row.id]) {
+      if (stopFlags.current[rowId]) {
         addLog('info', t('messages.promptRegenerationStopped'));
-        updateRow(index, { visualStatus: 'completed' });
+        updateRowById(rowId, { visualStatus: 'completed' });
         return false;
       }
 
       const duration = (Date.now() - startTime) / 1000;
-      updateRow(index, {
+      updateRowById(rowId, {
         prompt: newPrompt,
         visualStatus: 'completed',
         visualDuration: duration,
@@ -750,12 +756,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
       addLog('error', `Error al regenerar prompt: ${msg}`);
-      updateRow(index, { visualStatus: 'completed' });
+      updateRowById(rowId, { visualStatus: 'completed' });
       return false;
     }
   };
 
-  const processStep = async (index: number, step: 'nlu' | 'visual' | 'bitmap'): Promise<boolean> => {
+  const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'bitmap'): Promise<boolean> => {
     // Pre-flight: garantizar sesión antes de tocar estado de UI.
     try {
       await ensureAuth();
@@ -763,14 +769,14 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       return false;
     }
 
-    const row = rows[index];
+    const row = rows.find(r => r.id === rowId);
     if (!row) return false;
 
-    stopFlags.current[row.id] = false;
+    stopFlags.current[rowId] = false;
     const statusKey = `${step}Status` as keyof RowData;
     const durationKey = `${step}Duration` as keyof RowData;
 
-    updateRow(index, { [statusKey]: 'processing' });
+    updateRowById(rowId, { [statusKey]: 'processing' });
     const startTime = Date.now();
 
     try {
@@ -790,14 +796,14 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         result = await Gemini.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
       }
 
-      if (stopFlags.current[row.id]) {
-        addLog('info', `🛑 Proceso detenido por usuario en paso ${step.toUpperCase()}`);
-        updateRow(index, { [statusKey]: 'idle' });
+      if (stopFlags.current[rowId]) {
+        addLog('info', `Proceso detenido por usuario en paso ${step.toUpperCase()}`);
+        updateRowById(rowId, { [statusKey]: 'idle' });
         return false;
       }
 
       const duration = (Date.now() - startTime) / 1000;
-      updateRow(index, {
+      updateRowById(rowId, {
         [statusKey]: 'completed',
         [durationKey]: duration,
         ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated' } : {}),
@@ -808,20 +814,20 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       if (step === 'bitmap') {
         requestAnimationFrame(() => {
-          const rowEl = document.getElementById(`picto-row-${row.id}`);
+          const rowEl = document.getElementById(`picto-row-${rowId}`);
           const bitmapEl = rowEl?.querySelector('#bitmap-preview');
           if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
       }
       return true;
     } catch (err: any) {
-      updateRow(index, { [statusKey]: 'error' });
+      updateRowById(rowId, { [statusKey]: 'error' });
       addLog('error', `${step.toUpperCase()} Error para "${row.UTTERANCE}": ${err.message}`);
       return false;
     }
   };
 
-  const processCascade = async (index: number) => {
+  const processCascade = async (rowId: string) => {
     // Pre-flight: garantizar sesión antes de tocar estado de UI.
     // Si el usuario cancela el login, salir silenciosamente.
     try {
@@ -830,7 +836,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       return;
     }
 
-    const row = rows[index];
+    const row = rows.find(r => r.id === rowId);
     if (!row) return;
 
     stopFlags.current[row.id] = false;
@@ -842,12 +848,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     try {
       // --- NLU Step ---
       addLog('info', t('messages.cascadeStep', { current: 1, total: 3, step: stepNames.nlu }));
-      updateRow(index, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
+      updateRowById(rowId, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
       const nluStartTime = Date.now();
       const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.nlu }));
-        updateRow(index, { nluStatus: 'idle', status: 'idle' });
+        updateRowById(rowId, { nluStatus: 'idle', status: 'idle' });
         return;
       }
       finalUpdates.NLU = nluResult;
@@ -857,12 +863,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       // --- Visual Step ---
       addLog('info', t('messages.cascadeStep', { current: 2, total: 3, step: stepNames.visual }));
-      updateRow(index, { nluStatus: 'completed', nluDuration: finalUpdates.nluDuration, NLU: nluResult, visualStatus: 'processing' });
+      updateRowById(rowId, { nluStatus: 'completed', nluDuration: finalUpdates.nluDuration, NLU: nluResult, visualStatus: 'processing' });
       const visualStartTime = Date.now();
       const visualResult = await Gemini.generateVisualBlueprint(nluResult, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.visual }));
-        updateRow(index, { visualStatus: 'idle' });
+        updateRowById(rowId, { visualStatus: 'idle' });
         return;
       }
       finalUpdates.elements = visualResult.elements;
@@ -873,12 +879,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       // --- Bitmap Step (NanoBanana) ---
       addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.bitmap }));
-      updateRow(index, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
+      updateRowById(rowId, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
       const bitmapStartTime = Date.now();
       const bitmapResult = await Gemini.generateImage(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.bitmap }));
-        updateRow(index, { bitmapStatus: 'idle' });
+        updateRowById(rowId, { bitmapStatus: 'idle' });
         return;
       }
       finalUpdates.bitmap = bitmapResult;
@@ -887,7 +893,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       addLog('success', t('messages.cascadeStepComplete', { current: 3, total: 3, duration: finalUpdates.bitmapDuration.toFixed(1) }));
 
       finalUpdates.status = 'completed';
-      updateRow(index, finalUpdates);
+      updateRowById(rowId, finalUpdates);
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
       addLog('success', t('messages.cascadeComplete', { duration: totalTime.toFixed(1), utterance: row.UTTERANCE }));
@@ -903,7 +909,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (finalUpdates.nluStatus === 'completed' && finalUpdates.visualStatus !== 'completed') stepFailed = 'visual';
       else if (finalUpdates.visualStatus === 'completed') stepFailed = 'bitmap';
 
-      updateRow(index, { [`${stepFailed}Status`]: 'error', status: 'error' });
+      updateRowById(rowId, { [`${stepFailed}Status`]: 'error', status: 'error' });
       addLog('error', t('messages.cascadeFailed', { step: stepNames[stepFailed], error: err.message }));
     }
   };
@@ -1467,17 +1473,16 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         ) : (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
-              const globalIndex = rows.findIndex(r => r.id === row.id);
               return (
                 <RowComponent
                   key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { setOpenRowId(v ? row.id : null); if (v) setShowConfig(false); }}
-                  onUpdate={u => updateRowById(row.id, u)} onProcess={s => processStep(globalIndex, s)}
-                  onRegeneratePrompt={() => regeneratePrompt(globalIndex)}
+                  onUpdate={u => updateRowById(row.id, u)} onProcess={s => processStep(row.id, s)}
+                  onRegeneratePrompt={() => regeneratePrompt(row.id)}
                   onStop={() => {
                     stopFlags.current[row.id] = true;
                     addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
                   }}
-                  onCascade={() => processCascade(globalIndex)}
+                  onCascade={() => processCascade(row.id)}
                   onDelete={() => {
                     // Delete bitmap and SVG from IndexedDB
                     IndexedDBService.deleteBitmap(row.id).catch(err => {
@@ -1571,7 +1576,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           row={focusedRowData}
           onClose={() => setFocusMode(null)}
           onUpdate={updates => updateRowById(focusMode.rowId, updates)}
-          onRegeneratePrompt={() => regeneratePrompt(rows.findIndex(r => r.id === focusMode.rowId))}
+          onRegeneratePrompt={() => regeneratePrompt(focusMode.rowId)}
           config={config}
           onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
@@ -1620,6 +1625,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onSave={handleSVGEditorSave}
           styleDefs={config.svgStyleDefs ?? []}
           svgSource={svgEditorState.svgSource}
+          config={config}
+          onUpdateConfig={setConfig}
         />
       )}
 
@@ -1838,7 +1845,7 @@ const RowComponent: React.FC<{
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   return (
-    <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
+    <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 scroll-mt-24 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
       <div id={`row-header-${row.id}`} className="flex items-stretch pr-0 group min-h-[5rem]">
         <div className="pl-6 py-6 pr-6 flex-1 flex items-center gap-6">
           <textarea

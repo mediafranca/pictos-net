@@ -44,6 +44,10 @@ export const SVG_STYLESHEET = `
   stroke-width: 3pt;
   vector-effect: non-scaling-stroke;
 }
+.w, .white {
+  fill: #ffffff;
+  stroke: none;
+}
 
 /* ── Stroke utilities ────────────────────────────────────────────────── */
 .st-dark {

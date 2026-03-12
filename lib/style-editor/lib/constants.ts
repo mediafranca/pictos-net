@@ -66,6 +66,15 @@ export const INITIAL_STYLES: StyleDefinition[] = [
   },
   {
     id: generateId(),
+    selectors: ['.w', '.white'],
+    description: 'White fill, no stroke',
+    rules: [
+      { id: generateId(), property: 'fill', value: '#ffffff' },
+      { id: generateId(), property: 'stroke', value: 'none' },
+    ],
+  },
+  {
+    id: generateId(),
     selectors: ['.glow'],
     description: 'Effect: Blue Glow',
     rules: [

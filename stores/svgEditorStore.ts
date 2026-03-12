@@ -18,6 +18,7 @@ import {
     type OverrideMap,
 } from '../utils/styleUtils';
 import { flattenGroupTransforms } from '../utils/svgNormalizer';
+import { parsePathToNodes, serializeNodesToPath } from '../utils/pathParser';
 
 export interface SVGElement {
     id: string;
@@ -85,6 +86,9 @@ export interface EditorState {
     selectedNodeIndex: number | null;
     pathEditTool: 'select' | 'add' | 'delete';
 
+    // Display modes
+    outlineMode: boolean;
+
     // Viewport state (excluded from undo/redo)
     viewport: Viewport;
 
@@ -134,6 +138,9 @@ export interface EditorState {
     getResolvedClassValues: (elementId: string, className: string) => Record<string, string>;
     cleanupInlineAttrs: (elementId: string) => void;
 
+    // Display mode actions
+    toggleOutlineMode: () => void;
+
     // Viewport actions (not in undo/redo)
     setViewport: (partial: Partial<Viewport>) => void;
     zoomIn: () => void;
@@ -153,6 +160,7 @@ export interface EditorState {
     convertShapeToPath: (elementId: string) => void;
     setSelectedNodeIndex: (index: number | null) => void;
     setPathEditTool: (tool: 'select' | 'add' | 'delete') => void;
+    toggleNodeSmooth: () => void;
 
     undo: () => void;
     redo: () => void;
@@ -184,7 +192,7 @@ const assignMissingElementIds = (svg: string): string => {
             changed = true;
         }
     });
-    return changed ? new XMLSerializer().serializeToString(doc) : svg;
+    return changed ? new XMLSerializer().serializeToString(svgEl) : svg;
 };
 
 /**
@@ -337,6 +345,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         pathEditMode: null,
         selectedNodeIndex: null,
         pathEditTool: 'select',
+        outlineMode: false,
         viewport: { ...DEFAULT_VIEWPORT },
         history: [],
         historyIndex: -1,
@@ -789,7 +798,8 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             if (!svgDocument) return;
 
             const current = getElementClassesFromSvg(svgDocument, elementId);
-            let svg = updateElementClassesInSvg(svgDocument, elementId, current.filter(c => c !== className));
+            const remaining = current.filter(c => c !== className);
+            let svg = updateElementClassesInSvg(svgDocument, elementId, remaining);
 
             // Remove any local override rule for this (elementId, className)
             svg = removeOverrideRule(svg, elementId, className);
@@ -883,6 +893,12 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             ['fill', 'stroke', 'stroke-width', 'opacity', 'style'].forEach(attr => el.removeAttribute(attr));
             const svg = new XMLSerializer().serializeToString(doc);
             commitSvg(svg);
+        },
+
+        // ── Display mode actions ──────────────────────────────────────────────
+
+        toggleOutlineMode: () => {
+            set((state) => ({ outlineMode: !state.outlineMode }));
         },
 
         // ── Viewport actions (not in undo/redo) ─────────────────────────────
@@ -1083,6 +1099,77 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             set({ pathEditTool: tool });
         },
 
+        toggleNodeSmooth: () => {
+            const { svgDocument, svgSource, pathEditMode, selectedNodeIndex, styleDefinitions, keyframes } = get();
+            if (!svgDocument || !pathEditMode || selectedNodeIndex == null) return;
+
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const el = doc.getElementById(pathEditMode.elementId);
+            if (!el || el.tagName.toLowerCase() !== 'path') return;
+
+            const d = el.getAttribute('d');
+            if (!d) return;
+
+            const nodes = parsePathToNodes(d);
+            const node = nodes[selectedNodeIndex];
+            if (!node || node.command === 'M' || node.command === 'Z') return;
+
+            const hasHandles = node.cp1 || node.cp2;
+
+            if (!hasHandles || node.kind === 'anchor-corner') {
+                // Corner → Smooth: convert to C with 1/3-offset control points
+                const prev = selectedNodeIndex > 0 ? nodes[selectedNodeIndex - 1] : null;
+                const next = selectedNodeIndex < nodes.length - 1 ? nodes[selectedNodeIndex + 1] : null;
+
+                // Convert incoming segment (prev → this) to cubic
+                if (prev) {
+                    node.command = 'C';
+                    node.cp1 = {
+                        x: prev.anchor.x + (node.anchor.x - prev.anchor.x) / 3,
+                        y: prev.anchor.y + (node.anchor.y - prev.anchor.y) / 3,
+                    };
+                    node.cp2 = {
+                        x: prev.anchor.x + (node.anchor.x - prev.anchor.x) * 2 / 3,
+                        y: prev.anchor.y + (node.anchor.y - prev.anchor.y) * 2 / 3,
+                    };
+                }
+
+                // Convert outgoing segment (this → next) to cubic, ensure smoothness
+                if (next && (next.command === 'L' || next.command === 'M')) {
+                    next.command = 'C';
+                    // "out" handle: reflect in-handle through this anchor for collinearity
+                    if (node.cp2) {
+                        next.cp1 = {
+                            x: 2 * node.anchor.x - node.cp2.x,
+                            y: 2 * node.anchor.y - node.cp2.y,
+                        };
+                    } else {
+                        next.cp1 = {
+                            x: node.anchor.x + (next.anchor.x - node.anchor.x) / 3,
+                            y: node.anchor.y + (next.anchor.y - node.anchor.y) / 3,
+                        };
+                    }
+                    next.cp2 = {
+                        x: node.anchor.x + (next.anchor.x - node.anchor.x) * 2 / 3,
+                        y: node.anchor.y + (next.anchor.y - node.anchor.y) * 2 / 3,
+                    };
+                }
+
+                node.kind = 'anchor-smooth';
+            } else {
+                // Smooth/Asymm → Corner: remove handles, revert to L
+                node.command = 'L';
+                node.cp1 = undefined;
+                node.cp2 = undefined;
+                node.kind = 'anchor-corner';
+            }
+
+            el.setAttribute('d', serializeNodesToPath(nodes));
+            const svg = new XMLSerializer().serializeToString(doc);
+            const nextSvg = svgSource === 'raw' ? svg : applyUsedStylesToSvg(svg, styleDefinitions, keyframes);
+            commitSvg(nextSvg);
+        },
+
         undo: () => {
             const { history, historyIndex } = get();
             if (historyIndex > 0) {
@@ -1163,6 +1250,7 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
                 pathEditMode: null,
                 selectedNodeIndex: null,
                 pathEditTool: 'select',
+                outlineMode: false,
                 viewport: { ...DEFAULT_VIEWPORT },
                 history: [],
                 historyIndex: -1,

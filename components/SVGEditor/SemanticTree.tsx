@@ -159,7 +159,7 @@ function TreeNode({
                     <button
                         onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
                         className="p-0.5 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-200 shrink-0"
-                        aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                        aria-label={isExpanded ? t('svgEditor.collapse') : t('svgEditor.expand')}
                     >
                         {isExpanded
                             ? <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />

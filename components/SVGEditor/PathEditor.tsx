@@ -246,75 +246,23 @@ export default function PathEditor({ svgElement, elementId }: PathEditorProps) {
                 const node = { ...updated[dragState.nodeIndex] };
 
                 if (dragState.type === 'anchor') {
-                    // Move anchor + handles solidarily
+                    // Move only the anchor point
                     node.anchor = {
                         x: dragState.startPoint.x + dx,
                         y: dragState.startPoint.y + dy,
                     };
-                    if (dragState.startCp1) {
-                        node.cp1 = {
-                            x: dragState.startCp1.x + dx,
-                            y: dragState.startCp1.y + dy,
-                        };
-                    }
-                    if (dragState.startCp2) {
-                        node.cp2 = {
-                            x: dragState.startCp2.x + dx,
-                            y: dragState.startCp2.y + dy,
-                        };
-                    }
                 } else if (dragState.type === 'cp1' && node.cp1) {
+                    // Move only this control point
                     node.cp1 = {
                         x: dragState.startPoint.x + dx,
                         y: dragState.startPoint.y + dy,
                     };
-                    // Smooth: reflect opposite handle
-                    if (node.kind === 'anchor-smooth' && node.cp2) {
-                        const d1 = Math.sqrt(
-                            (node.cp1.x - node.anchor.x) ** 2 +
-                            (node.cp1.y - node.anchor.y) ** 2
-                        );
-                        const origD2 = dragState.startCp2
-                            ? Math.sqrt(
-                                (dragState.startCp2.x - dragState.startPoint.x) ** 2 +
-                                (dragState.startCp2.y - dragState.startPoint.y) ** 2
-                              )
-                            : d1;
-                        if (d1 > 1e-6) {
-                            const ux = (node.cp1.x - node.anchor.x) / d1;
-                            const uy = (node.cp1.y - node.anchor.y) / d1;
-                            node.cp2 = {
-                                x: node.anchor.x - ux * origD2,
-                                y: node.anchor.y - uy * origD2,
-                            };
-                        }
-                    }
                 } else if (dragState.type === 'cp2' && node.cp2) {
+                    // Move only this control point
                     node.cp2 = {
                         x: dragState.startPoint.x + dx,
                         y: dragState.startPoint.y + dy,
                     };
-                    // Smooth: reflect opposite handle
-                    if (node.kind === 'anchor-smooth' && node.cp1) {
-                        const d2 = Math.sqrt(
-                            (node.cp2.x - node.anchor.x) ** 2 +
-                            (node.cp2.y - node.anchor.y) ** 2
-                        );
-                        const origD1 = dragState.startCp1
-                            ? Math.sqrt(
-                                (dragState.startCp1.x - dragState.startPoint.x) ** 2 +
-                                (dragState.startCp1.y - dragState.startPoint.y) ** 2
-                              )
-                            : d2;
-                        if (d2 > 1e-6) {
-                            const ux = (node.cp2.x - node.anchor.x) / d2;
-                            const uy = (node.cp2.y - node.anchor.y) / d2;
-                            node.cp1 = {
-                                x: node.anchor.x - ux * origD1,
-                                y: node.anchor.y - uy * origD1,
-                            };
-                        }
-                    }
                 }
 
                 updated[dragState.nodeIndex] = node;
@@ -478,19 +426,59 @@ export default function PathEditor({ svgElement, elementId }: PathEditorProps) {
             const prev = nodes[i - 1];
             const curr = nodes[i];
             if (curr.kind === 'anchor-close') continue;
-            const p1 = svgToOverlay(prev.anchor);
-            const p2 = svgToOverlay(curr.anchor);
-            segments.push(
-                <line
-                    key={`seg-${i}`}
-                    x1={p1.x} y1={p1.y}
-                    x2={p2.x} y2={p2.y}
-                    stroke="transparent"
-                    strokeWidth={segHitWidth}
-                    style={{ cursor: 'copy' }}
-                    onClick={(e) => handleSegmentClick(e, i)}
-                />
-            );
+
+            // For bezier curves, render the actual curve path as hit target
+            // (straight <line> would miss the visible curve entirely).
+            // segmentIndex = i-1 because insertNodeAtSegment expects the START node index.
+            if (curr.command === 'C' && curr.cp1 && curr.cp2) {
+                const p0 = svgToOverlay(prev.anchor);
+                const c1 = svgToOverlay(curr.cp1);
+                const c2 = svgToOverlay(curr.cp2);
+                const p3 = svgToOverlay(curr.anchor);
+                const d = `M${p0.x},${p0.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p3.x},${p3.y}`;
+                segments.push(
+                    <path
+                        key={`seg-${i}`}
+                        d={d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={segHitWidth}
+                        style={{ cursor: 'copy' }}
+                        onClick={(e) => handleSegmentClick(e, i - 1)}
+                    />
+                );
+            } else if (curr.command === 'Q' && curr.cp1) {
+                const p0 = svgToOverlay(prev.anchor);
+                const c1 = svgToOverlay(curr.cp1);
+                const p2 = svgToOverlay(curr.anchor);
+                const d = `M${p0.x},${p0.y} Q${c1.x},${c1.y} ${p2.x},${p2.y}`;
+                segments.push(
+                    <path
+                        key={`seg-${i}`}
+                        d={d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={segHitWidth}
+                        style={{ cursor: 'copy' }}
+                        onClick={(e) => handleSegmentClick(e, i - 1)}
+                    />
+                );
+            } else {
+                // Straight segment (L, M)
+                const p1 = svgToOverlay(prev.anchor);
+                const p2 = svgToOverlay(curr.anchor);
+                segments.push(
+                    <line
+                        key={`seg-${i}`}
+                        x1={p1.x} y1={p1.y}
+                        x2={p2.x} y2={p2.y}
+                        stroke="transparent"
+                        strokeWidth={segHitWidth}
+                        style={{ cursor: 'copy' }}
+                        onClick={(e) => handleSegmentClick(e, i - 1)}
+                    />
+                );
+            }
         }
         return segments;
     };
@@ -574,19 +562,26 @@ export default function PathEditor({ svgElement, elementId }: PathEditorProps) {
         );
     };
 
-    const renderHandle = (node: ParsedNode, type: 'cp1' | 'cp2') => {
+    const renderHandle = (node: ParsedNode, type: 'cp1' | 'cp2', allNodes: ParsedNode[]) => {
         const cp = type === 'cp1' ? node.cp1 : node.cp2;
         if (!cp) return null;
         if (node.command === 'A') return null; // Arc params are not draggable handles
 
         const o = svgToOverlay(cp);
-        const anchorO = svgToOverlay(node.anchor);
+        // cp1 is the "out" handle from the PREVIOUS anchor → line connects to prev anchor
+        // cp2 is the "in" handle to THIS anchor → line connects to this anchor
+        let lineTarget: Point;
+        if (type === 'cp1' && node.index > 0) {
+            lineTarget = svgToOverlay(allNodes[node.index - 1].anchor);
+        } else {
+            lineTarget = svgToOverlay(node.anchor);
+        }
 
         return (
             <React.Fragment key={`handle-${node.index}-${type}`}>
                 {/* Dashed line from anchor to handle */}
                 <line
-                    x1={anchorO.x} y1={anchorO.y}
+                    x1={lineTarget.x} y1={lineTarget.y}
                     x2={o.x} y2={o.y}
                     stroke={HANDLE_LINE_COLOR}
                     strokeWidth={strokeWThin}
@@ -627,8 +622,8 @@ export default function PathEditor({ svgElement, elementId }: PathEditorProps) {
             {/* Render handle lines and circles first (below anchors) */}
             {nodes.map(node => (
                 <React.Fragment key={`handles-${node.index}`}>
-                    {renderHandle(node, 'cp1')}
-                    {renderHandle(node, 'cp2')}
+                    {renderHandle(node, 'cp1', nodes)}
+                    {renderHandle(node, 'cp2', nodes)}
                 </React.Fragment>
             ))}
             {/* Render anchors on top */}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, Undo, Redo, Download, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { X, Undo, Redo, Download, ZoomIn, ZoomOut, Maximize2, Palette, Scan } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
@@ -8,6 +8,8 @@ import SVGCanvas from './SVGCanvas';
 import { StylePanel } from './StylePanel';
 import { SelectionToolbar } from './SelectionToolbar';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
+import type { GlobalConfig } from '../../types';
+import { StyleEditor } from '../PictoForge/StyleEditor';
 import { convertInlineAttrsToCssRules } from '../../utils/styleUtils';
 import { normalizeSVGTransforms } from '../../utils/svgNormalizer';
 
@@ -68,7 +70,8 @@ function removeBackgroundRect(svgString: string): string {
 
     if (elArea >= vbArea * 0.85) {
         firstVisual.remove();
-        return new XMLSerializer().serializeToString(doc);
+        // Serialize the SVG element, not the document, to avoid XML declaration issues
+        return new XMLSerializer().serializeToString(svgEl);
     }
 
     return svgString;
@@ -121,6 +124,8 @@ interface SVGEditorModalProps {
     onSave: (svg: string) => void;
     styleDefs?: StyleDefinition[];
     svgSource?: 'raw' | 'structured' | null;
+    config?: GlobalConfig;
+    onUpdateConfig?: (config: GlobalConfig) => void;
 }
 
 export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
@@ -131,6 +136,8 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     onSave,
     styleDefs = [],
     svgSource = null,
+    config,
+    onUpdateConfig,
 }) => {
     const { t } = useTranslation();
     const { dialogProps } = useDialogA11y({ isOpen, onClose, label: t('svg.editor') });
@@ -146,11 +153,14 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     const hasUndo = historyIndex > 0;
     const hasRedo = historyIndex < historyLength - 1;
     const reset = useSVGEditorStore(state => state.reset);
+    const [showStyleEditor, setShowStyleEditor] = useState(false);
     const viewport = useSVGEditorStore(state => state.viewport);
     const zoomIn = useSVGEditorStore(state => state.zoomIn);
     const zoomOut = useSVGEditorStore(state => state.zoomOut);
     const zoomToFit = useSVGEditorStore(state => state.zoomToFit);
     const styleDefinitions = useSVGEditorStore(state => state.styleDefinitions);
+    const outlineMode = useSVGEditorStore(state => state.outlineMode);
+    const toggleOutlineMode = useSVGEditorStore(state => state.toggleOutlineMode);
 
     // Track which toolbar item is active for roving tabindex
     const toolbarRef = useRef<HTMLDivElement>(null);
@@ -277,7 +287,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                 <div
                     ref={toolbarRef}
                     role="toolbar"
-                    aria-label="Editor tools"
+                    aria-label={t('svgEditor.editorToolbar')}
                     className="flex items-center gap-2"
                     onKeyDown={handleToolbarKeyDown}
                 >
@@ -312,8 +322,8 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                         <button
                             onClick={zoomOut}
                             className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors rounded-l-md"
-                            title="Zoom out"
-                            aria-label="Zoom out"
+                            title={t('svgEditor.zoomOut')}
+                            aria-label={t('svgEditor.zoomOut')}
                             data-toolbar-item
                             tabIndex={-1}
                         >
@@ -325,8 +335,8 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                         <button
                             onClick={zoomIn}
                             className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-                            title="Zoom in"
-                            aria-label="Zoom in"
+                            title={t('svgEditor.zoomIn')}
+                            aria-label={t('svgEditor.zoomIn')}
                             data-toolbar-item
                             tabIndex={-1}
                         >
@@ -339,14 +349,45 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                                     ? 'text-violet-400 bg-violet-500/20 hover:bg-violet-500/30'
                                     : 'text-slate-400 hover:text-white hover:bg-slate-700'
                             }`}
-                            title="Zoom to fit"
-                            aria-label="Zoom to fit"
+                            title={t('svgEditor.zoomToFit')}
+                            aria-label={t('svgEditor.zoomToFit')}
                             data-toolbar-item
                             tabIndex={-1}
                         >
                             <Maximize2 size={16} aria-hidden="true" />
                         </button>
                     </div>
+
+                    {/* Outline mode toggle */}
+                    <button
+                        onClick={toggleOutlineMode}
+                        className={`p-2 transition-colors rounded-md border border-slate-600 bg-slate-700/50 ${
+                            outlineMode
+                                ? 'text-amber-400 bg-amber-500/20 hover:bg-amber-500/30'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                        }`}
+                        title={t('svgEditor.outlineMode')}
+                        aria-label={t('svgEditor.outlineMode')}
+                        aria-pressed={outlineMode}
+                        data-toolbar-item
+                        tabIndex={-1}
+                    >
+                        <Scan size={16} aria-hidden="true" />
+                    </button>
+
+                    {/* Style Editor */}
+                    {config && onUpdateConfig && (
+                        <button
+                            onClick={() => setShowStyleEditor(true)}
+                            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors rounded-md border border-slate-600 bg-slate-700/50"
+                            title={t('styleEditor.title')}
+                            aria-label={t('styleEditor.title')}
+                            data-toolbar-item
+                            tabIndex={-1}
+                        >
+                            <Palette size={16} aria-hidden="true" />
+                        </button>
+                    )}
 
                     {/* Export */}
                     <button
@@ -370,6 +411,21 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                     </button>
                 </div>
             </header>
+
+            {/* Style Editor overlay (z-[60] sits above svg-editor z-50) */}
+            {showStyleEditor && config && onUpdateConfig && (
+                <StyleEditor
+                    config={config}
+                    onUpdateConfig={(newConfig) => {
+                        onUpdateConfig(newConfig);
+                        // Refresh styles in the SVG editor store
+                        if (newConfig.svgStyleDefs) {
+                            setStyles(newConfig.svgStyleDefs);
+                        }
+                    }}
+                    onClose={() => setShowStyleEditor(false)}
+                />
+            )}
         </div>
     );
 };
