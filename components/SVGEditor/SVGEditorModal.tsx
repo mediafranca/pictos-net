@@ -9,6 +9,7 @@ import { StylePanel } from './StylePanel';
 import { SelectionToolbar } from './SelectionToolbar';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { convertInlineAttrsToCssRules } from '../../utils/styleUtils';
+import { normalizeSVGTransforms } from '../../utils/svgNormalizer';
 
 /**
  * Detects and removes a background rectangle or path that covers >=85% of the
@@ -193,9 +194,13 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     }, [svgDocument]);
 
     const handleSave = () => {
-        if (currentSvg) {
-            onSave(currentSvg);
-        }
+        if (!currentSvg) return;
+        // Bake group transforms destructively into path coordinates.
+        // This ensures edits survive when ESTRUCTURAR redistributes paths into new groups.
+        // Skip cheaply if there are no transforms to process.
+        const needsBake = currentSvg.includes('transform=');
+        const svgToSave = needsBake ? normalizeSVGTransforms(currentSvg) : currentSvg;
+        onSave(svgToSave);
     };
 
     const handleExport = () => {

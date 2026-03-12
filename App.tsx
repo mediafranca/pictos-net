@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
-  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -30,7 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
-import { AuthProvider, logout, onLogin, ensureAuth } from './components/AuthGate';
+import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -178,6 +178,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [showLibraryMenu, setShowLibraryMenu] = useState(false);
   const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, left: 0 });
   const libraryBtnRef = useRef<HTMLDivElement>(null);
+  const [showLangMenu, setShowLangMenu] = useState(false);
+  const [langMenuPos, setLangMenuPos] = useState({ top: 0, left: 0 });
+  const langBtnRef = useRef<HTMLDivElement>(null);
   const [searchValue, setSearchValue] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
@@ -578,13 +581,39 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const handleLibraryMenuToggle = () => {
     if (!showLibraryMenu && libraryBtnRef.current) {
       const rect = libraryBtnRef.current.getBoundingClientRect();
-      const DROPDOWN_WIDTH = 224; // w-56 = 14rem = 224px
+      const DROPDOWN_WIDTH = 224;
       setLibraryMenuPos({
         top: rect.bottom + 4,
         left: Math.max(8, rect.right - DROPDOWN_WIDTH),
       });
     }
     setShowLibraryMenu(!showLibraryMenu);
+  };
+
+  const handleLangMenuToggle = () => {
+    if (!showLangMenu && langBtnRef.current) {
+      const rect = langBtnRef.current.getBoundingClientRect();
+      const DROPDOWN_WIDTH = 140;
+      setLangMenuPos({
+        top: rect.bottom + 4,
+        left: Math.max(8, rect.right - DROPDOWN_WIDTH),
+      });
+    }
+    setShowLangMenu(!showLangMenu);
+  };
+
+  const handleLangSelect = (newLang: Locale) => {
+    setLang(newLang);
+    setConfig(prev => {
+      const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(prev.visualStylePrompt);
+      return {
+        ...prev,
+        lang: newLang,
+        uiLang: newLang,
+        ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
+      };
+    });
+    setShowLangMenu(false);
   };
 
   const clearAll = () => {
@@ -888,11 +917,23 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     return count;
   };
 
-  const openSVGEditor = (rowId: string) => {
+  const openSVGEditor = (rowId: string, preferSource?: 'raw' | 'structured') => {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
-    const svgToEdit = row.structuredSvg || row.rawSvg;
-    const source = row.structuredSvg ? 'structured' : 'raw';
+
+    let svgToEdit: string | undefined;
+    let source: 'raw' | 'structured';
+
+    if (preferSource === 'raw' && row.rawSvg) {
+      svgToEdit = row.rawSvg;
+      source = 'raw';
+    } else if (preferSource === 'structured' && row.structuredSvg) {
+      svgToEdit = row.structuredSvg;
+      source = 'structured';
+    } else {
+      svgToEdit = row.structuredSvg || row.rawSvg;
+      source = row.structuredSvg ? 'structured' : 'raw';
+    }
 
     if (!svgToEdit) {
       addLog('error', t('messages.noSvgToEdit'));
@@ -1010,27 +1051,25 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
 
           {/* Language Switcher */}
-          <select
-            value={lang}
-            onChange={(e) => {
-              const newLang = e.target.value as Locale;
-              setLang(newLang);
-              setConfig(prev => {
-                const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(prev.visualStylePrompt);
-                return {
-                  ...prev,
-                  lang: newLang,
-                  uiLang: newLang,
-                  ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
-                };
-              });
-            }}
-            className="p-2.5 text-xs border border-slate-200 bg-white hover:border-violet-200 rounded-md transition-all text-slate-600 font-medium cursor-pointer shadow-sm"
-            title="UI Language"
-          >
-            <option value="en-GB">English</option>
-            <option value="es-419">Español</option>
-          </select>
+          <div id="lang-btn-group" ref={langBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
+            <button
+              onClick={handleLangMenuToggle}
+              className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-100 flex items-center gap-2"
+              title="UI Language"
+            >
+              <Globe size={18} />
+              <span className="text-xs font-medium text-slate-500 hidden md:inline">
+                {lang === 'es-419' ? 'Español' : 'English'}
+              </span>
+            </button>
+            <button
+              onClick={handleLangMenuToggle}
+              className={`p-1.5 hover:bg-slate-50 text-slate-500 border-l border-transparent hover:text-violet-950 transition-colors ${showLangMenu ? 'bg-slate-50 text-violet-950' : ''}`}
+              aria-label="Cambiar idioma"
+            >
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </div>
 
           <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
@@ -1052,19 +1091,30 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
           <div className="w-px h-8 bg-slate-200 mx-2"></div>
 
-          <button id="settings-btn" onClick={() => setShowConfig(!showConfig)} className={`p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all ${showConfig ? 'bg-slate-100 text-violet-950' : ''}`} title={t('header.settingsTooltip')} aria-label={t('header.settingsTooltip')}><Settings size={18} aria-hidden="true" /></button>
           <button id="console-btn" onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 rounded-md transition-all" title={t('header.consoleTooltip')} aria-label={t('header.consoleTooltip')}><Terminal size={18} aria-hidden="true" /></button>
 
-          {!(import.meta as any).env?.DEV && authUser && (
+          {!(import.meta as any).env?.DEV && (
             <>
               <div className="w-px h-8 bg-slate-200 mx-1"></div>
-              <button
-                onClick={() => logout()}
-                className="p-2.5 hover:bg-slate-50 text-slate-400 hover:text-rose-500 border border-transparent hover:border-slate-200 rounded-md transition-all"
-                title={authUser.email || 'Logout'}
-              >
-                <LogOut size={16} aria-hidden="true" />
-              </button>
+              {authUser ? (
+                <button
+                  onClick={() => logout()}
+                  className="p-2.5 hover:bg-slate-50 text-slate-400 hover:text-rose-500 border border-transparent hover:border-slate-200 rounded-md transition-all"
+                  title={`${t('header.logout')} (${authUser.email})`}
+                  aria-label={t('header.logout')}
+                >
+                  <LogOut size={16} aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => requestLogin()}
+                  className="p-2.5 hover:bg-slate-50 text-slate-400 hover:text-emerald-600 border border-transparent hover:border-slate-200 rounded-md transition-all"
+                  title={t('header.login')}
+                  aria-label={t('header.login')}
+                >
+                  <LogIn size={16} aria-hidden="true" />
+                </button>
+              )}
             </>
           )}
         </nav>
@@ -1447,7 +1497,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   onLog={addLog}
                   config={config}
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
-                  onOpenEditor={() => openSVGEditor(row.id)}
+                  onOpenEditor={(source) => openSVGEditor(row.id, source)}
                   onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                 />
               );
@@ -1525,7 +1575,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           config={config}
           onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
-          onOpenEditor={() => openSVGEditor(focusMode!.rowId)}
+          onOpenEditor={(source) => openSVGEditor(focusMode!.rowId, source)}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
         />
@@ -1617,6 +1667,29 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         </div>
       )}
 
+      {/* Language Dropdown Portal */}
+      {showLangMenu && ReactDOM.createPortal(
+        <>
+          <div className="fixed inset-0 z-[55]" onClick={() => setShowLangMenu(false)} />
+          <div
+            id="lang-dropdown"
+            className="fixed w-36 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
+            style={{ top: langMenuPos.top, left: langMenuPos.left }}
+          >
+            {([['es-419', 'Español'], ['en-GB', 'English']] as [Locale, string][]).map(([code, label]) => (
+              <button
+                key={code}
+                onClick={() => handleLangSelect(code)}
+                className={`w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors ${lang === code ? 'font-bold text-violet-950 bg-violet-50' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+
       {/* Library Dropdown Portal */}
       {showLibraryMenu && ReactDOM.createPortal(
         <>
@@ -1629,6 +1702,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             className="fixed w-56 bg-white border border-slate-200 shadow-xl z-[56] rounded-sm animate-in fade-in slide-in-from-top-2"
             style={{ top: libraryMenuPos.top, left: libraryMenuPos.left }}
           >
+            <button
+              onClick={() => { setShowConfig(!showConfig); setShowLibraryMenu(false); }}
+              className={`w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors border-b border-slate-100 ${showConfig ? 'text-violet-950 bg-slate-50' : ''}`}
+            >
+              <Settings size={14} className="text-slate-500" /> {t('header.configureLibrary')}
+            </button>
             <div className="px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500 tracking-wider tabular-nums">
               {rows.length} {rows.length === 1 ? t('actions.element') : t('actions.elements')}
             </div>
@@ -1748,7 +1827,7 @@ const RowComponent: React.FC<{
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
-  onOpenEditor: () => void;
+  onOpenEditor: (source?: 'raw' | 'structured') => void;
   onOpenVectorizer: () => void;
 }> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
   const { t } = useTranslation();
@@ -2531,7 +2610,7 @@ const FocusViewModal: React.FC<{
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
-  onOpenEditor?: () => void;
+  onOpenEditor?: (source?: 'raw' | 'structured') => void;
   onOpenVectorizer?: () => void;
   onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
 }> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
 import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser, Trash2 } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
@@ -9,6 +9,10 @@ import { GlobalConfig } from '../types';
 
 import { generateStylesheet } from '../services/svgStructureService';
 import { injectSvgA11y } from '../utils/svgAccessibility';
+
+// Track active structuring processes across mount/unmount cycles.
+// Key = row ID, value = start timestamp. Survives component unmount.
+const activeStructuring = new Map<string, number>();
 
 // Helper function to sanitize filename for downloads
 const sanitizeFilename = (text: string, maxLength: number = 30): string => {
@@ -27,7 +31,7 @@ interface SVGGeneratorProps {
     config: GlobalConfig;
     onLog: (type: 'info' | 'error' | 'success', message: string) => void;
     onUpdate: (updates: Partial<RowData>) => void;
-    onOpenEditor?: () => void;
+    onOpenEditor?: (source?: 'raw' | 'structured') => void;
     onOpenVectorizer?: () => void;
 }
 
@@ -42,6 +46,8 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [subStatus, setSubStatus] = useState<string>('');
     const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
     const [confirmingDelete, setConfirmingDelete] = useState<'raw' | 'structured' | null>(null);
+    const [structureProgress, setStructureProgress] = useState(0);
+    const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // row.structuredSvg is the authoritative source (updated by parent via updateRow).
     // The local SVG library may be stale because each useSVGLibrary() instance has
@@ -68,8 +74,8 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
     // Vectorization only needs a bitmap (VTracer is independent of NLU/elements)
     const vectorizeEligibility = canVectorize({ bitmap: row.bitmap });
-    // Structuring requires bitmap + NLU + non-empty elements
-    const structureEligibility = canStructureSVG({ bitmap: row.bitmap, NLU: row.NLU, elements: row.elements });
+    // Structuring requires rawSvg + NLU + non-empty elements (no bitmap needed)
+    const structureEligibility = canStructureSVG({ rawSvg: row.rawSvg, NLU: row.NLU, elements: row.elements });
 
     // Dynamic Style Injection (Visual only)
     const displaySvg = React.useMemo(() => {
@@ -223,6 +229,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         };
     }, [status, processStartTime]);
 
+    // Cleanup heartbeat on unmount
+    useEffect(() => {
+        return () => {
+            if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+        };
+    }, []);
+
     // Debugging: Monitor row eligibility changes
     useEffect(() => {
         console.log('[SVGGenerator] Eligibility Updated:', {
@@ -233,17 +246,57 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     }, [vectorizeEligibility, structureEligibility]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Determine status based on what SVG data is available for this row.
-    // Priority: structuredSvg > rawSvg > idle
+    // Priority: structuredSvg > active structuring > rawSvg > idle
     useEffect(() => {
         if (structuredSvgEntry) {
+            // Structuring finished while we were unmounted
+            activeStructuring.delete(row.id);
             setStatus('completed');
+        } else if (activeStructuring.has(row.id)) {
+            // Remounted while structuring is still in progress — restore UI
+            const startedAt = activeStructuring.get(row.id)!;
+            setRawSvg(row.rawSvg || null);
+            setStatus('structuring');
+            setProcessStartTime(startedAt);
+            setElapsedTime((Date.now() - startedAt) / 1000);
+            setSubStatus('Estructurando SVG semántico...');
+            // Restart heartbeat from an estimated progress based on elapsed time
+            if (!heartbeatRef.current) {
+                const elapsed = (Date.now() - startedAt) / 1000;
+                const estimatedProgress = elapsed < 5 ? Math.min(elapsed * 5, 25)
+                    : elapsed < 30 ? Math.min(25 + (elapsed - 5) * 1.8, 70)
+                    : Math.min(70 + (elapsed - 30) * 0.3, 88);
+                setStructureProgress(estimatedProgress);
+                startHeartbeat();
+            }
         } else if (row.rawSvg) {
             setRawSvg(row.rawSvg);
             setStatus('traced');
         } else {
             setStatus('idle');
         }
-    }, [structuredSvgEntry, row.id, row.rawSvg]);
+    }, [structuredSvgEntry, row.id, row.rawSvg]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const startHeartbeat = () => {
+        const start = Date.now();
+        heartbeatRef.current = setInterval(() => {
+            const elapsed = (Date.now() - start) / 1000;
+            setStructureProgress(prev => {
+                if (prev >= 92) return prev;
+                // Fast progression: Gemini Flash typically responds in < 3s
+                if (elapsed < 1) return Math.min(prev + 10, 30);
+                if (elapsed < 3) return Math.min(prev + 8, 70);
+                if (elapsed < 8) return Math.min(prev + 3, 85);
+                return Math.min(prev + 0.5, 92);
+            });
+        }, 200);
+    };
+
+    const stopHeartbeat = (finalValue = 100) => {
+        if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+        setStructureProgress(finalValue);
+    };
 
     const handleFormat = async () => {
         if (!rawSvg) return;
@@ -254,20 +307,21 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             setProcessStartTime(Date.now());
             setElapsedTime(0);
 
-            // Step 2: Structure with Gemini
+            // Structure with Gemini
             setStatus('structuring');
             setSubStatus('Preparando prompt semántico...');
-            setProgress(0);
+            setStructureProgress(0);
+            activeStructuring.set(row.id, Date.now());
+            startHeartbeat();
             await new Promise(r => setTimeout(r, 600)); // UX Delay
 
             const nluData = typeof row.NLU === 'object' ? row.NLU as NLUData : undefined;
             if (!nluData) throw new Error("Invalid NLU data");
 
-            onLog('info', `Estructurando SVG semántico con referencia visual...`);
+            onLog('info', `Estructurando SVG semántico con contexto NLU...`);
             const sStart = performance.now();
             const result = await structureSVG({
                 rawSvg,
-                bitmap: row.bitmap || '', // Pass original bitmap as visual reference
                 nlu: nluData,
                 elements: row.elements || [],
                 utterance: row.UTTERANCE,
@@ -275,14 +329,15 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 onProgress: (msg) => onLog('info', msg),
                 onStatus: (s) => {
                     switch (s) {
-                        case 'sending': setSubStatus('Enviando imagen + SVG a Gemini...'); break;
-                        case 'receiving': setSubStatus('Recibiendo estructura semántica...'); break;
-                        case 'sanitizing': setSubStatus('Sanitizando y aplicando estilos...'); break;
+                        case 'sending': setSubStatus('Enviando inventario a Gemini Flash...'); break;
+                        case 'receiving': setSubStatus('Recibiendo asignación JSON...'); break;
+                        case 'sanitizing': setSubStatus('Ensamblando SVG + IDs semánticos...'); break;
                         default: setSubStatus(s);
                     }
                 }
             });
 
+            stopHeartbeat();
             const sEnd = performance.now();
 
             if (!result.success || !result.svg) {
@@ -303,11 +358,14 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             // Persist structured SVG to row
             onUpdate({ structuredSvg: result.svg });
 
+            activeStructuring.delete(row.id);
             setStatus('completed');
             const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
             onLog('success', `Proceso SVG finalizado. Tiempo total: ${totalTime}s`);
 
         } catch (err) {
+            stopHeartbeat(0);
+            activeStructuring.delete(row.id);
             console.error(err);
             setStatus('error');
             const msg = err instanceof Error ? err.message : "Unknown error";
@@ -340,6 +398,22 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             {t('svg.traceSvg')}
                         </div>
                         <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
+                            {onOpenEditor && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onOpenEditor('raw'); }}
+                                    className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                                    title="Editar SVG trazado"
+                                >
+                                    <Edit size={12} />
+                                </button>
+                            )}
+                            <button
+                                onClick={() => onOpenVectorizer?.()}
+                                className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                                title={t('vectorizer.adjustTrace')}
+                            >
+                                <Settings2 size={12} />
+                            </button>
                             <button
                                 onClick={downloadRawSvg}
                                 className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
@@ -391,9 +465,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
                         {onOpenEditor && (
                             <button
-                                onClick={(e) => { e.stopPropagation(); onOpenEditor(); }}
+                                onClick={(e) => { e.stopPropagation(); onOpenEditor('structured'); }}
                                 className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg backdrop-blur-sm transition-all"
-                                title="Editar SVG"
+                                title="Editar SVG estructurado"
                             >
                                 <Edit size={14} />
                             </button>
@@ -494,9 +568,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
                         {onOpenEditor && (
                             <button
-                                onClick={(e) => { e.stopPropagation(); onOpenEditor(); }}
+                                onClick={(e) => { e.stopPropagation(); onOpenEditor('raw'); }}
                                 className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                                title="Editar SVG"
+                                title="Editar SVG trazado"
                             >
                                 <Edit size={14} />
                             </button>
@@ -601,14 +675,32 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">
                             {t('svg.structuring')}
                         </p>
-                        <span className="ml-auto text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
-                            {elapsedTime.toFixed(1)}s
-                        </span>
+                        <div className="ml-auto flex items-center gap-2">
+                            {onOpenEditor && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onOpenEditor('raw'); }}
+                                    className="p-1.5 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors"
+                                    title="Editar SVG trazado"
+                                >
+                                    <Edit size={12} />
+                                </button>
+                            )}
+                            <button
+                                onClick={() => onOpenVectorizer?.()}
+                                className="p-1.5 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors"
+                                title={t('vectorizer.adjustTrace')}
+                            >
+                                <Settings2 size={12} />
+                            </button>
+                            <span className="text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
+                                {elapsedTime.toFixed(1)}s
+                            </span>
+                        </div>
                     </div>
                     <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
                         <div
                             className="bg-violet-600 h-full rounded-full transition-all duration-500 ease-out"
-                            style={{ width: '90%' }}
+                            style={{ width: `${structureProgress}%` }}
                         />
                     </div>
                     <p className="text-xs text-slate-500 mt-1.5 truncate">
@@ -630,7 +722,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
                         <div
                             className="bg-violet-600 h-full transition-all duration-300 ease-out"
-                            style={{ width: status === 'vectorizing' ? `${progress}%` : '90%' }}
+                            style={{ width: status === 'vectorizing' ? `${progress}%` : `${structureProgress}%` }}
                         ></div>
                     </div>
                     <div className="flex justify-between items-center mt-2">

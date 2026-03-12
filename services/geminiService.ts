@@ -287,29 +287,22 @@ export const generateSpatialPrompt = async (nlu: NLUData, elements: VisualElemen
   };
 
   const systemInstruction = `You are the "Spatial Articulation Node" in the PictoNet graph.
-Your function is to generate a descriptive prompt that explains how visual elements should be spatially arranged and composed.
+Your function is to generate the spatial edges/relationships between visual nodes — the "prompt" field of the visual blueprint.
 
 **Language Context:**
 The "utterance" language is: **${targetLang}**.
 You MUST generate the prompt in **${targetLang}**.
 
-**Input:**
-- Semantic context (NLU analysis)
-- Hierarchical visual elements structure
-
 **Task:**
-Generate a detailed spatial composition description that explains:
-1. How elements are positioned relative to each other
-2. Size relationships between elements
-3. Visual metaphors and symbolic representations
-4. Compositional guidelines for the pictogram
+Describe the edges/relationships between visual nodes in space, incorporating visual metaphors.
 
 **IMPORTANT:** When referencing elements in the prompt, always wrap their IDs in single quotes (e.g., 'pictograma', 'persona', 'casa').
 
 **Output:**
-A single descriptive text (NOT JSON) in **${targetLang}** that describes the spatial articulation.
+A single descriptive text (NOT JSON) in **${targetLang}**.
 Focus exclusively on TOPOLOGY and COMPOSITION (relative position, size relations, connections).
-Do NOT define style (that's handled elsewhere).`;
+Do NOT define style (that's handled elsewhere).
+Be concise: 3-6 sentences maximum. Match the density and brevity of a pictogram composition note, not an essay.`;
 
   const elementsText = formatElements(elements);
   const nluText = JSON.stringify(nlu, null, 2);

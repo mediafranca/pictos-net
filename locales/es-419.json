@@ -7,8 +7,11 @@
     "libraryTooltip": "Ir a la Librería (Workbench)",
     "settings": "Ajustes de Grafo",
     "settingsTooltip": "Ajustes de Grafo",
+    "configureLibrary": "Configurar Librería",
     "console": "Consola PICTOS",
-    "consoleTooltip": "Consola PICTOS"
+    "consoleTooltip": "Consola PICTOS",
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión"
   },
   "search": {
     "placeholder": "buscar o crear nuevo",

@@ -17,6 +17,7 @@ import {
     removeOverrideRule,
     type OverrideMap,
 } from '../utils/styleUtils';
+import { flattenGroupTransforms } from '../utils/svgNormalizer';
 
 export interface SVGElement {
     id: string;
@@ -657,8 +658,13 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         },
 
         ungroupElement: (groupId: string) => {
-            const svgDocument = get().svgDocument;
+            let svgDocument = get().svgDocument;
             if (!svgDocument) return;
+
+            // Bake the group's transform into its children BEFORE ungrouping.
+            // This ensures children inherit the group's position/scale/rotation
+            // and stay in their visual positions after the group is removed.
+            svgDocument = flattenGroupTransforms(svgDocument, [groupId]);
 
             const parser = new DOMParser();
             const doc = parser.parseFromString(svgDocument, 'image/svg+xml');
@@ -673,6 +679,22 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
                 parent.insertBefore(group.firstChild, group);
             }
             group.remove();
+
+            // Remove empty <g> elements left behind (e.g. sub-groups that had
+            // no shape children, or groups whose only children were text nodes)
+            const purgeEmptyGroups = (root: Element) => {
+                // Iterate bottom-up: process children before parents
+                Array.from(root.querySelectorAll('g')).reverse().forEach(g => {
+                    // A <g> is considered empty if it has no element children
+                    // (text nodes / comment nodes are not visual content)
+                    const hasElementChildren = Array.from(g.childNodes).some(
+                        node => node.nodeType === Node.ELEMENT_NODE
+                    );
+                    if (!hasElementChildren) g.remove();
+                });
+            };
+            const svgEl = doc.querySelector('svg');
+            if (svgEl) purgeEmptyGroups(svgEl);
 
             const serialized = new XMLSerializer().serializeToString(doc);
             const isRaw = get().svgSource === 'raw';

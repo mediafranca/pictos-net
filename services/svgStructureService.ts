@@ -1,9 +1,18 @@
 /**
- * SVG Structure Service - Gemini-powered SVG Restructuring
+ * SVG Structure Service v2 — JSON Assignment + Local Assembly
  *
  * Takes a raw SVG from vtracer and structures it according to
  * the mf-svg-schema specification, adding semantic roles and
  * accessibility metadata.
+ *
+ * Pipeline:
+ *   rawSvg → buildPathInventory (local)
+ *          → Gemini 2.5 Flash (emits ONLY a JSON assignment map)
+ *          → assembleSVGFromAssignment (local — paths never leave the client)
+ *          → post-process: deriveChildIds, filterCSS, validateXML
+ *
+ * Gemini's job is reduced to deciding which group each path belongs to.
+ * Input ~280 tokens, output ~150 tokens → < 2 seconds on Flash.
  *
  * @module services/svgStructureService
  */
@@ -11,7 +20,9 @@
 import type { NLUData, VisualElement, GlobalConfig } from "../types";
 import { SVG_STYLESHEET } from "./svgStyles";
 import { generateCssString } from "../lib/style-editor/lib/utils/cssGenerator";
-import { generateContentStream } from "./aiClient";
+import { generateContent } from "./aiClient";
+
+// ─── Public helpers ──────────────────────────────────────────────────────────
 
 /**
  * Returns the CSS stylesheet to embed in SVGs.
@@ -26,32 +37,11 @@ export const generateStylesheet = (config: GlobalConfig): string => {
     return SVG_STYLESHEET;
 };
 
-/**
- * Remove inline presentation attributes to enforce CSS classes
- */
-function sanitizeSVG(svgContent: string): string {
-    if (!svgContent) return '';
+// ─── Interfaces ──────────────────────────────────────────────────────────────
 
-    // Regex to strip fill, stroke, stroke-width, style from shape elements
-    // We run it twice to catch multiple attributes
-    let clean = svgContent;
-    const regex = /(<(?:path|rect|circle|ellipse|line|polyline|polygon|g)[^>]*?)\s+(?:fill|stroke|stroke-width|style|opacity)=["'][^"']*["']/gi;
-
-    clean = clean.replace(regex, '$1');
-    clean = clean.replace(regex, '$1'); // Second pass for remaining attributes
-    clean = clean.replace(regex, '$1'); // Third pass to be sure
-
-    return clean;
-}
-
-/**
- * Input data for SVG structuring
- */
 export interface SVGStructureInput {
     /** Raw SVG string from vtracer */
     rawSvg: string;
-    /** Original bitmap (Base64 PNG) for visual reference */
-    bitmap: string;
     /** NLU semantic analysis */
     nlu: NLUData;
     /** Hierarchical visual elements */
@@ -66,9 +56,6 @@ export interface SVGStructureInput {
     onStatus?: (status: string) => void;
 }
 
-/**
- * Result of SVG structuring
- */
 export interface SVGStructureResult {
     /** Fully structured SVG string (mf-svg-schema compliant) */
     svg: string;
@@ -78,430 +65,775 @@ export interface SVGStructureResult {
     error?: string;
 }
 
-// Internal interface for typed concept building
-interface ConceptMetadata {
-    id?: string;
-    role: string;
+// ─── Path Inventory (local pre-processing) ───────────────────────────────────
+
+interface PathInfo {
+    id: string;
+    fill: string;
+    fillRole: 'dark' | 'light' | 'accent' | 'unknown';
+    cx: number;
+    cy: number;
+    vtracerGroup: string | null;
+}
+
+interface PathInventory {
+    paths: PathInfo[];
+    vtracerGroups: Record<string, string[]>;
+    standalonePathIds: string[];
+    viewBox: string;
+}
+
+function getFillRole(fill: string): 'dark' | 'light' | 'accent' | 'unknown' {
+    if (!fill || fill === 'none') return 'unknown';
+    const hex = fill.replace('#', '');
+    if (hex.length !== 6 && hex.length !== 3) return 'unknown';
+
+    let r: number, g: number, b: number;
+    if (hex.length === 3) {
+        r = parseInt(hex[0] + hex[0], 16);
+        g = parseInt(hex[1] + hex[1], 16);
+        b = parseInt(hex[2] + hex[2], 16);
+    } else {
+        r = parseInt(hex.slice(0, 2), 16);
+        g = parseInt(hex.slice(2, 4), 16);
+        b = parseInt(hex.slice(4, 6), 16);
+    }
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const saturation = max === 0 ? 0 : (max - min) / max;
+
+    if (saturation > 0.4 && luminance > 0.1) return 'accent';
+    if (luminance < 0.2) return 'dark';
+    if (luminance > 0.8) return 'light';
+    return 'unknown';
+}
+
+function getTranslateOffset(transform: string | null): [number, number] {
+    if (!transform) return [0, 0];
+    const m = transform.match(/translate\(\s*([^,\s]+)[\s,]+([^)\s]+)\s*\)/);
+    return m ? [Math.round(parseFloat(m[1])), Math.round(parseFloat(m[2]))] : [0, 0];
+}
+
+function getCentroid(d: string, tx: number, ty: number): [number, number] {
+    const nums = d.match(/-?[0-9]+\.?[0-9]*/g)?.map(Number) ?? [];
+    if (nums.length < 2) return [tx, ty];
+    const xs = nums.filter((_, i) => i % 2 === 0);
+    const ys = nums.filter((_, i) => i % 2 === 1);
+    return [
+        Math.round(xs.reduce((a, b) => a + b, 0) / xs.length + tx),
+        Math.round(ys.reduce((a, b) => a + b, 0) / ys.length + ty),
+    ];
+}
+
+/** Extract fill from either fill="..." attribute or style="fill: ...;" */
+function extractFill(el: Element): string {
+    const fillAttr = el.getAttribute('fill');
+    if (fillAttr && fillAttr !== 'none') return fillAttr.trim();
+    const style = el.getAttribute('style') ?? '';
+    const m = style.match(/fill:\s*([^;]+)/);
+    return m?.[1]?.trim() ?? '#000000';
+}
+
+export function buildPathInventory(svg: string): PathInventory {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svg, 'image/svg+xml');
+
+    const vbMatch = svg.match(/viewBox="([^"]+)"/);
+    const viewBox = vbMatch?.[1] ?? '0 0 1024 1024';
+
+    const paths: PathInfo[] = [];
+    const vtracerGroups: Record<string, string[]> = {};
+    const standalonePathIds: string[] = [];
+
+    const svgEl = doc.querySelector('svg');
+    if (!svgEl) return { paths, vtracerGroups, standalonePathIds, viewBox };
+
+    // Walk direct children of the SVG
+    for (const child of Array.from(svgEl.children)) {
+        const tag = child.tagName.toLowerCase();
+        const id = child.getAttribute('id') ?? '';
+
+        // Skip non-visual elements
+        if (['defs', 'style', 'title', 'desc', 'metadata'].includes(tag)) continue;
+
+        if (tag === 'g') {
+            const groupPaths: string[] = [];
+            for (const p of Array.from(child.querySelectorAll('path'))) {
+                const pid = p.getAttribute('id') ?? '';
+                if (!pid) continue;
+                const fill = extractFill(p);
+                const d = p.getAttribute('d') ?? '';
+                const transform = p.getAttribute('transform') ?? '';
+                const [tx, ty] = getTranslateOffset(transform);
+                const [cx, cy] = getCentroid(d, tx, ty);
+
+                paths.push({ id: pid, fill, fillRole: getFillRole(fill), cx, cy, vtracerGroup: id });
+                groupPaths.push(pid);
+            }
+            if (groupPaths.length > 0) {
+                vtracerGroups[id] = groupPaths;
+            }
+        } else if (tag === 'path') {
+            const pid = id;
+            if (!pid) continue;
+            const fill = extractFill(child);
+            const d = child.getAttribute('d') ?? '';
+            const transform = child.getAttribute('transform') ?? '';
+            const [tx, ty] = getTranslateOffset(transform);
+            const [cx, cy] = getCentroid(d, tx, ty);
+
+            paths.push({ id: pid, fill, fillRole: getFillRole(fill), cx, cy, vtracerGroup: null });
+            standalonePathIds.push(pid);
+        }
+    }
+
+    return { paths, vtracerGroups, standalonePathIds, viewBox };
+}
+
+// ─── Gemini Prompt (v2: JSON assignment) ─────────────────────────────────────
+
+function buildSystemInstruction_v2(lang: string): string {
+    return `Eres un agente de estructuración semántica SVG. Tu ÚNICO output es un objeto JSON.
+
+**TU TAREA:**
+Se te entrega un inventario de paths SVG (cada uno con id, fill, centroide en el viewBox)
+y la jerarquía de elementos visuales. Debes asignar cada path al grupo semántico
+correspondiente, usando las señales de color y posición.
+
+**OUTPUT — EXACTAMENTE ESTE ESQUEMA JSON:**
+
+{
+  "desc": "descripción visual breve en ${lang} (máx 2 oraciones)",
+  "groups": {
+    "<group-id>": {
+      "concept": "Agent|Object|Action|Context|Attribute",
+      "label": "aria-label en ${lang}",
+      "class": "k|f",
+      "paths": ["path-id-1", "path-id-2"],
+      "children": {
+        "<child-id>": {
+          "concept": "...",
+          "label": "...",
+          "class": "...",
+          "paths": ["path-id-3"],
+          "evenodd": true
+        }
+      }
+    }
+  }
+}
+
+**REGLAS:**
+1. TODOS los path-ids del inventario deben aparecer exactamente UNA VEZ en el JSON
+2. "paths" en un nodo hoja son los paths asignados a ese grupo directamente
+3. "paths" en un nodo padre que tiene "children" puede estar vacío []
+4. "evenodd": true cuando haya paths light cuyo centroide está dentro del bbox del path dark del mismo grupo. El ensamblador los fusionará con fill-rule="evenodd".
+5. "class": "k" para Agent, "f" para Object/Context/Action/Attribute
+6. Preservar los group-ids de vtracer cuando coincidan con la jerarquía del NLU
+7. Si un path no encaja en ningún grupo semántico, asígnalo a un grupo "contexto" con concept="Context"
+8. NO incluir paths con id vacío o nulo
+9. Emitir SOLO el JSON. Sin markdown, sin explicaciones, sin backticks.`;
+}
+
+function formatElements(els: VisualElement[], depth = 0): string {
+    return els.map(el => {
+        const indent = '  '.repeat(depth);
+        const children = el.children ? '\n' + formatElements(el.children, depth + 1) : '';
+        return `${indent}- ${el.id}${children}`;
+    }).join('\n');
+}
+
+function formatInventory(inv: PathInventory): string {
+    const lines = inv.paths.map(p =>
+        `  ${p.id}: fill=${p.fill}(${p.fillRole}), pos=(${p.cx},${p.cy})` +
+        (p.vtracerGroup ? ` [grupo:${p.vtracerGroup}]` : ' [suelto]')
+    );
+
+    const hasUserGroups = Object.keys(inv.vtracerGroups).length > 0;
+    const groupLines = hasUserGroups
+        ? [
+            '',
+            'GRUPOS ORGANIZADOS POR EL USUARIO EN EL EDITOR (respetar si coinciden con NLU):',
+            ...Object.entries(inv.vtracerGroups).map(([gid, pids]) => {
+                const fillRoles = pids.map(pid => {
+                    const p = inv.paths.find(x => x.id === pid);
+                    return `${pid}(${p?.fillRole ?? '?'})`;
+                });
+                return `  ${gid}: [${fillRoles.join(', ')}]`;
+            }),
+        ]
+        : [
+            '',
+            '(paths sin agrupar — asignar según fill y posición)',
+        ];
+
+    const parts = [
+        `INVENTARIO DE PATHS (${inv.paths.length} paths, viewBox ${inv.viewBox}):`,
+        ...lines,
+        ...groupLines,
+    ];
+
+    if (inv.standalonePathIds.length > 0 && hasUserGroups) {
+        parts.push(`\nSTANDALONE (fuera de grupos): ${inv.standalonePathIds.join(', ')}`);
+    }
+
+    return parts.filter(Boolean).join('\n');
+}
+
+function buildUserMessage_v2(
+    inventory: PathInventory,
+    nlu: NLUData,
+    elements: VisualElement[],
+): string {
+    const vg = nlu.visual_guidelines;
+    const frames = (nlu.frames ?? [])
+        .map(f => `${f.frame_label ?? f.frame_name} ("${f.lexical_unit}")`)
+        .join(', ') || '(sin frames)';
+
+    return `**CONTEXTO SEMÁNTICO (NLU):**
+Utterance: "${nlu.utterance}"
+Actor: ${vg?.focus_actor ?? '?'} | Acción: ${vg?.action_core ?? '?'} | Objeto: ${vg?.object_core ?? '?'}
+Dominio: ${nlu.domain ?? 'general'} | Frames: ${frames}
+
+**JERARQUÍA REQUERIDA (ids exactos para los <g>):**
+${formatElements(elements)}
+
+**${formatInventory(inventory)}**
+
+Emite SOLO el JSON de asignación.`;
+}
+
+// ─── Gemini JSON parsing ─────────────────────────────────────────────────────
+
+function cleanGeminiJSON(text: string): string {
+    let clean = text.trim();
+    // Strip markdown fences
+    clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    // Find first { and last }
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start !== -1 && end !== -1) return clean.slice(start, end + 1);
+    return clean;
+}
+
+// ─── Assignment types ────────────────────────────────────────────────────────
+
+interface AssignmentNode {
+    concept: string;
     label: string;
-    nsmPrime?: string;
-    implicit?: boolean;
-    performedBy?: string;
-    note?: string;
+    class?: string;
+    paths?: string[];
+    evenodd?: boolean;
+    children?: Record<string, AssignmentNode>;
 }
 
-/**
- * Extract NSM primes from NLU data
- */
-function extractNSMPrimes(nlu: NLUData): string[] {
-    const primes = new Set<string>();
+interface Assignment {
+    desc: string;
+    groups: Record<string, AssignmentNode>;
+}
 
-    // Extract from nsm_explications keys and values
-    if (nlu.nsm_explications) {
-        for (const [key, value] of Object.entries(nlu.nsm_explications)) {
-            // Keys are often NSM primes in caps
-            if (key === key.toUpperCase()) {
-                primes.add(key);
+// ─── Local SVG Assembly from Assignment ──────────────────────────────────────
+
+interface OriginalPathData {
+    d: string;
+    transform: string;
+    fill: string;
+    otherAttrs: string;
+}
+
+function extractOriginalPaths(rawSvg: string): Map<string, OriginalPathData> {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
+    const map = new Map<string, OriginalPathData>();
+
+    doc.querySelectorAll('path').forEach(p => {
+        const id = p.getAttribute('id');
+        if (!id) return;
+
+        const fill = extractFill(p);
+        const d = p.getAttribute('d') ?? '';
+        const transform = p.getAttribute('transform') ?? '';
+
+        // Collect other attributes we might want to preserve
+        const skipAttrs = new Set(['id', 'd', 'transform', 'fill', 'style', 'class']);
+        const otherParts: string[] = [];
+        for (const attr of Array.from(p.attributes)) {
+            if (!skipAttrs.has(attr.name)) {
+                otherParts.push(`${attr.name}="${attr.value}"`);
             }
-            // Extract caps words from values
-            const capsWords = value.match(/\b[A-Z]+\b/g);
-            if (capsWords) {
-                capsWords.forEach(w => primes.add(w));
+        }
+
+        map.set(id, { d, transform, fill, otherAttrs: otherParts.join(' ') });
+    });
+
+    return map;
+}
+
+function escapeXmlAttr(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderNode(
+    groupId: string,
+    node: AssignmentNode,
+    originalPaths: Map<string, OriginalPathData>,
+    indent = '  ',
+): string {
+    const cls = node.class ?? 'f';
+    const label = escapeXmlAttr(node.label);
+    const concept = escapeXmlAttr(node.concept);
+    const openTag = `${indent}<g id="${groupId}" role="group" tabindex="0" data-concept="${concept}" aria-label="${label}" class="${cls}">`;
+
+    const lines = [openTag];
+
+    // Render own paths
+    if (node.paths?.length) {
+        if (node.evenodd && node.paths.length > 1) {
+            // Combine into single evenodd path
+            const darkPath = node.paths
+                .map(id => originalPaths.get(id))
+                .find(p => p && getFillRole(p.fill) === 'dark');
+            const fill = darkPath?.fill ?? '#000000';
+
+            const subpaths = node.paths.map(id => {
+                const p = originalPaths.get(id);
+                if (!p) return '';
+                // Include transform offset in the path data for correct positioning
+                if (p.transform) {
+                    // For evenodd, transforms need to be baked — for now just concatenate d values
+                    return p.d;
+                }
+                return p.d;
+            }).filter(Boolean).join(' ');
+
+            lines.push(`${indent}  <path d="${subpaths}" fill="${fill}" fill-rule="evenodd"/>`);
+        } else {
+            for (const pathId of node.paths) {
+                const p = originalPaths.get(pathId);
+                if (!p) { console.warn(`[assemble] path not found: ${pathId}`); continue; }
+                const transformAttr = p.transform ? ` transform="${p.transform}"` : '';
+                const otherAttrs = p.otherAttrs ? ` ${p.otherAttrs}` : '';
+                lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${transformAttr}${otherAttrs}/>`);
             }
         }
     }
 
-    // Fallback primes based on roles
-    if (primes.size === 0) {
-        if (nlu.visual_guidelines?.focus_actor) primes.add('SOMEONE');
-        if (nlu.visual_guidelines?.action_core) primes.add('DO');
-        if (nlu.visual_guidelines?.object_core) primes.add('SOMETHING');
+    // Render children
+    if (node.children) {
+        for (const [childId, childNode] of Object.entries(node.children)) {
+            lines.push(renderNode(childId, childNode, originalPaths, indent + '  '));
+        }
     }
 
-    return Array.from(primes).slice(0, 5); // Limit to 5 primes
+    lines.push(`${indent}</g>`);
+    return lines.join('\n');
 }
 
-/**
- * Build semantic concepts array for metadata
- */
-function buildConceptsArray(elements: VisualElement[], nlu: NLUData): ConceptMetadata[] {
-    const concepts: ConceptMetadata[] = [];
-    const roles = nlu.visual_guidelines;
+function assembleSVGFromAssignment(
+    rawSvg: string,
+    assignment: Assignment,
+    input: SVGStructureInput,
+    metadata: object,
+    filteredCSS: string,
+    viewBox: string,
+): string {
+    const originalPaths = extractOriginalPaths(rawSvg);
 
-    // Map elements to semantic roles
-    const flatElements = flattenElements(elements);
+    // Validate all path ids are covered
+    const assignedIds = new Set<string>();
+    function collectIds(node: AssignmentNode) {
+        node.paths?.forEach(id => assignedIds.add(id));
+        if (node.children) Object.values(node.children).forEach(collectIds);
+    }
+    Object.values(assignment.groups).forEach(collectIds);
 
-    for (const el of flatElements) {
-        const id = `g-${el.id.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+    const allOriginalIds = Array.from(originalPaths.keys());
+    const missing = allOriginalIds.filter(id => !assignedIds.has(id));
+    if (missing.length > 0) {
+        console.warn(`[assemble] paths sin asignar: ${missing.join(', ')}`);
+        // Auto-assign to a fallback group
+        assignment.groups['contexto'] = assignment.groups['contexto'] ?? {
+            concept: 'Context',
+            label: 'elementos de contexto',
+            class: 'f',
+            paths: [],
+        };
+        assignment.groups['contexto'].paths = [
+            ...(assignment.groups['contexto'].paths ?? []),
+            ...missing,
+        ];
+    }
 
-        // Determine role based on NLU visual_guidelines
-        let role = 'Theme';
-        let nsmPrime = 'SOMETHING';
+    const bodyLines = Object.entries(assignment.groups).map(([gid, node]) =>
+        renderNode(gid, node, originalPaths)
+    );
 
-        if (roles?.focus_actor && el.id.toLowerCase().includes(roles.focus_actor.toLowerCase())) {
-            role = 'Agent';
-            nsmPrime = 'SOMEONE';
-        } else if (roles?.object_core && el.id.toLowerCase().includes(roles.object_core.toLowerCase())) {
-            role = 'Patient';
-            nsmPrime = 'SOMETHING';
+    const body = bodyLines.join('\n');
+
+    return assembleStructuredSVG(body, input, metadata, filteredCSS, viewBox);
+}
+
+// ─── Post-processing: CSS filtering (local) ─────────────────────────────────
+
+function extractUsedClasses(svgContent: string): Set<string> {
+    const used = new Set<string>();
+    const re = /class="([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(svgContent)) !== null) {
+        m[1].split(/\s+/).forEach(cls => cls && used.add(cls));
+    }
+    return used;
+}
+
+function buildFilteredCSS(fullCSS: string, usedClasses: Set<string>): string {
+    const keyframeRe = /@keyframes\s+([\w-]+)\s*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g;
+    const keyframes = new Map<string, string>();
+    let strippedCSS = fullCSS;
+    let kfM: RegExpExecArray | null;
+    while ((kfM = keyframeRe.exec(fullCSS)) !== null) {
+        keyframes.set(kfM[1], kfM[0]);
+        strippedCSS = strippedCSS.replace(kfM[0], '');
+    }
+
+    const ruleRe = /([^{]+)\{([^}]+)\}/g;
+    const keptRules: string[] = [];
+    const usedAnimations = new Set<string>();
+    let rM: RegExpExecArray | null;
+    while ((rM = ruleRe.exec(strippedCSS)) !== null) {
+        const selector = rM[1].trim();
+        const declarations = rM[2].trim();
+        if (!declarations) continue;
+
+        if (selector.includes('[role="group"]')) {
+            keptRules.push(`${selector} {\n  ${declarations}\n}`);
+            continue;
         }
 
-        concepts.push({
-            id,
-            role,
-            label: el.id.replace(/_/g, ' '),
-            nsmPrime
+        const classesInSelector = [...selector.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(c => c[1]);
+        const isUsed = classesInSelector.some(cls => usedClasses.has(cls));
+        if (!isUsed) continue;
+
+        keptRules.push(`${selector} {\n  ${declarations}\n}`);
+        const animMatch = declarations.match(/animation(?:-name)?\s*:\s*([\w-]+)/);
+        if (animMatch) usedAnimations.add(animMatch[1]);
+    }
+
+    for (const [name, block] of keyframes) {
+        if (usedAnimations.has(name)) keptRules.push(block);
+    }
+
+    return keptRules.join('\n\n');
+}
+
+// ─── Post-processing: Semantic IDs (local) ───────────────────────────────────
+
+function deriveChildIds(svgContent: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+
+    if (doc.querySelector('parsererror')) {
+        console.warn('[deriveChildIds] SVG parse failed, skipping ID derivation');
+        return svgContent;
+    }
+
+    const renames = new Map<string, string>();
+    const vtracerHashRe = /^el-[0-9a-z]+$/i;
+
+    doc.querySelectorAll('g[id]').forEach(group => {
+        const gId = group.getAttribute('id')!;
+        if (vtracerHashRe.test(gId)) return;
+
+        let counter = 1;
+        group.childNodes.forEach(child => {
+            if (!(child instanceof Element)) return;
+            if (child.tagName === 'g') return;
+
+            const oldId = child.getAttribute('id');
+            if (!oldId) {
+                child.setAttribute('id', `${gId}-${counter++}`);
+                return;
+            }
+            if (vtracerHashRe.test(oldId) || /^(path|rect|circle)\d+$/.test(oldId)) {
+                const newId = `${gId}-${counter++}`;
+                child.setAttribute('id', newId);
+                renames.set(oldId, newId);
+            }
         });
+    });
+
+    let result = new XMLSerializer().serializeToString(doc);
+    result = result.replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '');
+    result = result.replace(/<svg /, '<svg xmlns="http://www.w3.org/2000/svg" ');
+
+    for (const [oldId, newId] of renames) {
+        result = result.replace(new RegExp(`#${oldId}(?=[.\\s{,])`, 'g'), `#${newId}`);
     }
 
-    // Add implicit Action if action_core exists
-    if (roles?.action_core) {
-        const agent = concepts.find(c => c.role === 'Agent');
+    return result;
+}
 
-        concepts.push({
-            role: 'Action',
-            label: `${roles.action_core} (implicit action)`,
-            nsmPrime: 'DO',
-            implicit: true,
-            performedBy: agent?.id,
-            note: 'Action is implicit, performed by the Agent through posture or gesture'
-        });
-    }
+// ─── Validation ──────────────────────────────────────────────────────────────
 
-    return concepts;
+function validateXML(svg: string): string | null {
+    const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    const err = doc.querySelector('parsererror');
+    if (err) return err.textContent || 'XML parse error';
+    return null;
 }
 
 /**
- * Flatten nested visual elements
+ * Remove empty <g> elements from an SVG fragment.
+ * Iterates until stable (handles nested empty groups).
  */
-function flattenElements(elements: VisualElement[]): VisualElement[] {
-    const flat: VisualElement[] = [];
-
-    for (const el of elements) {
-        // Skip the root 'pictograma' element
-        if (el.id !== 'pictograma') {
-            flat.push(el);
-        }
-        if (el.children) {
-            flat.push(...flattenElements(el.children));
-        }
+function removeEmptyGroupsFromFragment(fragment: string): string {
+    let prev = '';
+    let current = fragment;
+    while (prev !== current) {
+        prev = current;
+        current = current.replace(/<g(\s[^>]*)?\s*>\s*<\/g>/g, '');
     }
-
-    return flat;
+    return current;
 }
 
-/**
- * Build the metadata JSON block
- */
+// ─── Metadata (built locally, never by Gemini) ──────────────────────────────
+
 function buildMetadataJSON(input: SVGStructureInput): object {
-    const primes = extractNSMPrimes(input.nlu);
-    const concepts = buildConceptsArray(input.elements, input.nlu);
+    const nlu = input.nlu;
+    const vg = nlu.visual_guidelines;
+    const config = input.config;
+
+    const naturalDesc = [
+        vg?.focus_actor && `${vg.focus_actor}`,
+        vg?.action_core && `realizando: ${vg.action_core}`,
+        vg?.object_core && `con: ${vg.object_core}`,
+        vg?.context && `contexto: ${vg.context}`,
+    ].filter(Boolean).join(', ') || input.utterance;
 
     return {
         version: "1.0.0",
+        schema: "mediafranca/mf-svg-schema",
         utterance: input.utterance,
-        nsm: {
-            primes,
-            gloss: primes.join(' ') + ' (derived from NLU analysis)'
+        lang: nlu.lang || config.lang || 'es-419',
+        domain: nlu.domain ?? 'general',
+        region: config.geoContext?.region ?? null,
+        nsm: { explications: nlu.nsm_explications ?? {} },
+        frames: (nlu.frames ?? []).map(f => ({
+            frame: f.frame_name,
+            label: f.frame_label ?? f.frame_name,
+            lexicalUnit: f.lexical_unit,
+            roles: Object.fromEntries(
+                Object.entries(f.roles ?? {}).map(([role, data]) => [
+                    role, { type: data.type, surface: data.surface, ref: data.ref }
+                ])
+            ),
+        })),
+        pragmatics: {
+            speechAct: nlu.metadata?.speech_act ?? 'assertive',
+            intent: nlu.metadata?.intent ?? 'inform',
+            politeness: nlu.pragmatics?.politeness ?? null,
+            formality: nlu.pragmatics?.formality ?? null,
+            expectedResponse: nlu.pragmatics?.expected_response ?? null,
         },
-        concepts,
+        visualGuidelines: {
+            focusActor: vg?.focus_actor ?? null,
+            actionCore: vg?.action_core ?? null,
+            objectCore: vg?.object_core ?? null,
+            context: vg?.context ?? null,
+            temporal: vg?.temporal ?? null,
+        },
         accessibility: {
             cognitiveDescription: input.utterance,
-            visualDescription: input.nlu.visual_guidelines
-                ? `${input.nlu.visual_guidelines.focus_actor || 'Element'} ${input.nlu.visual_guidelines.action_core || 'interacts with'} ${input.nlu.visual_guidelines.object_core || 'object'}`
-                : input.utterance
+            visualDescription: naturalDesc,
+            lang: nlu.lang || config.lang || 'es-419',
         },
         provenance: {
-            generator: "PictoNet v2.7",
+            generator: "PictoNet",
             generatedAt: new Date().toISOString(),
             sourceDataset: "MediaFranca-PictoNet",
-            licence: input.config.license || "CC BY 4.0"
-        }
+            licence: config.license || "CC BY 4.0",
+        },
     };
 }
 
+// ─── SVG Assembly (local post-process) ──────────────────────────────────────
+
 /**
- * Build the system instruction for Gemini
+ * Assemble the complete mf-svg-schema SVG from a body (groups)
+ * and locally-built metadata, CSS, title, etc.
  */
-function buildSystemInstruction(metadata: object, elements: VisualElement[], config: GlobalConfig, lang: string = 'en'): string {
-    const css = generateStylesheet(config);
-    return `You are an SVG restructuring agent following the MediaFranca SVG Schema specification.
+function assembleStructuredSVG(
+    body: string,
+    input: SVGStructureInput,
+    metadata: object,
+    filteredCSS: string,
+    viewBox: string,
+): string {
+    const lang = input.nlu.lang || input.config.lang || 'es-419';
+    const domain = input.nlu.domain ?? 'general';
+    const utteranceEscaped = escapeXmlAttr(input.utterance);
 
-**YOUR TASK:**
-Convert a raw vectorized SVG into a semantically structured SVG following the mf-svg-schema standard.
+    // Extract <desc> from body if present
+    const descMatch = body.match(/<desc[^>]*>([\s\S]*?)<\/desc>/i);
+    const descContent = descMatch ? descMatch[1].trim() : input.utterance;
+    const bodyWithoutDesc = body.replace(/<desc[^>]*>[\s\S]*?<\/desc>/i, '').trim();
 
-**INPUT YOU RECEIVE:**
-1. **Visual Reference (IMAGE)**: The original bitmap pictogram - USE THIS to understand what each part represents
-2. **Geometric Base (TEXT)**: Raw SVG with unstructured <path> elements from vtracer vectorization
-3. **Semantic Context (TEXT)**: Hierarchical visual elements that MUST correspond to visual parts in the image
-4. **Metadata (TEXT)**: NLU analysis and concepts
+    const descEscaped = descContent
+        .replace(/&(?!amp;|lt;|gt;|quot;|apos;)/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 
-**CRITICAL VISUAL CORRELATION:**
-Look at the IMAGE and the HIERARCHICAL ELEMENTS together:
-- Each element in the hierarchy (e.g., "persona", "vaso_agua") represents a VISIBLE part in the image
-- Your job is to GROUP the SVG paths that correspond to each element
-- Use the IMAGE as the PRIMARY reference to understand what represents what
+    const metadataJSON = JSON.stringify(metadata, null, 2);
 
-**OUTPUT REQUIREMENTS:**
-You must output a COMPLETE, VALID SVG file with these exact parts in order:
-
-1. **<svg> root** with attributes:
-   - id="pictogram"
-   - xmlns="http://www.w3.org/2000/svg"
-   - viewBox="0 0 100 100" (adjust based on input)
-   - role="img"
-   - aria-labelledby="title desc"
-   - lang="${lang}"
-   - tabindex="0"
-   - focusable="true"
-
-2. **<title id="title">** - The utterance
-
-3. **<desc id="desc">** - Visual description from accessibility.visualDescription
-
-4. **<metadata id="mf-accessibility">** - The complete JSON metadata block (provided below)
-
-5. **<defs><style>** - The embedded CSS stylesheet (provided below)
-
-6. **Semantic <g> groups** - Group the paths according to concepts:
-   - Each concept with an 'id' needs a corresponding <g> element
-   - Attributes: id, role="group", tabindex="0", data-concept="Role", aria-label
-   - Assign class="f" (foreground/secondary) or class="k" (key/primary - for Agents)
-   - Preserve the original path geometry, just reorganize into groups
-
-**SEMANTIC METADATA TO EMBED:**
-\`\`\`json
-${JSON.stringify(metadata, null, 2)}
-\`\`\`
-
-**CSS STYLESHEET TO EMBED:**
-\`\`\`css
-${css}
-\`\`\`
-
-**VISUAL ELEMENT HIERARCHY:**
-\`\`\`json
-${JSON.stringify(elements, null, 2)}
-\`\`\`
-
-**GROUPING STRATEGY — THE ELEMENT HIERARCHY IS YOUR STRUCTURE:**
-
-The HIERARCHICAL ELEMENTS provided define the exact group structure the SVG must have.
-This is not a suggestion — it is the required DOM outline.
-
-Process:
-1. The root level of the SVG body contains one <g> per top-level element in the hierarchy.
-2. If a hierarchy element has children, its <g> contains nested <g> elements for each child.
-3. The id of each <g> must match the element id in the hierarchy (e.g., id="persona", id="vaso_agua").
-4. Look at the IMAGE to identify which SVG paths visually belong to each element.
-5. Place those paths inside the corresponding <g>.
-6. Paths that don't clearly belong to any named element go into a <g id="context" class="f"> group.
-7. NEVER leave paths outside of a named group.
-
-Example: if the hierarchy is:
-  - persona
-    - cabeza
-    - cuerpo
-  - vaso_agua
-
-The SVG body must be:
-<g id="persona" class="k" role="group" ...>
-  <g id="cabeza" role="group" ...> ... paths ... </g>
-  <g id="cuerpo" role="group" ...> ... paths ... </g>
-</g>
-<g id="vaso_agua" class="f" role="group" ...> ... paths ... </g>
-
-**OPTIONAL VISUAL IMPROVEMENT:**
-If the raw SVG has obvious artifacts from the vectorization process (e.g., excessive
-micro-paths smaller than 5px, redundant overlapping paths, fragmented contours that
-should be a single shape), you may:
-- Omit micro-paths (paths with very small bounding boxes that represent noise)
-- Merge visually fragmented contours of the same color into a single <path>
-  by combining their 'd' attributes using SVG subpath notation (M ... Z M ... Z)
-
-Do NOT simplify or alter paths that are clearly meaningful visual elements.
-When in doubt, preserve the original path data exactly.
-
-**CRITICAL RULES:**
-1. Output ONLY the complete SVG, no explanation
-2. Preserve ALL original path data - do not simplify or modify paths
-3. Every path must be inside a semantic <g> group
-4. The metadata JSON must be exactly as provided (inside <metadata> tags)
-5. Remove any path fill/stroke attributes and rely on CSS classes
-6. Maintain proper SVG structure and valid XML
-7. NEVER use fill, stroke, stroke-width, or style attributes on <path>, <rect>,
-   <circle>, or <ellipse> elements. These MUST be removed entirely.
-8. Apply visual classes ONLY on <g> group elements, not on individual paths.
-   Use class="k" for Agents (key/foreground) and class="f" for secondary elements.
-   This ensures CSS from <defs><style> controls all visual appearance.
-9. A single <g> may combine multiple semantic sub-elements. The class should
-   reflect the semantic role of the entire group, not individual paths.`;
+    return `<svg id="pictogram" xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" role="img" aria-labelledby="title desc" lang="${lang}" tabindex="0" focusable="true" data-domain="${domain}" data-utterance="${utteranceEscaped}">
+  <title id="title">${utteranceEscaped}</title>
+  <desc id="desc">${descEscaped}</desc>
+  <metadata id="mf-data"><![CDATA[
+${metadataJSON}
+  ]]></metadata>
+  <defs>
+    <style>
+${filteredCSS}
+    </style>
+  </defs>
+  ${bodyWithoutDesc}
+</svg>`;
 }
 
-/**
- * Clean SVG response from Gemini
- */
-function cleanSVGResponse(text: string): string {
-    if (!text) return '';
+// ─── Main structuring function (v2: JSON assignment) ─────────────────────────
 
-    let cleaned = text.trim();
-
-    // Remove markdown code blocks
-    cleaned = cleaned.replace(/^```(?:svg|xml|html)?\s*/i, '');
-    cleaned = cleaned.replace(/\s*```$/i, '');
-    cleaned = cleaned.trim();
-
-    // Find the SVG content
-    const svgStart = cleaned.indexOf('<svg');
-    const svgEnd = cleaned.lastIndexOf('</svg>');
-
-    if (svgStart !== -1 && svgEnd !== -1) {
-        return cleaned.substring(svgStart, svgEnd + 6);
-    }
-
-    return cleaned;
-}
-
-/**
- * Structure a raw SVG according to mf-svg-schema
- * 
- * This function takes a raw SVG (from vtracer) and transforms it into
- * a semantically rich, accessible SVG following the MediaFranca specification.
- * 
- * @param input - The structuring input containing raw SVG, NLU, elements, etc.
- * @returns Promise resolving to structured SVG result
- * 
- * @example
- * ```typescript
- * const result = await structureSVG({
- *   rawSvg: svgFromVtracer,
- *   nlu: row.NLU,
- *   elements: row.elements,
- *   utterance: row.UTTERANCE,
- *   config: globalConfig
- * });
- * 
- * if (result.success) {
- *   console.log(result.svg);
- * }
- * ```
- */
 export async function structureSVG(input: SVGStructureInput): Promise<SVGStructureResult> {
     try {
-        // Build the metadata JSON
-        const metadata = buildMetadataJSON(input);
+        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Iniciando pre-procesamiento local...');
 
-        // Build the system instruction
-        const lang = input.nlu.lang || input.config.lang || 'en';
-        const systemInstruction = buildSystemInstruction(metadata, input.elements, input.config, lang);
+        // ── Step 1: Build path inventory (local) ────────────────────────
+        const inventory = buildPathInventory(input.rawSvg);
 
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Preparando solicitud multimodal...');
+        if (inventory.paths.length === 0) {
+            return { svg: '', success: false, error: 'No se encontraron paths en el SVG' };
+        }
+
+        if (input.onProgress) {
+            input.onProgress(
+                `[ESTRUCTURAR] Inventario: ${inventory.paths.length} paths, ` +
+                `${Object.keys(inventory.vtracerGroups).length} grupos existentes, ` +
+                `${inventory.standalonePathIds.length} sueltos`
+            );
+        }
+
+        // ── Step 2: Prepare prompts ─────────────────────────────────────
+        const lang = input.nlu.lang || input.config.lang || 'es-419';
+        const systemInstruction = buildSystemInstruction_v2(lang);
+        const userMessage = buildUserMessage_v2(inventory, input.nlu, input.elements);
+
+        // ── Step 3: Gemini call (JSON assignment only) ───────────────────
+        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Enviando inventario a Gemini Flash...');
         if (input.onStatus) input.onStatus('sending');
 
-        // Extract base64 data from bitmap (remove data URL prefix if present)
-        const base64Data = input.bitmap.replace(/^data:image\/\w+;base64,/, '');
-
-        // Format hierarchical elements as readable text
-        const formatElements = (els: VisualElement[], depth = 0): string => {
-            return els.map(el => {
-                const indent = '  '.repeat(depth);
-                const children = el.children ? '\n' + formatElements(el.children, depth + 1) : '';
-                return `${indent}- ${el.id}${children}`;
-            }).join('\n');
-        };
-
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Enviando imagen + SVG + elementos a Gemini 3 Pro...');
-
-        // Call Gemini with MULTIMODAL input (image + text)
-        const result = generateContentStream({
-            model: "gemini-3-pro-preview",
+        const response = await generateContent({
+            model: "gemini-2.5-flash",
             contents: {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: "image/png",
-                            data: base64Data
-                        }
-                    },
-                    {
-                        text: `**ORIGINAL PICTOGRAM IMAGE ABOVE** — Primary visual reference.
-
-**REQUIRED GROUP STRUCTURE (from hierarchy — this defines the SVG DOM outline):**
-${formatElements(input.elements)}
-
-**CSS STYLESHEET (classes to apply at group level, NEVER on individual paths):**
-The stylesheet is in the system instruction. Valid classes: "k" (key/agent), "f" (secondary).
-
-**RAW SVG GEOMETRY (paths to distribute into the groups above):**
-${input.rawSvg}
-
-Distribute each path into its correct semantic group. Output ONLY the complete
-restructured SVG — no explanation, no markdown, no code fences.`
-                    }
-                ]
+                parts: [{ text: userMessage }],
             },
             config: {
                 systemInstruction,
-            }
+                temperature: 0.1,
+                maxOutputTokens: 2048,
+            },
         });
 
-        let text = '';
-        let lastReportSize = 0;
-
         if (input.onStatus) input.onStatus('receiving');
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Gemini está analizando la imagen y estructurando el SVG...');
 
-        for await (const chunk of result) {
-            const chunkText = chunk.text;
-            text += chunkText;
-
-            // Report progress every ~1KB or so
-            if (input.onProgress && (text.length - lastReportSize > 500)) {
-                input.onProgress(`[SVG FORMAT] Recibiendo SVG estructurado... (${(text.length / 1024).toFixed(1)} KB)`);
-                lastReportSize = text.length;
-            }
+        const rawJSON = response.text;
+        if (!rawJSON) {
+            return { svg: '', success: false, error: 'Gemini no retornó respuesta' };
         }
 
-        // Parse the response
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Respuesta completa recibida, procesando...');
-
-        // Sanitize to remove inline styles and force CSS usage
+        if (input.onProgress) {
+            input.onProgress(`[ESTRUCTURAR] JSON recibido (${rawJSON.length} chars), ensamblando SVG...`);
+        }
         if (input.onStatus) input.onStatus('sanitizing');
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Limpiando respuesta y extrayendo SVG...');
-        let svgContent = cleanSVGResponse(text);
 
-        if (input.onProgress) input.onProgress('[SVG FORMAT] Sanitizando estilos inline y aplicando clases CSS...');
-        // Sanitize to remove inline styles and force CSS usage
-        svgContent = sanitizeSVG(svgContent);
-
-        if (!svgContent || !svgContent.includes('<svg')) {
-            if (input.onProgress) input.onProgress('[SVG FORMAT] ❌ Error: respuesta no contiene SVG válido');
+        // ── Step 4: Parse JSON assignment ────────────────────────────────
+        let assignment: Assignment;
+        try {
+            const jsonText = cleanGeminiJSON(rawJSON);
+            assignment = JSON.parse(jsonText);
+        } catch (parseErr) {
+            console.error('[ESTRUCTURAR] JSON parse failed:', rawJSON);
             return {
                 svg: '',
                 success: false,
-                error: 'Gemini did not return valid SVG'
+                error: `JSON inválido de Gemini: ${parseErr instanceof Error ? parseErr.message : 'parse error'}`,
             };
         }
 
-        if (input.onProgress) input.onProgress(`[SVG FORMAT] ✓ SVG estructurado completado (${(svgContent.length / 1024).toFixed(1)} KB)`);
+        if (!assignment.groups || Object.keys(assignment.groups).length === 0) {
+            return { svg: '', success: false, error: 'Gemini retornó JSON sin grupos' };
+        }
 
-        return {
-            svg: svgContent,
-            success: true
-        };
+        // ── Step 5: Prepare metadata and CSS ─────────────────────────────
+        const viewBox = inventory.viewBox;
+        const metadata = buildMetadataJSON(input);
+
+        // Build filtered CSS based on classes used in the assignment
+        const usedClassesFromAssignment = new Set<string>();
+        function collectClasses(node: AssignmentNode) {
+            if (node.class) node.class.split(/\s+/).forEach(c => usedClassesFromAssignment.add(c));
+            if (node.children) Object.values(node.children).forEach(collectClasses);
+        }
+        Object.values(assignment.groups).forEach(collectClasses);
+
+        const fullCSS = generateStylesheet(input.config);
+        const filteredCSS = buildFilteredCSS(fullCSS, usedClassesFromAssignment);
+
+        // ── Step 6: Assemble SVG locally ─────────────────────────────────
+        let svgContent = assembleSVGFromAssignment(
+            input.rawSvg,
+            assignment,
+            input,
+            metadata,
+            filteredCSS,
+            viewBox,
+        );
+
+        // ── Step 7: Post-process ─────────────────────────────────────────
+
+        // Remove empty groups
+        svgContent = removeEmptyGroupsFromFragment(svgContent);
+
+        // Validate XML
+        const validation = validateXML(svgContent);
+        if (validation) {
+            if (input.onProgress) {
+                input.onProgress(`[ESTRUCTURAR] XML issue: ${validation.slice(0, 120)}`);
+            }
+        } else {
+            // Derive semantic child IDs (only if XML is valid)
+            svgContent = deriveChildIds(svgContent);
+        }
+
+        if (input.onProgress) {
+            const groupCount = (svgContent.match(/<g /g) ?? []).length;
+            input.onProgress(
+                `[ESTRUCTURAR] Completado — ${(svgContent.length / 1024).toFixed(1)} KB, ` +
+                `${groupCount} grupos semánticos`
+            );
+        }
+
+        return { svg: svgContent, success: true };
 
     } catch (error) {
         return {
             svg: '',
             success: false,
-            error: error instanceof Error ? error.message : 'Unknown error during SVG structuring'
+            error: error instanceof Error ? error.message : 'Error desconocido en ESTRUCTURAR',
         };
     }
 }
 
-/**
- * Check if a row has a bitmap available for VTracer vectorization.
- * Does NOT require NLU or elements — tracing is independent of semantic data.
- */
+// ─── Eligibility checks ─────────────────────────────────────────────────────
+
 export function canVectorize(row: {
     bitmap?: string;
 }): { eligible: boolean; reason?: string } {
@@ -511,17 +843,13 @@ export function canVectorize(row: {
     return { eligible: true };
 }
 
-/**
- * Check if a row has sufficient data for semantic SVG structuring.
- * Requires: bitmap (raw SVG source), NLU analysis, and visual elements.
- */
 export function canStructureSVG(row: {
-    bitmap?: string;
+    rawSvg?: string;
     NLU?: NLUData | string;
     elements?: VisualElement[];
 }): { eligible: boolean; reason?: string } {
-    if (!row.bitmap) {
-        return { eligible: false, reason: 'No bitmap available' };
+    if (!row.rawSvg) {
+        return { eligible: false, reason: 'No raw SVG available (run VTracer first)' };
     }
     if (!row.NLU || typeof row.NLU === 'string') {
         return { eligible: false, reason: 'NLU analysis required' };

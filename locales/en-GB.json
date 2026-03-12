@@ -7,8 +7,11 @@
     "libraryTooltip": "Go to Library (Workbench)",
     "settings": "Graph Settings",
     "settingsTooltip": "Graph Settings",
+    "configureLibrary": "Configure Library",
     "console": "PICTOS Console",
-    "consoleTooltip": "PICTOS Console"
+    "consoleTooltip": "PICTOS Console",
+    "login": "Sign in",
+    "logout": "Sign out"
   },
   "search": {
     "placeholder": "search or create new",
