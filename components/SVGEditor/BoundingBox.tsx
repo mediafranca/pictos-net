@@ -326,6 +326,7 @@ function transformPathData(
 }
 
 export default function BoundingBox({ svgElement, elementId, containerElement, onTransformComplete }: BoundingBoxProps) {
+    const zoom = useSVGEditorStore(state => state.viewport.zoom);
     const [bbox, setBbox] = useState<BBox | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [activeHandle, setActiveHandle] = useState<HandleType | null>(null);
@@ -899,40 +900,88 @@ export default function BoundingBox({ svgElement, elementId, containerElement, o
 
     if (!bbox) return null;
 
-    const handleStyle = "absolute w-3 h-3 bg-blue-600 rounded-full border border-white cursor-pointer hover:scale-125 transition-transform shadow-sm";
+    // Counter-scale so handles keep a constant screen size regardless of zoom
+    const iz = 1 / zoom;                // inverse zoom
+    const handlePx = 12;                 // handle diameter in screen px
+    const handleSvg = handlePx * iz;     // handle size in SVG-local units
+    const halfH = handleSvg / 2;
+    const borderW = Math.max(1, iz);     // border always ~1 screen px
+    const rotStemH = 24 * iz;            // rotation stem height
+    const rotBtnSvg = 20 * iz;           // rotation button size
+    const rotIconSvg = 12 * iz;          // rotation icon size
+
+    const handleStyle: React.CSSProperties = {
+        position: 'absolute',
+        width: `${handleSvg}px`,
+        height: `${handleSvg}px`,
+        borderRadius: '50%',
+        background: '#2563eb',
+        border: `${borderW}px solid white`,
+        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+        cursor: 'pointer',
+    };
 
     return (
         <div
-            className="absolute border border-blue-600 pointer-events-auto shadow-[0_0_0_1px_rgba(255,255,255,0.4)]"
+            className="absolute pointer-events-auto"
             style={{
                 left: `${bbox.x}px`,
                 top: `${bbox.y}px`,
                 width: `${bbox.width}px`,
                 height: `${bbox.height}px`,
                 cursor: isDragging && activeHandle === 'move' ? 'grabbing' : 'grab',
+                border: `${borderW}px solid #2563eb`,
+                boxShadow: `0 0 0 ${borderW}px rgba(255,255,255,0.4)`,
+                overflow: 'visible',
             }}
             onMouseDown={(e) => handleMouseDown(e, 'move')}
         >
-            {/* Rotation Handle */}
-            <div className="absolute w-px h-6 bg-blue-600 left-1/2 -top-6 -translate-x-1/2" />
+            {/* Rotation stem + button */}
+            <div style={{
+                position: 'absolute',
+                width: `${borderW}px`,
+                height: `${rotStemH}px`,
+                background: '#2563eb',
+                left: '50%',
+                top: `${-rotStemH}px`,
+                transform: 'translateX(-50%)',
+            }} />
             <div
-                className="absolute w-5 h-5 bg-white border border-blue-600 rounded-full cursor-grab hover:bg-blue-50 transition-colors shadow-sm z-50 left-1/2 -top-10 -translate-x-1/2 flex items-center justify-center text-blue-600"
+                style={{
+                    position: 'absolute',
+                    width: `${rotBtnSvg}px`,
+                    height: `${rotBtnSvg}px`,
+                    background: 'white',
+                    border: `${borderW}px solid #2563eb`,
+                    borderRadius: '50%',
+                    cursor: 'grab',
+                    zIndex: 50,
+                    left: '50%',
+                    top: `${-(rotStemH + rotBtnSvg * 0.65)}px`,
+                    transform: 'translateX(-50%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#2563eb',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                }}
                 onMouseDown={(e) => handleMouseDown(e, 'rotate')}
                 title="Rotate"
             >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width={rotIconSvg} height={rotIconSvg} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21.5 2v6h-6M21.34 5.5A10 10 0 1 1 11.26 2.8" />
                 </svg>
             </div>
 
-            <div className={handleStyle} style={{ top: '-6px', left: '-6px', cursor: 'nwse-resize' }} onMouseDown={(e) => handleMouseDown(e, 'nw')} />
-            <div className={handleStyle} style={{ top: '-6px', right: '-6px', cursor: 'nesw-resize' }} onMouseDown={(e) => handleMouseDown(e, 'ne')} />
-            <div className={handleStyle} style={{ bottom: '-6px', left: '-6px', cursor: 'nesw-resize' }} onMouseDown={(e) => handleMouseDown(e, 'sw')} />
-            <div className={handleStyle} style={{ bottom: '-6px', right: '-6px', cursor: 'nwse-resize' }} onMouseDown={(e) => handleMouseDown(e, 'se')} />
-            <div className={handleStyle} style={{ top: '-6px', left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} onMouseDown={(e) => handleMouseDown(e, 'n')} />
-            <div className={handleStyle} style={{ bottom: '-6px', left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} onMouseDown={(e) => handleMouseDown(e, 's')} />
-            <div className={handleStyle} style={{ left: '-6px', top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} onMouseDown={(e) => handleMouseDown(e, 'w')} />
-            <div className={handleStyle} style={{ right: '-6px', top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} onMouseDown={(e) => handleMouseDown(e, 'e')} />
+            {/* Resize handles — positioned with negative offsets in SVG-local units */}
+            <div style={{ ...handleStyle, top: `${-halfH}px`, left: `${-halfH}px`, cursor: 'nwse-resize' }} onMouseDown={(e) => handleMouseDown(e, 'nw')} />
+            <div style={{ ...handleStyle, top: `${-halfH}px`, right: `${-halfH}px`, cursor: 'nesw-resize' }} onMouseDown={(e) => handleMouseDown(e, 'ne')} />
+            <div style={{ ...handleStyle, bottom: `${-halfH}px`, left: `${-halfH}px`, cursor: 'nesw-resize' }} onMouseDown={(e) => handleMouseDown(e, 'sw')} />
+            <div style={{ ...handleStyle, bottom: `${-halfH}px`, right: `${-halfH}px`, cursor: 'nwse-resize' }} onMouseDown={(e) => handleMouseDown(e, 'se')} />
+            <div style={{ ...handleStyle, top: `${-halfH}px`, left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} onMouseDown={(e) => handleMouseDown(e, 'n')} />
+            <div style={{ ...handleStyle, bottom: `${-halfH}px`, left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} onMouseDown={(e) => handleMouseDown(e, 's')} />
+            <div style={{ ...handleStyle, left: `${-halfH}px`, top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} onMouseDown={(e) => handleMouseDown(e, 'w')} />
+            <div style={{ ...handleStyle, right: `${-halfH}px`, top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} onMouseDown={(e) => handleMouseDown(e, 'e')} />
         </div>
     );
 }

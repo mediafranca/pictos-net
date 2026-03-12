@@ -577,6 +577,48 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         );
     }
 
+    // Structuring in progress — keep rawSvg visible with progress bar below
+    if (status === 'structuring' && rawSvg) {
+        return (
+            <div className="flex flex-col h-full">
+                <div
+                    className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden"
+                    style={{ minHeight: 120 }}
+                >
+                    <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none" />
+                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                        {t('svg.traceSvg')}
+                    </div>
+                    <div
+                        dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
+                        className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+                    />
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-3 mb-2">
+                        <div className="w-5 h-5 rounded-full border-2 border-slate-200 border-t-violet-600 animate-spin flex-none" />
+                        <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                            {t('svg.structuring')}
+                        </p>
+                        <span className="ml-auto text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
+                            {elapsedTime.toFixed(1)}s
+                        </span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
+                        <div
+                            className="bg-violet-600 h-full rounded-full transition-all duration-500 ease-out"
+                            style={{ width: '90%' }}
+                        />
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1.5 truncate">
+                        {subStatus || 'Aplicando esquema semántico con Gemini...'}
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col items-center justify-center h-full p-6 border border-dashed border-slate-300 rounded-lg bg-slate-50 hover:bg-white transition-colors group">
             {(status === 'vectorizing' || status === 'structuring') ? (

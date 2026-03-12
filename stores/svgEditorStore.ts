@@ -76,6 +76,14 @@ export interface EditorState {
     overrideMap: OverrideMap;
     libraryValues: Map<string, Record<string, string>>;
 
+    // Path edit mode
+    pathEditMode: {
+        elementId: string;
+        elementType: 'path' | 'polygon' | 'polyline' | 'line' | 'unsupported';
+    } | null;
+    selectedNodeIndex: number | null;
+    pathEditTool: 'select' | 'add' | 'delete';
+
     // Viewport state (excluded from undo/redo)
     viewport: Viewport;
 
@@ -121,6 +129,7 @@ export interface EditorState {
     unciteClass: (elementId: string, className: string) => void;
     setLocalOverride: (elementId: string, className: string, declarations: Record<string, string>) => void;
     restoreClassToLibrary: (elementId: string, className: string) => void;
+    defineLocalStyle: (className: string, declarations: Record<string, string>) => void;
     getResolvedClassValues: (elementId: string, className: string) => Record<string, string>;
     cleanupInlineAttrs: (elementId: string) => void;
 
@@ -135,6 +144,14 @@ export interface EditorState {
     duplicateElement: (id: string) => void;
     bringForward: (id: string) => void;
     sendBackward: (id: string) => void;
+
+    // Path edit mode actions
+    enterPathEditMode: (elementId: string) => void;
+    exitPathEditMode: () => void;
+    updatePathData: (elementId: string, newPathData: string) => void;
+    convertShapeToPath: (elementId: string) => void;
+    setSelectedNodeIndex: (index: number | null) => void;
+    setPathEditTool: (tool: 'select' | 'add' | 'delete') => void;
 
     undo: () => void;
     redo: () => void;
@@ -316,6 +333,9 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         stylesVersion: 0,
         overrideMap: new Map(),
         libraryValues: new Map(),
+        pathEditMode: null,
+        selectedNodeIndex: null,
+        pathEditTool: 'select',
         viewport: { ...DEFAULT_VIEWPORT },
         history: [],
         historyIndex: -1,
@@ -786,6 +806,35 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         },
 
         /**
+         * Defines a new class locally (in-memory, for this session).
+         * The CSS rule is written to the SVG <style> block the first time
+         * the class gets cited on any element via citeClass().
+         * @see CSS_STYLING_ARCHITECTURE.md
+         */
+        defineLocalStyle: (className: string, declarations: Record<string, string>) => {
+            const newStyle: StyleDefinition = {
+                id: 'local-' + Math.random().toString(36).slice(2, 7),
+                selectors: [`.${className}`],
+                rules: Object.entries(declarations)
+                    .filter(([, v]) => v.trim() !== '')
+                    .map(([property, value]) => ({
+                        id: Math.random().toString(36).slice(2, 9),
+                        property,
+                        value,
+                    })),
+            };
+            const current = get().styleDefinitions;
+            const merged = [
+                ...current.filter(s => !s.selectors.includes(`.${className}`)),
+                newStyle,
+            ];
+            set({
+                styleDefinitions: merged,
+                libraryValues: buildLibraryValuesMap(merged),
+            });
+        },
+
+        /**
          * Returns the resolved visual values for (elementId, className):
          * library defaults merged with any local overrides.
          * @see CSS_STYLING_ARCHITECTURE.md — Resolved Values
@@ -922,6 +971,96 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             }
         },
 
+        // ── Path edit mode actions ────────────────────────────────────────────
+
+        enterPathEditMode: (elementId: string) => {
+            const { svgDocument } = get();
+            if (!svgDocument) return;
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const el = doc.getElementById(elementId);
+            if (!el) return;
+            const tag = el.tagName.toLowerCase();
+            const supportedDirectly = ['path', 'polygon', 'polyline', 'line'];
+            const unsupported = ['rect', 'circle', 'ellipse'];
+            const elementType = supportedDirectly.includes(tag)
+                ? tag as 'path' | 'polygon' | 'polyline' | 'line'
+                : unsupported.includes(tag) ? 'unsupported' as const : 'unsupported' as const;
+            set({ pathEditMode: { elementId, elementType }, selectedNodeIndex: null, pathEditTool: 'select' });
+        },
+
+        exitPathEditMode: () => {
+            set({ pathEditMode: null, selectedNodeIndex: null, pathEditTool: 'select' });
+        },
+
+        updatePathData: (elementId: string, newPathData: string) => {
+            const { svgDocument, svgSource } = get();
+            if (!svgDocument) return;
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const el = doc.getElementById(elementId);
+            if (!el) return;
+            const tag = el.tagName.toLowerCase();
+            if (tag === 'path') el.setAttribute('d', newPathData);
+            else if (tag === 'polygon' || tag === 'polyline') el.setAttribute('points', newPathData);
+            else if (tag === 'line') {
+                const [x1, y1, x2, y2] = newPathData.split(' ').map(Number);
+                el.setAttribute('x1', String(x1)); el.setAttribute('y1', String(y1));
+                el.setAttribute('x2', String(x2)); el.setAttribute('y2', String(y2));
+            }
+            const svg = new XMLSerializer().serializeToString(doc);
+            const nextSvg = svgSource === 'raw' ? svg : applyUsedStylesToSvg(svg, get().styleDefinitions, get().keyframes);
+            commitSvg(nextSvg);
+        },
+
+        convertShapeToPath: (elementId: string) => {
+            const { svgDocument } = get();
+            if (!svgDocument) return;
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const el = doc.getElementById(elementId);
+            if (!el) return;
+            const tag = el.tagName.toLowerCase();
+            const ns = 'http://www.w3.org/2000/svg';
+            const path = doc.createElementNS(ns, 'path');
+            Array.from(el.attributes).forEach(attr => {
+                if (!['x', 'y', 'width', 'height', 'cx', 'cy', 'r', 'rx', 'ry'].includes(attr.name)) {
+                    path.setAttribute(attr.name, attr.value);
+                }
+            });
+            let d = '';
+            if (tag === 'rect') {
+                const x = parseFloat(el.getAttribute('x') || '0');
+                const y = parseFloat(el.getAttribute('y') || '0');
+                const w = parseFloat(el.getAttribute('width') || '0');
+                const h = parseFloat(el.getAttribute('height') || '0');
+                d = `M${x},${y} L${x + w},${y} L${x + w},${y + h} L${x},${y + h} Z`;
+            } else if (tag === 'circle') {
+                const cx = parseFloat(el.getAttribute('cx') || '0');
+                const cy = parseFloat(el.getAttribute('cy') || '0');
+                const r = parseFloat(el.getAttribute('r') || '0');
+                d = `M${cx + r},${cy} A${r},${r} 0 1 0 ${cx - r},${cy} A${r},${r} 0 1 0 ${cx + r},${cy} Z`;
+            } else if (tag === 'ellipse') {
+                const cx = parseFloat(el.getAttribute('cx') || '0');
+                const cy = parseFloat(el.getAttribute('cy') || '0');
+                const rx = parseFloat(el.getAttribute('rx') || '0');
+                const ry = parseFloat(el.getAttribute('ry') || '0');
+                d = `M${cx + rx},${cy} A${rx},${ry} 0 1 0 ${cx - rx},${cy} A${rx},${ry} 0 1 0 ${cx + rx},${cy} Z`;
+            }
+            if (d) {
+                path.setAttribute('d', d);
+                el.parentNode?.replaceChild(path, el);
+                const svg = new XMLSerializer().serializeToString(doc);
+                commitSvg(svg);
+                set({ pathEditMode: { elementId, elementType: 'path' }, selectedNodeIndex: null });
+            }
+        },
+
+        setSelectedNodeIndex: (index: number | null) => {
+            set({ selectedNodeIndex: index });
+        },
+
+        setPathEditTool: (tool: 'select' | 'add' | 'delete') => {
+            set({ pathEditTool: tool });
+        },
+
         undo: () => {
             const { history, historyIndex } = get();
             if (historyIndex > 0) {
@@ -999,6 +1138,9 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
                 stylesVersion: 0,
                 overrideMap: new Map(),
                 libraryValues: new Map(),
+                pathEditMode: null,
+                selectedNodeIndex: null,
+                pathEditTool: 'select',
                 viewport: { ...DEFAULT_VIEWPORT },
                 history: [],
                 historyIndex: -1,

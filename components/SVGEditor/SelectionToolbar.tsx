@@ -6,11 +6,12 @@
 import React, { useState } from 'react';
 import {
     Group, Ungroup, Paintbrush, Trash2, Copy,
-    ArrowUp, ArrowDown,
+    ArrowUp, ArrowDown, Plus, Minus, Spline, X, MousePointer2,
 } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
+import { StylePickerModal } from './StylePickerModal';
 
 const LEFT_PANEL = 288;
 const RIGHT_PANEL = 320;
@@ -54,6 +55,116 @@ function handleToolbarKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     }
 }
 
+// ── ToolbarStylePicker — reads styleDefs from store ──────────────────────────
+
+const ToolbarStylePicker: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    elementId: string;
+    currentClasses: string[];
+}> = ({ isOpen, onClose, elementId, currentClasses }) => {
+    const styleDefinitions = useSVGEditorStore(state => state.styleDefinitions);
+    return (
+        <StylePickerModal
+            isOpen={isOpen}
+            onClose={onClose}
+            elementId={elementId}
+            styleDefs={styleDefinitions}
+            currentClasses={currentClasses}
+        />
+    );
+};
+
+// ── PathEditToolbar — shown when pathEditMode is active ───────────────────────
+
+const PathEditToolbar: React.FC = () => {
+    const { t } = useTranslation();
+    const exitPathEditMode = useSVGEditorStore(state => state.exitPathEditMode);
+    const selectedNodeIndex = useSVGEditorStore(state => state.selectedNodeIndex);
+    const pathEditTool = useSVGEditorStore(state => state.pathEditTool);
+    const setPathEditTool = useSVGEditorStore(state => state.setPathEditTool);
+
+    const centerX = LEFT_PANEL + (window.innerWidth - LEFT_PANEL - RIGHT_PANEL) / 2;
+    const btnClass = "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-violet-800 rounded transition-colors";
+    const activeBtnClass = "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-900 bg-amber-400 rounded transition-colors";
+
+    return (
+        <div
+            role="toolbar"
+            aria-label="Path edit"
+            className="fixed z-[15] flex items-center gap-1 bg-violet-900 rounded-lg shadow-xl border border-violet-700 px-2 py-1.5 text-white"
+            style={{ top: 76, left: centerX, transform: 'translateX(-50%)' }}
+            onKeyDown={handleToolbarKeyDown}
+        >
+            <span className="text-xs font-mono text-violet-300 px-2">
+                {t('svgEditor.nodeEditMode')}
+            </span>
+
+            <div className="w-px h-5 bg-violet-600" />
+
+            {/* Sticky tool mode toggles */}
+            <button
+                onClick={() => setPathEditTool('select')}
+                className={pathEditTool === 'select' ? activeBtnClass : btnClass}
+                title="Select"
+                data-toolbar-item
+                tabIndex={0}
+            >
+                <MousePointer2 size={13} aria-hidden="true" />
+            </button>
+
+            <button
+                onClick={() => setPathEditTool(pathEditTool === 'add' ? 'select' : 'add')}
+                className={pathEditTool === 'add' ? activeBtnClass : btnClass}
+                title={t('svgEditor.addNodeMode')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <Plus size={13} aria-hidden="true" />
+                {t('svgEditor.addNodeMode')}
+            </button>
+
+            <button
+                onClick={() => setPathEditTool(pathEditTool === 'delete' ? 'select' : 'delete')}
+                className={pathEditTool === 'delete' ? activeBtnClass : btnClass}
+                title={t('svgEditor.deleteNodeMode')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <Minus size={13} aria-hidden="true" />
+                {t('svgEditor.deleteNodeMode')}
+            </button>
+
+            <div className="w-px h-5 bg-violet-600" />
+
+            <button
+                disabled={selectedNodeIndex == null}
+                className={`${btnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                title={t('svgEditor.toggleSmooth')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <Spline size={13} aria-hidden="true" />
+            </button>
+
+            <div className="w-px h-5 bg-violet-600" />
+
+            <button
+                onClick={exitPathEditMode}
+                className={btnClass}
+                title={t('svgEditor.exitNodeEdit')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <X size={13} aria-hidden="true" />
+                {t('svgEditor.exitNodeEdit')}
+            </button>
+        </div>
+    );
+};
+
+// ── SelectionToolbar ─────────────────────────────────────────────────────────
+
 interface SelectionToolbarProps {
     styleDefs: StyleDefinition[];
 }
@@ -66,15 +177,18 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
         groupElements,
         ungroupElement,
         deleteElement,
-        addClassToElement,
         clearSelection,
         duplicateElement,
         bringForward,
         sendBackward,
         svgDocument,
+        pathEditMode,
     } = useSVGEditorStore();
 
-    const [showClassPicker, setShowClassPicker] = useState(false);
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
+
+    // If in path edit mode, show the node editing toolbar instead
+    if (pathEditMode) return <PathEditToolbar />;
 
     const ids = Array.from(selectedElementIds);
     const singleId = ids.length === 1 ? ids[0] : (selectedElementIds.size === 0 ? selectedElementId : null);
@@ -118,21 +232,12 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
         if (singleId) sendBackward(singleId);
     };
 
-    const handleApplyClass = (className: string) => {
-        allIds.forEach(id => addClassToElement(id, className));
-        setShowClassPicker(false);
+    const getCurrentClasses = (id: string): string[] => {
+        if (!svgDocument || !id) return [];
+        const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+        const el = doc.getElementById(id);
+        return (el?.getAttribute('class') || '').split(' ').filter(Boolean);
     };
-
-    // Extract available class names from style defs
-    const availableClasses: string[] = Array.from(
-        new Set<string>(
-            styleDefs.flatMap(s =>
-                s.selectors
-                    .filter(sel => sel.startsWith('.'))
-                    .map(sel => sel.slice(1))
-            )
-        )
-    );
 
     // Center between panels
     const centerX = LEFT_PANEL + (window.innerWidth - LEFT_PANEL - RIGHT_PANEL) / 2;
@@ -141,91 +246,91 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
     const divider = <div className="w-px h-5 bg-slate-200" />;
 
     return (
-        <div
-            role="toolbar"
-            aria-label="Selection"
-            className="fixed z-[15] flex items-center gap-1 bg-white rounded-lg shadow-xl border border-slate-200 px-2 py-1.5"
-            style={{ top: 76, left: centerX, transform: 'translateX(-50%)' }}
-            onKeyDown={handleToolbarKeyDown}
-        >
-            {/* Group — 2+ selected */}
-            {allIds.length >= 2 && (
-                <button
-                    onClick={handleGroup}
-                    className={btnClass}
-                    title={t('svgEditor.group')}
-                    aria-label={t('svgEditor.group')}
-                    data-toolbar-item
-                    tabIndex={0}
-                >
-                    <Group size={13} aria-hidden="true" />
-                    {t('svgEditor.group')}
-                </button>
-            )}
-
-            {/* Ungroup — 1 selected <g> */}
-            {singleId && isGroup && (
-                <button
-                    onClick={handleUngroup}
-                    className={btnClass}
-                    title={t('svgEditor.ungroup')}
-                    aria-label={t('svgEditor.ungroup')}
-                    data-toolbar-item
-                    tabIndex={-1}
-                >
-                    <Ungroup size={13} aria-hidden="true" />
-                    {t('svgEditor.ungroup')}
-                </button>
-            )}
-
-            {(allIds.length >= 2 || (singleId && isGroup)) && divider}
-
-            {/* Duplicate — single selection */}
-            {singleId && (
-                <button
-                    onClick={handleDuplicate}
-                    className={btnClass}
-                    title={t('svgEditor.duplicate')}
-                    aria-label={t('svgEditor.duplicate')}
-                    data-toolbar-item
-                    tabIndex={-1}
-                >
-                    <Copy size={13} aria-hidden="true" />
-                </button>
-            )}
-
-            {/* Bring Forward / Send Backward — single selection */}
-            {singleId && (
-                <>
+        <>
+            <div
+                role="toolbar"
+                aria-label="Selection"
+                className="fixed z-[15] flex items-center gap-1 bg-white rounded-lg shadow-xl border border-slate-200 px-2 py-1.5"
+                style={{ top: 76, left: centerX, transform: 'translateX(-50%)' }}
+                onKeyDown={handleToolbarKeyDown}
+            >
+                {/* Group — 2+ selected */}
+                {allIds.length >= 2 && (
                     <button
-                        onClick={handleBringForward}
+                        onClick={handleGroup}
                         className={btnClass}
-                        title={t('svgEditor.bringForward')}
-                        aria-label={t('svgEditor.bringForward')}
+                        title={t('svgEditor.group')}
+                        aria-label={t('svgEditor.group')}
+                        data-toolbar-item
+                        tabIndex={0}
+                    >
+                        <Group size={13} aria-hidden="true" />
+                        {t('svgEditor.group')}
+                    </button>
+                )}
+
+                {/* Ungroup — 1 selected <g> */}
+                {singleId && isGroup && (
+                    <button
+                        onClick={handleUngroup}
+                        className={btnClass}
+                        title={t('svgEditor.ungroup')}
+                        aria-label={t('svgEditor.ungroup')}
                         data-toolbar-item
                         tabIndex={-1}
                     >
-                        <ArrowUp size={13} aria-hidden="true" />
+                        <Ungroup size={13} aria-hidden="true" />
+                        {t('svgEditor.ungroup')}
                     </button>
+                )}
+
+                {(allIds.length >= 2 || (singleId && isGroup)) && divider}
+
+                {/* Duplicate — single selection */}
+                {singleId && (
                     <button
-                        onClick={handleSendBackward}
+                        onClick={handleDuplicate}
                         className={btnClass}
-                        title={t('svgEditor.sendBackward')}
-                        aria-label={t('svgEditor.sendBackward')}
+                        title={t('svgEditor.duplicate')}
+                        aria-label={t('svgEditor.duplicate')}
                         data-toolbar-item
                         tabIndex={-1}
                     >
-                        <ArrowDown size={13} aria-hidden="true" />
+                        <Copy size={13} aria-hidden="true" />
                     </button>
-                </>
-            )}
+                )}
 
-            {divider}
+                {/* Bring Forward / Send Backward — single selection */}
+                {singleId && (
+                    <>
+                        <button
+                            onClick={handleBringForward}
+                            className={btnClass}
+                            title={t('svgEditor.bringForward')}
+                            aria-label={t('svgEditor.bringForward')}
+                            data-toolbar-item
+                            tabIndex={-1}
+                        >
+                            <ArrowUp size={13} aria-hidden="true" />
+                        </button>
+                        <button
+                            onClick={handleSendBackward}
+                            className={btnClass}
+                            title={t('svgEditor.sendBackward')}
+                            aria-label={t('svgEditor.sendBackward')}
+                            data-toolbar-item
+                            tabIndex={-1}
+                        >
+                            <ArrowDown size={13} aria-hidden="true" />
+                        </button>
+                    </>
+                )}
 
-            {/* Apply Class */}
-            <div className="relative">
+                {divider}
+
+                {/* Apply Class — opens StylePickerModal */}
                 <button
-                    onClick={() => setShowClassPicker(!showClassPicker)}
+                    onClick={() => setIsPickerOpen(true)}
                     className={btnClass}
                     title={t('svgEditor.applyClass')}
                     aria-label={t('svgEditor.applyClass')}
@@ -236,38 +341,34 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
                     {t('svgEditor.applyClass')}
                 </button>
 
-                {showClassPicker && availableClasses.length > 0 && (
-                    <div className="absolute bottom-full left-0 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[120px] max-h-48 overflow-y-auto">
-                        {availableClasses.map(cls => (
-                            <button
-                                key={cls}
-                                onClick={() => handleApplyClass(cls)}
-                                className="w-full text-left px-3 py-1.5 text-xs font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
-                            >
-                                .{cls}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                {divider}
+
+                {/* Delete */}
+                <button
+                    onClick={handleDelete}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded transition-colors"
+                    title={t('svgEditor.deleteSelected')}
+                    aria-label={t('svgEditor.deleteSelected')}
+                    data-toolbar-item
+                    tabIndex={-1}
+                >
+                    <Trash2 size={13} aria-hidden="true" />
+                </button>
+
+                <div className="ml-1 text-xs text-slate-500 tabular-nums">
+                    {allIds.length}
+                </div>
             </div>
 
-            {divider}
-
-            {/* Delete */}
-            <button
-                onClick={handleDelete}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded transition-colors"
-                title={t('svgEditor.deleteSelected')}
-                aria-label={t('svgEditor.deleteSelected')}
-                data-toolbar-item
-                tabIndex={-1}
-            >
-                <Trash2 size={13} aria-hidden="true" />
-            </button>
-
-            <div className="ml-1 text-xs text-slate-500 tabular-nums">
-                {allIds.length}
-            </div>
-        </div>
+            {/* StylePickerModal — outside toolbar div for proper z-index layering */}
+            {singleId && (
+                <ToolbarStylePicker
+                    isOpen={isPickerOpen}
+                    onClose={() => setIsPickerOpen(false)}
+                    elementId={singleId}
+                    currentClasses={getCurrentClasses(singleId)}
+                />
+            )}
+        </>
     );
 };

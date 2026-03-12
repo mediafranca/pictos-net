@@ -140,8 +140,10 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
     const svgDocument = useSVGEditorStore(state => state.svgDocument);
     const undo = useSVGEditorStore(state => state.undo);
     const redo = useSVGEditorStore(state => state.redo);
-    const canUndo = useSVGEditorStore(state => state.canUndo);
-    const canRedo = useSVGEditorStore(state => state.canRedo);
+    const historyIndex = useSVGEditorStore(state => state.historyIndex);
+    const historyLength = useSVGEditorStore(state => state.history.length);
+    const hasUndo = historyIndex > 0;
+    const hasRedo = historyIndex < historyLength - 1;
     const reset = useSVGEditorStore(state => state.reset);
     const viewport = useSVGEditorStore(state => state.viewport);
     const zoomIn = useSVGEditorStore(state => state.zoomIn);
@@ -278,7 +280,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                     <div className="flex bg-slate-700/50 rounded-md border border-slate-600">
                         <button
                             onClick={undo}
-                            disabled={!canUndo()}
+                            disabled={!hasUndo}
                             className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors border-r border-slate-600 rounded-l-md"
                             title={t('svgEditor.undo')}
                             aria-label={t('svgEditor.undo')}
@@ -289,7 +291,7 @@ export const SVGEditorModal: React.FC<SVGEditorModalProps> = ({
                         </button>
                         <button
                             onClick={redo}
-                            disabled={!canRedo()}
+                            disabled={!hasRedo}
                             className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded-r-md"
                             title={t('svgEditor.redo')}
                             aria-label={t('svgEditor.redo')}

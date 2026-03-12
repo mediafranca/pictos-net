@@ -30,7 +30,7 @@ import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
-import { AuthProvider, logout, onLogin } from './components/AuthGate';
+import { AuthProvider, logout, onLogin, ensureAuth } from './components/AuthGate';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -727,6 +727,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   };
 
   const processStep = async (index: number, step: 'nlu' | 'visual' | 'bitmap'): Promise<boolean> => {
+    // Pre-flight: garantizar sesión antes de tocar estado de UI.
+    try {
+      await ensureAuth();
+    } catch {
+      return false;
+    }
+
     const row = rows[index];
     if (!row) return false;
 
@@ -786,6 +793,14 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   };
 
   const processCascade = async (index: number) => {
+    // Pre-flight: garantizar sesión antes de tocar estado de UI.
+    // Si el usuario cancela el login, salir silenciosamente.
+    try {
+      await ensureAuth();
+    } catch {
+      return;
+    }
+
     const row = rows[index];
     if (!row) return;
 

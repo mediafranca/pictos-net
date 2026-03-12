@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
-import { Trash2, Check, RotateCcw, X, Plus, Ungroup, AlertTriangle, Sparkles } from 'lucide-react';
+import { Trash2, Check, RotateCcw, X, Plus, Ungroup, AlertTriangle, Sparkles, Pencil, Wand2 } from 'lucide-react';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { StylePickerModal } from './StylePickerModal';
+import EditModal from '../../lib/style-editor/lib/components/EditModal';
+import { INITIAL_KEYFRAMES } from '../../lib/style-editor/lib/keyframeConstants';
 
 // ── RenameField ─────────────────────────────────────────────────────────────
 const RenameField: React.FC<{ elementId: string }> = ({ elementId }) => {
@@ -210,7 +212,12 @@ const CitedClassEditor: React.FC<CitedClassEditorProps> = ({
 };
 
 // ── InlineAttrsPanel — displays presentation attrs for raw SVG elements ──────
-const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
+interface InlineAttrsPanelProps {
+    elementId: string;
+    onConvertToClass?: (declarations: Record<string, string>) => void;
+}
+
+const InlineAttrsPanel: React.FC<InlineAttrsPanelProps> = ({ elementId, onConvertToClass }) => {
     const { t } = useTranslation();
     const { svgDocument, updateElementAttributes, stripInlineStyles } = useSVGEditorStore();
     const [confirming, setConfirming] = useState(false);
@@ -251,6 +258,17 @@ const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
                     />
                 ))}
             </div>
+
+            {onConvertToClass && (
+                <button
+                    onClick={() => onConvertToClass(attrs.reduce((acc, a) => ({ ...acc, [a.prop]: a.value }), {} as Record<string, string>))}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+                >
+                    <Wand2 size={11} aria-hidden="true" />
+                    {t('svgEditor.convertToClass')}
+                </button>
+            )}
+
             {confirming ? (
                 <div className="space-y-2 mt-2">
                     <p className="text-xs text-amber-600 flex items-start gap-1">
@@ -285,21 +303,15 @@ const InlineAttrsPanel: React.FC<{ elementId: string }> = ({ elementId }) => {
 };
 
 // ── GroupPanel — actions for <g> elements ─────────────────────────────────────
-const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> = ({ elementId, styleDefs }) => {
-    const { t } = useTranslation();
-    const { ungroupElement, addClassToElement, stripInlineStyles, svgDocument } = useSVGEditorStore();
-    const [showClassPicker, setShowClassPicker] = useState(false);
-    const [confirmStrip, setConfirmStrip] = useState(false);
+interface GroupPanelProps {
+    elementId: string;
+    onOpenPicker: () => void;
+}
 
-    const availableClasses: string[] = Array.from(
-        new Set<string>(
-            styleDefs.flatMap(s =>
-                s.selectors
-                    .filter(sel => sel.startsWith('.'))
-                    .map(sel => sel.slice(1))
-            )
-        )
-    );
+const GroupPanel: React.FC<GroupPanelProps> = ({ elementId, onOpenPicker }) => {
+    const { t } = useTranslation();
+    const { ungroupElement, stripInlineStyles, svgDocument } = useSVGEditorStore();
+    const [confirmStrip, setConfirmStrip] = useState(false);
 
     // Check if element is a <g>
     if (!svgDocument) return null;
@@ -313,29 +325,14 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
                 {t('svgEditor.groupName')}
             </label>
 
-            {/* Apply class */}
-            <div className="relative">
-                <button
-                    onClick={() => setShowClassPicker(!showClassPicker)}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
-                >
-                    <Plus size={10} aria-hidden="true" />
-                    {t('svgEditor.applyClass')}
-                </button>
-                {showClassPicker && availableClasses.length > 0 && (
-                    <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg py-1 max-h-40 overflow-y-auto z-10">
-                        {availableClasses.map(cls => (
-                            <button
-                                key={cls}
-                                onClick={() => { addClassToElement(elementId, cls); setShowClassPicker(false); }}
-                                className="w-full text-left px-3 py-1.5 text-xs font-mono text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors"
-                            >
-                                .{cls}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
+            {/* Apply class — delegates to parent StylePickerModal */}
+            <button
+                onClick={onOpenPicker}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+            >
+                <Plus size={10} aria-hidden="true" />
+                {t('svgEditor.applyClass')}
+            </button>
 
             {/* Strip inline styles with warning */}
             {confirmStrip ? (
@@ -390,6 +387,62 @@ const GroupPanel: React.FC<{ elementId: string; styleDefs: StyleDefinition[] }> 
     );
 };
 
+// ── PathEditButton — enter/exit node editing mode ─────────────────────────────
+const PathEditButton: React.FC<{ elementId: string }> = ({ elementId }) => {
+    const { t } = useTranslation();
+    const { pathEditMode, enterPathEditMode, exitPathEditMode, convertShapeToPath, svgDocument } = useSVGEditorStore();
+
+    const elementTag = React.useMemo(() => {
+        if (!svgDocument) return null;
+        const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+        const el = doc.getElementById(elementId);
+        return el?.tagName.toLowerCase() ?? null;
+    }, [elementId, svgDocument]);
+
+    const editableTags = ['path', 'polygon', 'polyline', 'line', 'rect', 'circle', 'ellipse'];
+    if (!elementTag || !editableTags.includes(elementTag)) return null;
+
+    const isEditing = pathEditMode?.elementId === elementId;
+    const needsConversion = ['rect', 'circle', 'ellipse'].includes(elementTag);
+
+    if (needsConversion && !isEditing) {
+        return (
+            <div className="px-4 py-3 border-b border-slate-100 space-y-2">
+                <p className="text-xs text-slate-500">{t('svgEditor.convertToPathDesc')}</p>
+                <button
+                    onClick={() => convertShapeToPath(elementId)}
+                    className="w-full flex items-center justify-center gap-2 py-2 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+                >
+                    <Pencil size={12} aria-hidden="true" />
+                    {t('svgEditor.convertToPath')}
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="px-4 py-3 border-b border-slate-100">
+            {isEditing ? (
+                <button
+                    onClick={exitPathEditMode}
+                    className="w-full flex items-center justify-center gap-2 py-2 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 rounded transition-colors"
+                >
+                    <Pencil size={12} aria-hidden="true" />
+                    {t('svgEditor.exitNodeEdit')}
+                </button>
+            ) : (
+                <button
+                    onClick={() => enterPathEditMode(elementId)}
+                    className="w-full flex items-center justify-center gap-2 py-2 text-xs text-violet-600 hover:bg-violet-50 border border-violet-200 rounded transition-colors"
+                >
+                    <Pencil size={12} aria-hidden="true" />
+                    {t('svgEditor.editNodes')}
+                </button>
+            )}
+        </div>
+    );
+};
+
 // ── StylePanel ────────────────────────────────────────────────────────────────
 interface StylePanelProps {
     styleDefs?: StyleDefinition[];
@@ -398,12 +451,14 @@ interface StylePanelProps {
 
 /**
  * Right panel of the SVG Editor.
- * Shows only the classes already cited on the selected element (no full palette
- * grid inline). The full palette opens via StylePickerModal.
  *
- * Two-level zero-inline-styles model:
- *   - Level 1 (cite/uncite): via StylePickerModal
- *   - Level 2 (local overrides): CitedClassEditor rows below
+ * Layout order:
+ *   1. Element ID (RenameField) — header
+ *   2. Inline presentation attributes (with "convert to class")
+ *   3. Cited classes with local override editors
+ *   4. Apply class / Define buttons
+ *   5. Danger zone (delete)
+ *
  * @see CSS_STYLING_ARCHITECTURE.md
  */
 export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSource = null }) => {
@@ -414,13 +469,17 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
         overrideMap,
         libraryValues,
         unciteClass,
+        citeClass,
         setLocalOverride,
         restoreClassToLibrary,
         getResolvedClassValues,
+        defineLocalStyle,
     } = useSVGEditorStore();
 
     const [currentClasses, setCurrentClasses] = useState<string[]>([]);
     const [isPickerOpen, setIsPickerOpen] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editModalPreset, setEditModalPreset] = useState<Record<string, string> | null>(null);
     const isRaw = svgSource === 'raw';
 
     // Sync currentClasses from svgDocument whenever element or document changes
@@ -433,9 +492,11 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
         setCurrentClasses(classAttr.split(' ').filter(Boolean));
     }, [selectedElementId, svgDocument]);
 
-    // Close picker when selection changes
+    // Close modals when selection changes
     useEffect(() => {
         setIsPickerOpen(false);
+        setIsEditModalOpen(false);
+        setEditModalPreset(null);
     }, [selectedElementId]);
 
     if (!selectedElementId) {
@@ -452,36 +513,74 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
         setLocalOverride(selectedElementId, cls, { [property]: value });
     };
 
+    const handleSaveNewClass = (styleDef: StyleDefinition) => {
+        const className = styleDef.selectors[0]?.replace(/^\./, '') ?? '';
+        if (!className) return;
+        defineLocalStyle(className, Object.fromEntries(styleDef.rules.map(r => [r.property, r.value])));
+        if (selectedElementId) {
+            citeClass(selectedElementId, className);
+        }
+        setIsEditModalOpen(false);
+        setEditModalPreset(null);
+    };
+
+    const handleConvertToClass = (declarations: Record<string, string>) => {
+        setEditModalPreset(declarations);
+        setIsEditModalOpen(true);
+    };
+
     return (
         <div id="svg-editor-props-content" className="flex flex-col h-full">
 
-            {/* Header */}
+            {/* 1. Header with editable Element ID */}
             <div id="svg-editor-props-header" className="px-4 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{t('svgEditor.properties')}</p>
-                <p className="text-xs font-mono text-slate-700 mt-0.5 truncate">{selectedElementId}</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    {t('svgEditor.properties')}
+                </p>
+                <RenameField elementId={selectedElementId} />
             </div>
 
             <div className="flex-1 overflow-y-auto">
 
+                {/* Path edit mode */}
+                <PathEditButton elementId={selectedElementId} />
+
                 {/* Group-specific panel */}
-                <GroupPanel elementId={selectedElementId} styleDefs={styleDefs} />
+                <GroupPanel
+                    elementId={selectedElementId}
+                    onOpenPicker={() => setIsPickerOpen(true)}
+                />
 
-                {/* Inline presentation attributes (shown for raw SVGs or when attrs exist) */}
-                <InlineAttrsPanel elementId={selectedElementId} />
+                {/* 2. Inline presentation attributes */}
+                <InlineAttrsPanel
+                    elementId={selectedElementId}
+                    onConvertToClass={handleConvertToClass}
+                />
 
-                {/* ── Cited classes with local override editors ── */}
+                {/* 3. Cited classes with local override editors */}
                 <div id="svg-editor-props-overrides" className="px-4 py-4 space-y-3">
                     <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                             {isRaw ? t('svgEditor.applyClass') : t('svgEditor.localOverride')}
                         </label>
-                        <button
-                            onClick={() => setIsPickerOpen(true)}
-                            className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-violet-200"
-                        >
-                            <Plus size={10} aria-hidden="true" />
-                            {t('svgEditor.addStyle')}
-                        </button>
+                        {/* 4. Apply class / Define buttons */}
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setIsEditModalOpen(true)}
+                                className="flex items-center gap-1 text-xs text-slate-500 hover:text-violet-600 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-transparent hover:border-violet-200"
+                                title={t('svgEditor.defineNewClass')}
+                            >
+                                <Plus size={10} aria-hidden="true" />
+                                Define
+                            </button>
+                            <button
+                                onClick={() => setIsPickerOpen(true)}
+                                className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 hover:bg-violet-50 px-2 py-1 rounded transition-colors border border-violet-200"
+                            >
+                                <Plus size={10} aria-hidden="true" />
+                                {t('svgEditor.addStyle')}
+                            </button>
+                        </div>
                     </div>
 
                     {currentClasses.length === 0 ? (
@@ -539,26 +638,36 @@ export const StylePanel: React.FC<StylePanelProps> = ({ styleDefs = [], svgSourc
                 })()}
             </div>
 
-            {/* ── Identity ── */}
-            <div id="svg-editor-props-identity" className="border-t border-slate-100 px-4 py-3 space-y-1.5 shrink-0">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    {t('svgEditor.elementId')}
-                </label>
-                <RenameField elementId={selectedElementId} />
-            </div>
-
-            {/* ── Danger zone ── */}
+            {/* 5. Danger zone */}
             <div id="svg-editor-props-danger" className="border-t border-red-100 px-4 py-3 shrink-0">
                 <DeleteButton elementId={selectedElementId} />
             </div>
 
-            {/* Style picker — opened by "+ Agregar estilo" button */}
+            {/* Style picker modal */}
             <StylePickerModal
                 isOpen={isPickerOpen}
                 onClose={() => setIsPickerOpen(false)}
                 elementId={selectedElementId}
                 styleDefs={styleDefs}
                 currentClasses={currentClasses}
+            />
+
+            {/* EditModal for defining new classes (from "Define" button or "Convert inline to class") */}
+            <EditModal
+                isOpen={isEditModalOpen}
+                onClose={() => { setIsEditModalOpen(false); setEditModalPreset(null); }}
+                styleDef={editModalPreset ? {
+                    id: '',
+                    selectors: ['.nueva-clase'],
+                    rules: Object.entries(editModalPreset).map(([property, value]) => ({
+                        id: Math.random().toString(36).slice(2, 9),
+                        property,
+                        value,
+                    })),
+                } : null}
+                onSave={handleSaveNewClass}
+                onDelete={() => {}}
+                keyframes={INITIAL_KEYFRAMES}
             />
         </div>
     );

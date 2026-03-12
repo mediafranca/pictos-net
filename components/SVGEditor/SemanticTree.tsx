@@ -62,7 +62,7 @@ function TreeNode({
     onShiftClick,
 }: TreeNodeProps) {
     const { t } = useTranslation();
-    const { selectedElementId, selectElement, updateElementId, deleteElement } = useSVGEditorStore();
+    const { selectedElementId, selectElement, updateElementId, deleteElement, pathEditMode } = useSVGEditorStore();
     const [isExpanded, setIsExpanded] = useState(true);
     const [isEditingId, setIsEditingId] = useState(false);
     const [editedId, setEditedId] = useState(node.id);
@@ -121,13 +121,14 @@ function TreeNode({
                 className={`group flex items-center gap-1 px-2 py-1.5 hover:bg-slate-100 transition-colors text-slate-700 ${dragIndicator} ${isSelected || isMultiSelected ? 'bg-slate-100' : ''}`}
                 style={{ paddingLeft: `${level * 14 + 8}px` }}
                 onClick={(e) => {
+                    if (pathEditMode) return;
                     if (e.shiftKey) {
                         onShiftClick(node.id);
                     } else {
                         selectElement(node.id);
                     }
                 }}
-                draggable={!isEditingId}
+                draggable={!isEditingId && !pathEditMode}
                 onDragStart={(event) => {
                     event.stopPropagation();
                     event.dataTransfer.effectAllowed = 'move';
@@ -233,6 +234,7 @@ function TreeNode({
                         title={t('svgEditor.selectStyle')}
                         onClick={(e) => {
                             e.stopPropagation();
+                            if (pathEditMode) return;
                             selectElement(node.id);
                             setIsPickerOpen(true);
                         }}

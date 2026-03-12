@@ -10,6 +10,7 @@ import { Button } from '../ui/button';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { normalizeSVG, parseSVGToDOM } from '../../utils/svgNormalizer';
 import BoundingBox from './BoundingBox';
+import PathEditor from './PathEditor';
 import { updateDynamicStyles } from '../../lib/style-editor/lib/utils/cssGenerator';
 
 export default function SVGCanvas() {
@@ -29,6 +30,7 @@ export default function SVGCanvas() {
         setViewport,
         zoomToFit,
         zoomToPoint,
+        pathEditMode,
     } = useSVGEditorStore();
 
     const [refreshKey, setRefreshKey] = useState(0);
@@ -166,6 +168,7 @@ export default function SVGCanvas() {
 
         const handleSvgClick = (event: MouseEvent) => {
             if (marqueeActive.current) return;
+            if (useSVGEditorStore.getState().pathEditMode) return;
 
             const target = event.target;
             if (!(target instanceof Element)) {
@@ -277,11 +280,48 @@ export default function SVGCanvas() {
             } else if (mod && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
                 useSVGEditorStore.getState().undo();
+            } else if (e.key === 'Escape') {
+                const { pathEditMode: pem } = useSVGEditorStore.getState();
+                if (pem) {
+                    e.preventDefault();
+                    useSVGEditorStore.getState().exitPathEditMode();
+                }
             }
         };
         document.addEventListener('keydown', handler);
         return () => document.removeEventListener('keydown', handler);
     }, []);
+
+    // Path edit mode — isolation: dim everything except the active element
+    useEffect(() => {
+        if (!svgElement) return;
+
+        if (!pathEditMode) {
+            svgElement.querySelectorAll<SVGElement>('[id]').forEach(el => {
+                el.style.opacity = '';
+                el.style.transition = '';
+            });
+            return;
+        }
+
+        svgElement.querySelectorAll<SVGElement>('[id]').forEach(el => {
+            const id = el.getAttribute('id');
+            if (id === pathEditMode.elementId) {
+                el.style.opacity = '1';
+                el.style.transition = 'opacity 0.2s ease';
+            } else {
+                el.style.opacity = '0.15';
+                el.style.transition = 'opacity 0.2s ease';
+            }
+        });
+
+        return () => {
+            svgElement.querySelectorAll<SVGElement>('[id]').forEach(el => {
+                el.style.opacity = '';
+                el.style.transition = '';
+            });
+        };
+    }, [svgElement, pathEditMode]);
 
     // Drag-to-pan handlers
     const handleStageMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -295,6 +335,7 @@ export default function SVGCanvas() {
 
         // Only start marquee on left click on background
         if (e.button !== 0) return;
+        if (useSVGEditorStore.getState().pathEditMode) return;
         if ((e.target as Element).closest('svg [id]')) return;
 
         const stage = canvasStageRef.current;
@@ -391,6 +432,7 @@ export default function SVGCanvas() {
     }, [marquee, svgElement, selectElements]);
 
     const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (useSVGEditorStore.getState().pathEditMode) return;
         if (e.target === canvasStageRef.current) {
             selectElement(null);
         }
@@ -475,11 +517,14 @@ export default function SVGCanvas() {
                     style={canvasSize ? {
                         width: `${canvasSize.width}px`,
                         height: `${canvasSize.height}px`,
-                    } : undefined}
+                        overflow: 'visible',
+                    } : { overflow: 'visible' }}
                 />
 
-                {/* Bounding boxes for all selected elements */}
-                {svgElement && selectedElementIds.size > 0 && Array.from(selectedElementIds).map(id => (
+                {/* Bounding boxes for all selected elements (hidden during path edit) */}
+                {svgElement && selectedElementIds.size > 0 && Array.from(selectedElementIds)
+                    .filter(id => !pathEditMode || pathEditMode.elementId !== id)
+                    .map(id => (
                     <BoundingBox
                         key={`${refreshKey}-${id}`}
                         svgElement={svgElement}
@@ -488,13 +533,22 @@ export default function SVGCanvas() {
                         onTransformComplete={() => setRefreshKey(prev => prev + 1)}
                     />
                 ))}
-                {svgElement && selectedElementId && selectedElementIds.size === 0 && (
+                {svgElement && selectedElementId && selectedElementIds.size === 0
+                    && (!pathEditMode || pathEditMode.elementId !== selectedElementId) && (
                     <BoundingBox
                         key={refreshKey}
                         svgElement={svgElement}
                         elementId={selectedElementId}
                         containerElement={svgContentRef.current ?? svgElement}
                         onTransformComplete={() => setRefreshKey(prev => prev + 1)}
+                    />
+                )}
+
+                {/* Path Edit Mode — node handles */}
+                {pathEditMode && svgElement && (
+                    <PathEditor
+                        svgElement={svgElement}
+                        elementId={pathEditMode.elementId}
                     />
                 )}
 

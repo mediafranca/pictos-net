@@ -96,7 +96,7 @@ function removeSpamNotice() {
 
 /**
  * Open login and return a Promise that resolves with the user once they log in.
- * Rejects if the user closes the dialog without logging in.
+ * Rejects cleanly if the user closes the dialog without logging in.
  */
 export function requestLogin(): Promise<IdentityUser> {
     return new Promise(async (resolve, reject) => {
@@ -104,16 +104,39 @@ export function requestLogin(): Promise<IdentityUser> {
         const current = widget.currentUser();
         if (current) { resolve(current); return; }
 
-        const onLogin = (u?: IdentityUser) => {
-            widget.close();
+        let settled = false;
+
+        const onLoginHandler = (u?: IdentityUser) => {
+            if (settled) return;
+            settled = true;
             removeSpamNotice();
             if (u) resolve(u);
             else reject(new Error('Login cancelled'));
         };
-        widget.on('login', onLogin);
+
+        const onCloseHandler = () => {
+            if (settled) return;
+            settled = true;
+            removeSpamNotice();
+            reject(new Error('Login cancelled'));
+        };
+
+        widget.on('login', onLoginHandler);
+        widget.on('close', onCloseHandler);
         showSpamNotice();
         widget.open('login');
     });
+}
+
+/**
+ * Garantiza que haya una sesión activa antes de llamar a la API.
+ * - En dev: no-op (siempre pasa).
+ * - En prod: si no hay sesión, abre el widget y espera login.
+ *   Lanza error si el usuario cancela — el caller debe manejar el catch.
+ */
+export async function ensureAuth(): Promise<void> {
+    if (isDev) return;
+    await requestLogin();
 }
 
 interface AuthProviderProps {
