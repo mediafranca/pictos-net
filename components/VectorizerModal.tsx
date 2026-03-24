@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Download, Check, AlertTriangle, Loader2, ChevronDown, ChevronRight, Scan } from 'lucide-react';
 import { useDialogA11y } from '../hooks/useDialogA11y';
 import {
     traceInteractive,
@@ -22,6 +22,7 @@ import {
     type VectorizerConfig,
     type VectorizerResult,
 } from '../services/vtracerService';
+import { parsePathToNodes } from '../utils/pathParser';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,6 +59,84 @@ function downloadSvgBlob(svg: string, filename: string) {
 
 function sanitizeName(s: string) {
     return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+}
+
+/**
+ * Parse a CSS/SVG transform string and extract the cumulative translate offset.
+ * Handles: translate(x,y), translate(x), matrix(a,b,c,d,e,f)
+ */
+function getTranslateOffset(el: Element): { tx: number; ty: number } {
+    let tx = 0, ty = 0;
+    let current: Element | null = el;
+    while (current && current.tagName !== 'svg') {
+        const tf = current.getAttribute('transform');
+        if (tf) {
+            // translate(x, y) or translate(x)
+            const trMatch = tf.match(/translate\(\s*([-\d.e]+)[\s,]*([-\d.e]*)?\s*\)/);
+            if (trMatch) {
+                tx += parseFloat(trMatch[1]) || 0;
+                ty += parseFloat(trMatch[2]) || 0;
+            }
+            // matrix(a,b,c,d,e,f) — e,f are the translate components
+            const mMatch = tf.match(/matrix\(\s*([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)\s*\)/);
+            if (mMatch) {
+                tx += parseFloat(mMatch[5]) || 0;
+                ty += parseFloat(mMatch[6]) || 0;
+            }
+        }
+        current = current.parentElement;
+    }
+    return { tx, ty };
+}
+
+/**
+ * Inject red vertex circles into the SVG using DOM parsing.
+ * Accounts for transform attributes on path elements and their ancestors.
+ */
+function injectVertexOverlay(svgHtml: string): string {
+    const doc = new DOMParser().parseFromString(svgHtml, 'image/svg+xml');
+    const svgEl = doc.documentElement;
+
+    // Determine dot size from viewBox
+    const vb = svgEl.getAttribute('viewBox');
+    if (!vb) return svgHtml;
+    const [, , vbW, vbH] = vb.split(/\s+/).map(Number);
+    const r = Math.max(vbW || 1, vbH || 1) * 0.004;
+    const sw = r * 0.4;
+
+    const paths = svgEl.querySelectorAll('path');
+    if (paths.length === 0) return svgHtml;
+
+    const NS = 'http://www.w3.org/2000/svg';
+
+    // Collect circles in a fragment so they render on top of all paths
+    const overlay = doc.createElementNS(NS, 'g');
+    overlay.setAttribute('data-vertex-overlay', '1');
+
+    paths.forEach(path => {
+        const d = path.getAttribute('d');
+        if (!d) return;
+
+        // Accumulate translate transforms from the path and its ancestors
+        const { tx, ty } = getTranslateOffset(path);
+
+        const nodes = parsePathToNodes(d);
+        for (const node of nodes) {
+            if (node.kind === 'anchor-close') continue;
+            const circle = doc.createElementNS(NS, 'circle');
+            circle.setAttribute('data-vertex', '1');
+            circle.setAttribute('cx', String(node.anchor.x + tx));
+            circle.setAttribute('cy', String(node.anchor.y + ty));
+            circle.setAttribute('r', String(r));
+            circle.setAttribute('fill', '#ef4444');
+            circle.setAttribute('stroke', '#fff');
+            circle.setAttribute('stroke-width', String(sw));
+            overlay.appendChild(circle);
+        }
+    });
+
+    svgEl.appendChild(overlay);
+    return new XMLSerializer().serializeToString(doc);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +285,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
     const [imageDims, setImageDims] = useState<{ width: number; height: number } | null>(null);
     const [canvasReady, setCanvasReady] = useState(false);
     const [resultSvgHtml, setResultSvgHtml] = useState('');
+    const [outlinePreview, setOutlinePreview] = useState(false);
 
     const isMounted = useRef(false);
     const rafRef = useRef<number | null>(null);
@@ -422,6 +502,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                     {traceState === 'done' && result && (
                         <span className="text-xs font-mono text-slate-500 ml-2">
                             {result.layersTraced} paths
+                            {resultSvgHtml && ` · ${(new Blob([resultSvgHtml]).size / 1024).toFixed(0)} KB`}
                             {result.tiersUsed > 1 && ` · tier ${result.tiersUsed}`}
                         </span>
                     )}
@@ -651,14 +732,38 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             id="vectorizer-result"
                             className="flex-1 flex flex-col overflow-hidden"
                         >
-                            <p className="text-xs font-medium uppercase tracking-widest text-slate-500 px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
-                                SVG Result
-                            </p>
+                            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 shrink-0 bg-slate-50">
+                                <p className="text-xs font-medium uppercase tracking-widest text-slate-500">
+                                    SVG Result
+                                </p>
+                                {resultSvgHtml && (
+                                    <button
+                                        onClick={() => setOutlinePreview(v => !v)}
+                                        className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors ${
+                                            outlinePreview
+                                                ? 'bg-amber-400 text-amber-900'
+                                                : 'text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                                        }`}
+                                        title="Outline mode"
+                                    >
+                                        <Scan size={12} aria-hidden="true" />
+                                        Outline
+                                    </button>
+                                )}
+                            </div>
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
                                 {resultSvgHtml ? (
                                     <div
-                                        className="max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto"
-                                        dangerouslySetInnerHTML={{ __html: resultSvgHtml }}
+                                        className={`max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto ${
+                                            outlinePreview
+                                                ? '[&_path]:!fill-none [&_path]:!stroke-black [&_path]:![stroke-width:1px] [&_path]:![vector-effect:non-scaling-stroke] [&_rect]:!fill-none [&_rect]:!stroke-black [&_rect]:![stroke-width:1px] [&_circle:not([data-vertex])]:!fill-none [&_circle:not([data-vertex])]:!stroke-black [&_circle:not([data-vertex])]:![stroke-width:1px] [&_ellipse]:!fill-none [&_ellipse]:!stroke-black [&_ellipse]:![stroke-width:1px] [&_polygon]:!fill-none [&_polygon]:!stroke-black [&_polygon]:![stroke-width:1px]'
+                                                : ''
+                                        }`}
+                                        dangerouslySetInnerHTML={{
+                                            __html: outlinePreview
+                                                ? injectVertexOverlay(resultSvgHtml)
+                                                : resultSvgHtml,
+                                        }}
                                     />
                                 ) : traceState === 'idle' ? (
                                     <p className="absolute text-xs text-slate-500">Starting...</p>

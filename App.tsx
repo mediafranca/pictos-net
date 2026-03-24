@@ -1409,13 +1409,17 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                         {/* Thumbnail strip */}
                         <div className="flex h-24 bg-slate-100">
                           {[0, 1, 2].map(i => (
-                            <img
-                              key={i}
-                              src={`/libraries/thumbs/${slug}_${i}.jpg`}
-                              alt=""
-                              className="w-1/3 h-full object-cover"
-                              loading="lazy"
-                            />
+                            <picture key={i} className="w-1/3 h-full">
+                              <source srcSet={`/libraries/thumbs-opt/${slug}_${i}.webp`} type="image/webp" />
+                              <img
+                                src={`/libraries/thumbs/${slug}_${i}.jpg`}
+                                alt=""
+                                width={240}
+                                height={240}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            </picture>
                           ))}
                         </div>
 
