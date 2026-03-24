@@ -20,17 +20,17 @@ La rama de desarrollo `lab` contiene la siguiente versión:
 
 El sistema implementa un pipeline de tres fases automáticas más dos de post-procesamiento opcional. Cada fase es visible, editable y regenerable de forma independiente:
 
-**① Comprender** (Gemini 2.5 Flash) — Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM): 65 primitivos semánticos universales. Produce un esquema estructurado con intención comunicativa, dominio, roles semánticos (FrameNet) e instrucciones visuales.
+**(1) Comprender** (Gemini 2.5 Flash) — Análisis lingüístico profundo basado en Natural Semantic Metalanguage (NSM): 65 primitivos semánticos universales. Produce un esquema estructurado con intención comunicativa, dominio, roles semánticos (FrameNet) e instrucciones visuales.
 
-**② Componer** (Gemini 2.5 Flash) — Traduce el análisis NLU a una jerarquía de elementos visuales (`elements`) y una descripción de articulación espacial (`prompt`). Si el usuario edita los elementos, puede regenerar solo el prompt sin repetir toda la composición.
+**(2) Componer** (Gemini 2.5 Flash) — Traduce el análisis NLU a una jerarquía de elementos visuales (`elements`) y una descripción de articulación espacial (`prompt`). Si el usuario edita los elementos, puede regenerar solo el prompt sin repetir toda la composición.
 
-**③ Producir** (Gemini Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. Resultado: bitmap PNG lossless, máximo 1024×1024px. La compresión a JPEG (q=0.75) ocurre únicamente en la capa de persistencia (IndexedDB), no en el pipeline.
+**(3) Producir** (Gemini 2.5 Flash Image | Gemini 3 Pro Image) — Renderiza el pictograma combinando el contexto semántico, los elementos, el prompt espacial y el estilo visual global. El modelo se selecciona según configuración (flash por defecto, pro opcional). Resultado: bitmap PNG lossless, máximo 1024×1024px. La compresión a JPEG (q=0.75) ocurre únicamente en la capa de persistencia (IndexedDB), no en el pipeline.
 
-**④ Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante clustering jerarquico de color (ColorImageConverter nativo de visioncortex). Proceso local, sin API. Resultado: SVG crudo sin semantica.
+**(4) Vectorizar** (vtracer WASM, local) — Convierte el bitmap a SVG mediante clustering jerarquico de color (ColorImageConverter nativo de visioncortex). Proceso local, sin API. Resultado: SVG crudo sin semantica.
 
-**⑤ Estructurar** (Gemini 3 Pro, multimodal) — Reorganiza los paths del SVG crudo en grupos semánticos según la jerarquía de elementos, embebiendo metadatos de accesibilidad según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema).
+**(5) Estructurar** (Gemini 2.5 Flash, multimodal) — Reorganiza los paths del SVG crudo en grupos semánticos según la jerarquía de elementos, embebiendo metadatos de accesibilidad según [mf-svg-schema](https://github.com/mediafranca/mf-svg-schema).
 
-Las fases ④ y ⑤ son opcionales y las inicia el usuario manualmente. La cascada automática (①→②→③) se ejecuta al crear una nueva frase o presionar Play en una fila. Los pictogramas generados pueden evaluarse con el marco [ICAP](https://github.com/mediafranca/ICAP).
+Las fases (4) y (5) son opcionales y las inicia el usuario manualmente. La cascada automática (1 -> 2 -> 3) se ejecuta al crear una nueva frase o presionar Play en una fila. Los pictogramas generados pueden evaluarse con el marco [ICAP](https://github.com/mediafranca/ICAP).
 
 ## Esquema detallado
 
@@ -63,13 +63,13 @@ flowchart TD
         cfg_img["imageModel flash|pro<br>aspectRatio"]
     end
 
-    subgraph F1["<b>① COMPRENDER</b> — Gemini 2.5 Flash"]
+    subgraph F1["<b>(1) COMPRENDER</b> — Gemini 2.5 Flash"]
         direction TB
         f1_proc["NSM Schema Engine<br>65 primos universales<br>nlu-schema v1.0"]
         f1_out["<b>NLUData</b><br>domain · frames · frame_label<br>nsm_explications<br>visual_guidelines · pragmatics"]
     end
 
-    subgraph F2["<b>② COMPONER</b> — Gemini 2.5 Flash"]
+    subgraph F2["<b>(2) COMPONER</b> — Gemini 2.5 Flash"]
         direction TB
         f2a["Visual Topology Node<br><i>genera elements + prompt<br>en una sola llamada</i>"]
         f2b["Spatial Articulation Node<br><i>solo en regeneración manual<br>cuando usuario edita elements</i>"]
@@ -77,23 +77,23 @@ flowchart TD
         f2_prompt["<b>prompt</b><br>composición espacial"]
     end
 
-    subgraph F3["<b>③ PRODUCIR</b> — Gemini Image"]
+    subgraph F3["<b>(3) PRODUCIR</b> — Gemini Image"]
         direction TB
         f3_merge["<b>fullPrompt</b> combina:<br>utterance + NLU context<br>+ domain + elements + prompt<br>+ visualStylePrompt"]
-        f3_gen["flash-image | pro-image<br>sin texto · flat design<br>fondo blanco"]
+        f3_gen["gemini-2.5-flash-image | gemini-3-pro-image-preview<br>sin texto · flat design<br>fondo blanco"]
         f3_post["resize max 1024px · PNG lossless<br><i>JPEG q=0.75 solo en IndexedDB</i>"]
         f3_out["<b>bitmap</b><br>base64 data URL"]
     end
 
     subgraph POST["Post-procesamiento — manual, opcional"]
         direction TB
-        subgraph F4["<b>④ VECTORIZAR</b> — WASM local"]
+        subgraph F4["<b>(4) VECTORIZAR</b> — WASM local"]
             direction TB
             f4_proc["vtracer · BinaryImageConverter<br>extrae colores · máscara binaria<br>spline | polygon | none"]
             f4_out["<b>rawSvg</b><br>multicolor · sin semántica"]
         end
 
-        subgraph F5["<b>⑤ ESTRUCTURAR</b> — Gemini 3 Pro ⚡stream"]
+        subgraph F5["<b>(5) ESTRUCTURAR</b> — Gemini 2.5 Flash"]
             direction TB
             f5_multi["<b>MULTIMODAL</b><br>bitmap PNG + rawSvg<br>+ elements + CSS"]
             f5_proc["Agrupa paths en g semánticos<br>Sanitiza inline styles<br>Aplica clases CSS"]
@@ -208,24 +208,24 @@ Cada campo es editable. Al modificar un dato, los pasos posteriores se marcan co
 }}%%
 flowchart LR
     subgraph EDIT["Edición del usuario"]
-        e1["✏️ Edita <b>utterance</b>"]
-        e2["✏️ Edita <b>NLU</b>"]
-        e3["✏️ Edita <b>elements</b>"]
-        e4["✏️ Edita <b>prompt</b>"]
+        e1["Edita <b>utterance</b>"]
+        e2["Edita <b>NLU</b>"]
+        e3["Edita <b>elements</b>"]
+        e4["Edita <b>prompt</b>"]
     end
 
     subgraph INVALIDATION["Campos invalidados"]
-        nlu_out["⚠️ NLU outdated"]
-        vis_out["⚠️ visual outdated"]
-        bmp_out["⚠️ bitmap outdated"]
+        nlu_out["NLU outdated"]
+        vis_out["visual outdated"]
+        bmp_out["bitmap outdated"]
     end
 
     subgraph REGEN["Regeneración disponible"]
-        r1["▶ Regenerar NLU"]
-        r2["▶ Regenerar composición"]
-        r2b["▶ Regenerar solo prompt"]
-        r3["▶ Regenerar imagen"]
-        r_all["▶▶ Cascada completa"]
+        r1["Regenerar NLU"]
+        r2["Regenerar composición"]
+        r2b["Regenerar solo prompt"]
+        r3["Regenerar imagen"]
+        r_all["Cascada completa"]
     end
 
     e1 --> nlu_out
@@ -342,7 +342,7 @@ Ver [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) para instrucciones completas,
 | [docs/UI_CONVENTIONS.md](./docs/UI_CONVENTIONS.md) | Convenciones de diseño: colores, tipografía, z-index |
 | [docs/CSS_STYLING_ARCHITECTURE.md](./docs/CSS_STYLING_ARCHITECTURE.md) | Modelo de dos niveles para estilos SVG (clases + overrides locales) |
 | [docs/WCAG_ROADMAP.md](./docs/WCAG_ROADMAP.md) | Estado de conformidad WCAG 2.1 AA y roadmap de accesibilidad |
-| [docs/ROADMAP_ESTRUCTURAR.md](./docs/ROADMAP_ESTRUCTURAR.md) | Plan de optimización de la fase ⑤ ESTRUCTURAR (branch `exp/optimize-structure`) |
+| [docs/ROADMAP_ESTRUCTURAR.md](./docs/ROADMAP_ESTRUCTURAR.md) | Plan de optimización de la fase (5) ESTRUCTURAR (branch `exp/optimize-structure`) |
 
 ---
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { X, Plus } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
@@ -36,6 +36,7 @@ export const StylePickerModal: React.FC<StylePickerModalProps> = ({
     const { dialogProps } = useDialogA11y({ isOpen, onClose, label: t('svgEditor.selectStyle') });
 
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
     // Merge: store takes precedence (includes locally defined classes)
     const allStyleDefs = useMemo(() => {
@@ -53,11 +54,16 @@ export const StylePickerModal: React.FC<StylePickerModalProps> = ({
     if (!isOpen) return null;
 
     const handleToggle = (cls: string, isCited: boolean) => {
+        // Preserve scroll position across the re-render triggered by cite/uncite
+        const scrollTop = scrollRef.current?.scrollTop ?? 0;
         if (isCited) {
             unciteClass(elementId, cls);
         } else {
             citeClass(elementId, cls);
         }
+        requestAnimationFrame(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollTop;
+        });
     };
 
     const handleSaveNewClass = (styleDef: StyleDefinition) => {
@@ -75,6 +81,7 @@ export const StylePickerModal: React.FC<StylePickerModalProps> = ({
         >
             <div className="absolute inset-0 bg-black/40" />
             <div
+                ref={scrollRef}
                 className="relative bg-white rounded-xl shadow-2xl p-4 w-[38rem] max-w-[90vw] max-h-[80vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
                 {...dialogProps}

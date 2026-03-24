@@ -1276,21 +1276,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 </select>
               </div>
 
-              {/* field-image-model */}
-              <div id="field-image-model">
-                <FieldLabel
-                  label={t('config.model')}
-                  tooltip={t('config.imageModelTooltip')}
-                />
-                <select
-                  value={config.imageModel || 'flash'}
-                  onChange={e => setConfig({ ...config, imageModel: e.target.value })}
-                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
-                >
-                  <option value="flash">{t('config.imageModels.flash')}</option>
-                  <option value="pro">{t('config.imageModels.pro')}</option>
-                </select>
-              </div>
 
               {/* field-reduce-motion */}
               <div id="field-reduce-motion">
@@ -2001,9 +1986,20 @@ const RowComponent: React.FC<{
                 </div>
               </div>
             </StepBox>
-            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('format')} duration={row.bitmapDuration}
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
+                <div className="flex items-center gap-2 px-1">
+                  <select
+                    value={config.imageModel || 'flash'}
+                    onChange={e => onConfigChange({ ...config, imageModel: e.target.value })}
+                    className="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 hover:bg-white focus:bg-white transition-colors"
+                    title={t('config.imageModelTooltip')}
+                  >
+                    <option value="flash">{t('config.imageModels.flash')}</option>
+                    <option value="pro">{t('config.imageModels.pro')}</option>
+                  </select>
+                </div>
                 <div
                   id="bitmap-preview"
                   className="relative border border-slate-200 flex items-start justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px]"

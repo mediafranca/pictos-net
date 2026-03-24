@@ -3,6 +3,16 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[functions]
+  # Image generation with Gemini can take 30-60s
+  external_node_modules = ["@google/genai"]
+  node_bundler = "esbuild"
+
+[functions."api-gemini"]
+  # Extend timeout for slow image generation (default is 10s)
+  # Requires Netlify Pro plan for >10s; max 26s on Pro
+  timeout = 26
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -298,8 +298,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         setStructureProgress(finalValue);
     };
 
-    const handleFormat = async () => {
-        if (!rawSvg) return;
+    const handleFormat = async (svgOverride?: string) => {
+        const svg = svgOverride || rawSvg;
+        if (!svg) return;
 
         try {
             setError(undefined);
@@ -321,7 +322,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             onLog('info', `Estructurando SVG semántico con contexto NLU...`);
             const sStart = performance.now();
             const result = await structureSVG({
-                rawSvg,
+                rawSvg: svg,
                 nlu: nluData,
                 elements: row.elements || [],
                 utterance: row.UTTERANCE,
@@ -527,7 +528,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                                 removeSVGByRowId(row.id);
                                 onUpdate({ structuredSvg: undefined });
                                 setRawSvg(row.rawSvg!);
-                                setStatus('traced');
+                                handleFormat(row.rawSvg!);
                             }}
                             className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
                             title={t('svg.reStructureTooltip')}

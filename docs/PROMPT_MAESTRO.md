@@ -71,7 +71,7 @@ funcionalidad ni IDs existentes.
 TAREA:
 Agrega el ID #home-view al div de viewMode=home en App.tsx,
 y el ID #list-view al div de viewMode=list.
-Luego actualiza su estado a ✅ en UI_MAP.md.
+Luego actualiza su estado a [OK] en UI_MAP.md.
 ```
 
 ### Para refactorizar un componente visual
@@ -80,7 +80,7 @@ TAREA:
 El área de preview del bitmap en #block-produce tiene un style inline
 `style={{ backgroundColor: '#eeeeee' }}`. Reemplázalo con la clase
 Tailwind equivalente. Identifica el ID correcto de esa área en UI_MAP.md
-(#bitmap-preview, actualmente 🔲 sin implementar) y agrégalo al div.
+(#bitmap-preview, actualmente [PENDING] sin implementar) y agrégalo al div.
 ```
 
 ---

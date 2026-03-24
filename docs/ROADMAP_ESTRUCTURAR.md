@@ -1,4 +1,4 @@
-# Roadmap: Optimización de la fase ⑤ ESTRUCTURAR
+# Roadmap: Optimización de la fase (5) ESTRUCTURAR
 
 Branch de experimentación: `exp/optimize-structure`
 
@@ -9,12 +9,12 @@ Estado: Planificación
 
 ## Contexto
 
-La fase ⑤ ESTRUCTURAR es actualmente la más lenta del pipeline y la única que combina tres cargas simultáneas hacia la API: una imagen base64, el SVG crudo completo, y un system instruction denso. Este documento traza el plan de optimización en cinco experimentos independientes, ordenados por seguridad e impacto, más una decisión de diseño transversal sobre el rol del SVG como artefacto.
+La fase (5) ESTRUCTURAR es actualmente la más lenta del pipeline y la única que combina tres cargas simultáneas hacia la API: una imagen base64, el SVG crudo completo, y un system instruction denso. Este documento traza el plan de optimización en cinco experimentos independientes, ordenados por seguridad e impacto, más una decisión de diseño transversal sobre el rol del SVG como artefacto.
 
 ### Estado actual (línea base)
 
 ```
-Modelo:         gemini-2.5-flash (texto) — gemini-3-pro-preview (estruturar) ← el más lento
+Modelo:         gemini-2.5-flash (texto y estructurar) — ya optimizado
 Payload imagen: bitmap PNG 1024×1024 completo (~150–400 KB base64)
 Payload SVG:    rawSvg completo (vtracer output, ~10–80 KB)
 Payload CSS:    stylesheet completo del sistema (~200+ líneas, ~2.000 tokens)

@@ -21,9 +21,9 @@ Consultar `docs/UI_MAP.md` antes de crear o renombrar cualquier sección.
 ```
 
 ### Prohibido
-- ❌ No usar IDs genéricos: `#container`, `#wrapper`, `#box`, `#div1`
-- ❌ No crear secciones importantes sin ID
-- ❌ No renombrar IDs existentes sin actualizar UI_MAP.md
+- No usar IDs genéricos: `#container`, `#wrapper`, `#box`, `#div1`
+- No crear secciones importantes sin ID
+- No renombrar IDs existentes sin actualizar UI_MAP.md
 
 ---
 
@@ -51,10 +51,10 @@ Usar siempre los tokens semánticos, nunca valores hardcodeados:
 
 ### Colores de fondo prohibidos como inline style
 ```tsx
-// ❌ MAL
+// MAL
 <div style={{ backgroundColor: '#eeeeee' }}>
 
-// ✅ BIEN - agregar a tailwind.config.js si es un tono nuevo
+// BIEN - agregar a tailwind.config.js si es un tono nuevo
 <div className="bg-neutral-200">
 ```
 

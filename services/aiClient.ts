@@ -41,22 +41,33 @@ async function getAuthToken(): Promise<string> {
  */
 async function proxyCall(params: GenerateContentParams): Promise<GenerateContentResponse> {
     const token = await getAuthToken();
+    const MAX_RETRIES = 2;
 
-    const res = await fetch("/.netlify/functions/api-gemini", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify(params),
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const res = await fetch("/.netlify/functions/api-gemini", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify(params),
+        });
 
-    if (!res.ok) {
+        if (res.ok) return res.json();
+
+        // Retry on 502/503/504 (transient proxy/timeout errors)
+        if ([502, 503, 504].includes(res.status) && attempt < MAX_RETRIES) {
+            const delay = (attempt + 1) * 3000;
+            console.warn(`[aiClient] ${res.status} on attempt ${attempt + 1}, retrying in ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+        }
+
         const err = await res.json().catch(() => ({ error: res.statusText }));
         throw new Error(err.error || `Proxy error ${res.status}`);
     }
 
-    return res.json();
+    throw new Error('Max retries exceeded');
 }
 
 /**

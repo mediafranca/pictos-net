@@ -133,36 +133,36 @@ pictos-net/
 
 ## 4. Pipeline de generación (5 fases)
 
-La cascada automática abarca las fases ①②③. Las fases ④⑤ son opcionales e iniciadas manualmente por el usuario.
+La cascada automática abarca las fases (1)(2)(3). Las fases (4)(5) son opcionales e iniciadas manualmente por el usuario.
 
 ```
 utterance
     │
     ▼
-① COMPRENDER — Gemini 2.5 Flash
+(1) COMPRENDER — Gemini 2.5 Flash
     │  NSM Schema Engine
     │  65 primitivos semánticos universales
     │  → NLUData (domain, frames, nsm_explications, visual_guidelines)
     │
     ▼
-② COMPONER — Gemini 2.5 Flash
+(2) COMPONER — Gemini 2.5 Flash
     │  Visual Topology Node  → elements (VisualElement[])
     │  Spatial Articulation  → prompt (descripción composición espacial)
     │
     ▼
-③ PRODUCIR — Gemini Image (flash-image | pro-image)
+(3) PRODUCIR — Gemini Image (gemini-2.5-flash-image | gemini-3-pro-image-preview)
     │  fullPrompt = utterance + NLU + elements + prompt + visualStylePrompt
     │  → bitmap PNG lossless, máximo 1024×1024px
     │  (JPEG q=0.75 solo en capa de persistencia IndexedDB)
     │
     ▼ (usuario inicia manualmente)
-④ VECTORIZAR — vtracer WASM (local, sin API)
+(4) VECTORIZAR — vtracer WASM (local, sin API)
     │  ColorImageConverter (color) / BinaryImageConverter (B&W)
     │  Clustering jerárquico de color, spline/polygon fitting
     │  → rawSvg (paths sin semántica)
     │
     ▼ (usuario inicia manualmente)
-⑤ ESTRUCTURAR — Gemini (multimodal: bitmap + rawSvg + elements + CSS)
+(5) ESTRUCTURAR — Gemini 2.5 Flash (multimodal: bitmap + rawSvg + elements + CSS)
        Agrupa paths en <g> semánticos según jerarquía de elementos
        Aplica clases CSS, atributos ARIA, metadatos mf-svg-schema
        → structuredSvg (autocontenido, accesible)
@@ -410,7 +410,7 @@ El modelo de estilos sigue arquitectura de dos niveles documentada en `docs/CSS_
 
 ### VectorizerModal
 
-Modal fullscreen para la fase ④. Panel izquierdo con controles vtracer (presets, curve mode, color mode, sliders). Panel derecho dividido: original bitmap (canvas) | SVG result (renderizado progresivo).
+Modal fullscreen para la fase (4). Panel izquierdo con controles vtracer (presets, curve mode, color mode, sliders). Panel derecho dividido: original bitmap (canvas) | SVG result (renderizado progresivo).
 
 ---
 
@@ -454,7 +454,7 @@ GEMINI_API_KEY=<Google Generative AI API Key>
 
 Necesaria en `.env` para desarrollo local. En producción se inyecta via GitHub Actions secret.
 
-⚠️ La API key queda embebida en el bundle compilado. Ver `docs/SECURITY.md`.
+WARNING: La API key queda embebida en el bundle compilado. Ver `docs/SECURITY.md`.
 
 ### vite.config.ts
 

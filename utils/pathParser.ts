@@ -35,17 +35,34 @@ interface RawCommand {
     args: number[];
 }
 
+/**
+ * Extrae todos los números de un string de argumentos SVG path.
+ * Maneja separadores implícitos del estándar SVG:
+ *   - signo `-` como separador (e.g. "300.5-100.2" → [300.5, -100.2])
+ *   - punto decimal consecutivo (e.g. "1.5.3" → [1.5, 0.3])
+ *   - notación científica (e.g. "1e-4")
+ * Se usa en parsePathToNodes y en extractVertices (vista Outline del Vectorizer).
+ */
+function extractNumbers(argStr: string): number[] {
+    const re = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+    const result: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(argStr)) !== null) {
+        const n = Number(m[0]);
+        if (!isNaN(n)) result.push(n);
+    }
+    return result;
+}
+
 function tokenize(d: string): RawCommand[] {
     const commands: RawCommand[] = [];
-    // Match command letter followed by numbers (with optional comma/whitespace separators)
+    // Match command letter followed by everything until the next command letter
     const re = /([MmLlHhVvCcSsQqTtAaZz])([^MmLlHhVvCcSsQqTtAaZz]*)/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(d)) !== null) {
         const cmd = match[1];
         const argStr = match[2].trim();
-        const args = argStr.length > 0
-            ? argStr.split(/[\s,]+/).map(Number).filter(n => !isNaN(n))
-            : [];
+        const args = argStr.length > 0 ? extractNumbers(argStr) : [];
         commands.push({ command: cmd, args });
     }
     return commands;
