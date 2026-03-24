@@ -11,10 +11,12 @@
 
 import sharp from 'sharp';
 import { readdirSync, mkdirSync, statSync, existsSync } from 'fs';
-import { join, basename, extname } from 'path';
+import { join, basename, extname, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-const INPUT_DIR = join(import.meta.dirname, '../public/libraries/thumbs');
-const OUTPUT_DIR = join(import.meta.dirname, '../public/libraries/thumbs-opt');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const INPUT_DIR = join(__dirname, '../public/libraries/thumbs');
+const OUTPUT_DIR = join(__dirname, '../public/libraries/thumbs-opt');
 const SIZE = 240;
 const QUALITY = 80;
 
