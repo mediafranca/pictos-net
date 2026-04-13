@@ -1,7 +1,16 @@
 {
-  "generated": "2026-03-24T02:54:46.822Z",
-  "count": 13,
+  "generated": "2026-04-13T19:04:48.342Z",
+  "count": 12,
   "libraries": [
+    {
+      "filename": "a_mano_graph_2026-04-13.json",
+      "name": "A mano",
+      "location": "Quilpué, Región de Valparaíso, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 2131888
+    },
     {
       "filename": "accessible_court_v1.json",
       "name": "Accessible Court v1",
@@ -10,15 +19,6 @@
       "items": 20,
       "description": "pictonet_graph_dump",
       "filesize": 7431625
-    },
-    {
-      "filename": "accessible_court_v2.json",
-      "name": "Accessible Court v2",
-      "location": "Auckland, Auckland, Nueva Zelanda",
-      "language": "en-GB",
-      "items": 20,
-      "description": "pictonet_graph_dump",
-      "filesize": 12157676
     },
     {
       "filename": "dibujo_graph_2026-03-05.json",
@@ -73,15 +73,6 @@
       "items": 6,
       "description": "pictonet_graph_dump",
       "filesize": 374781
-    },
-    {
-      "filename": "koru_style.json",
-      "name": "Koru Style",
-      "location": "Viña del Mar, Valparaiso Region, Chile",
-      "language": "en-GB",
-      "items": 6,
-      "description": "pictonet_graph_dump",
-      "filesize": 4814515
     },
     {
       "filename": "pictos_net.json",
