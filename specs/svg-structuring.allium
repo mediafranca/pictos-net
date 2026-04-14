@@ -1,0 +1,365 @@
+-- allium: 3
+-- svg-structuring.allium
+
+-- Scope: Phase 5 "Estructurar" — structuring a raw vectorized SVG into
+--   a semantic, mf-svg-schema-compliant SVG using Gemini AI assignment.
+-- Includes: Pre-processing, Gemini prompt, JSON parsing, SVG assembly,
+--   style handling, metadata embedding, post-processing.
+-- Excludes:
+--   - Vectorization (Phase 4, VTracer)
+--   - NLU analysis (Phase 1)
+--   - Visual blueprint (Phase 2)
+--   - Bitmap generation (Phase 3)
+--   - SVG editor interactions (separate spec)
+-- Dependencies: VisualElement from types.ts, NLUData from types.ts,
+--   mf-svg-schema spec, aiClient for Gemini calls
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value PathInfo {
+  id: String
+  fill: String
+  fillRole: dark | light | accent | unknown
+  cx: Number
+  cy: Number
+  vtracerGroup: String?
+}
+
+value PathInventory {
+  paths: [PathInfo]
+  vtracerGroups: Map<String, [String]>
+  groupClasses: Map<String, String>
+  pathClasses: Map<String, String>
+  standalonePathIds: [String]
+  viewBox: String
+  rawStyleRules: String
+  cssFillMap: Map<String, String>
+}
+
+value AssignmentNode {
+  concept: Agent | Object | Action | Context | Attribute
+  label: String
+  class: k | f
+  paths: [String]
+  children: Map<String, AssignmentNode>?
+  evenodd: Boolean?
+}
+
+value Assignment {
+  desc: String
+  groups: Map<String, AssignmentNode>
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external RawSVG {
+  -- SVG output from VTracer (Phase 4)
+  -- Contains paths, optional groups, optional <style> blocks
+  -- May have user-edited CSS classes from the SVG editor
+}
+
+external NLUData {
+  -- Semantic analysis from Phase 1
+  utterance: String
+  lang: String
+  domain: String?
+  frames: [Frame]
+  visual_guidelines: VisualGuidelines
+  nsm_explications: Map<String, String>
+  pragmatics: Pragmatics
+}
+
+external VisualElement {
+  -- Hierarchical element tree from Phase 2
+  id: String
+  children: [VisualElement]?
+}
+
+external GlobalConfig {
+  -- User configuration including style definitions
+  lang: String
+  svgStyleDefs: [StyleDefinition]?
+  svgKeyframes: [Keyframe]?
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity StructuredSVG {
+  content: String
+  success: Boolean
+  error: String?
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+  gemini_model: String = "gemini-2.5-flash"
+  gemini_temperature: Number = 0.1
+  max_output_tokens: Number = 8192
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Eligibility ===
+
+rule CheckEligibility {
+  when: user requests structuring for a row
+
+  requires: row has rawSvg (Phase 4 completed)
+  requires: row has NLU as parsed object (Phase 1 completed)
+  requires: row has elements with at least one item (Phase 2 completed)
+
+  -- All three upstream phases must be complete
+}
+
+-- === Pre-processing (local) ===
+
+rule EnsurePathIds {
+  when: structuring begins
+
+  ensures: every <path> and <g> in rawSvg has a unique id attribute
+  -- VTracer output lacks ids; generate p0, p1, ... g0, g1, ...
+  -- Existing ids are preserved, no collisions
+}
+
+rule BuildPathInventory {
+  when: ids assigned
+
+  ensures: PathInventory created with:
+    -- For each path: id, resolved fill, fillRole, centroid, vtracerGroup
+    -- Fill resolution order: inline fill attr > style attr > CSS class > #000000
+    -- FillRole classification by luminance/saturation:
+    --   dark (luminance < 0.2), light (luminance > 0.8),
+    --   accent (saturation > 0.4 AND luminance > 0.1), unknown (default)
+    -- Centroid: geometric center from path d attribute coordinates
+    -- User CSS classes from <style> blocks are captured in rawStyleRules
+    -- CSS class-to-fill mappings captured in cssFillMap
+}
+
+-- === Gemini assignment ===
+
+rule SendAssignmentPrompt {
+  when: inventory built
+
+  ensures: Gemini receives a prompt containing:
+    1. System instruction defining the JSON schema for assignment
+    2. User message with:
+       a. Semantic context: utterance, actor, action, object, domain, frames
+       b. Element tree hierarchy with exact ids to use as group ids
+       c. Path inventory with fill colors, roles, centroids, vtracer groups
+
+  @invariant "element tree as target structure"
+    -- The element tree ids MUST be communicated as the preferred group ids.
+    -- Gemini should use these ids for <g> elements whenever a semantic
+    -- match exists. When paths don't correspond 1:1 with elements,
+    -- Gemini may group or split, but must stay as close as possible
+    -- to the provided hierarchy.
+
+  @invariant "path privacy"
+    -- Path geometry (d attribute) is NEVER sent to Gemini.
+    -- Only id, fill, fillRole, centroid, and vtracerGroup are sent.
+
+  @invariant "all paths assigned"
+    -- The prompt requires that every path id appears exactly once
+    -- in the JSON response.
+}
+
+rule ParseAssignment {
+  when: Gemini responds
+
+  requires: response is non-empty
+
+  ensures: response parsed as Assignment JSON
+  -- cleanGeminiJSON repairs: markdown fences, comments, trailing commas,
+  -- truncated strings, unclosed brackets
+
+  @invariant "type safety on response"
+    -- response.text MUST be verified as a string before calling
+    -- string methods (.trim, .match, .replace, .indexOf).
+    -- If response.text is undefined, null, or not a string,
+    -- return an error immediately rather than calling string methods.
+}
+
+rule HandleParseFailure {
+  when: JSON parsing fails after cleaning
+
+  ensures: StructuredSVG.success = false
+  ensures: StructuredSVG.error contains parse error details
+  -- Raw JSON logged for debugging
+}
+
+rule HandleEmptyGroups {
+  when: parsed JSON has no groups or groups is empty
+
+  ensures: StructuredSVG.success = false
+  ensures: StructuredSVG.error = "Gemini returned JSON without groups"
+}
+
+-- === Style handling ===
+
+rule PreserveUserStyles {
+  when: assembling structured SVG
+
+  @invariant "user classes take precedence"
+    -- If a path or group in the raw SVG has user-applied CSS classes
+    -- (from manual editing in the SVG editor), those classes MUST be
+    -- preserved in the structured SVG.
+    -- Auto-calculated color classes (main, w, accent) are ONLY applied
+    -- when the element has NO user-defined classes that map to a fill.
+
+  @invariant "raw style rules preserved"
+    -- CSS rules from the raw SVG's <style> block are appended to
+    -- the final stylesheet. They are NOT replaced by library defaults.
+
+  @guidance "style layering order"
+    -- The final CSS in the structured SVG follows this order:
+    -- 1. Library stylesheet (filtered to used classes only)
+    -- 2. User-defined styles from raw SVG's <style> block
+    -- User styles appear AFTER library styles and thus override them.
+
+  @guidance "no auto-color when user class has fill"
+    -- When checking whether to apply auto-color class:
+    -- Look up user classes in cssFillMap. If ANY user class defines
+    -- a fill, skip the auto-color class entirely for that group.
+}
+
+-- === SVG assembly (local) ===
+
+rule AssembleSVG {
+  when: assignment parsed and styles resolved
+
+  ensures: structured SVG assembled locally with:
+    -- Semantic <g> elements with: id, role="group", tabindex="0",
+    --   data-concept, aria-label, class
+    -- Original path geometry preserved exactly (d, transform)
+    -- Path class attributes preserved from raw SVG
+
+  @invariant "geometry stays local"
+    -- Path d attributes are read from the original rawSvg DOM,
+    -- never from Gemini's response. Gemini only provides the
+    -- assignment map (which path goes in which group).
+}
+
+rule HandleMissingPaths {
+  when: some path ids from inventory are not in assignment
+
+  ensures: missing paths auto-assigned to a fallback "contexto" group
+    with concept=Context, class=f
+  -- Warning logged with list of missing path ids
+}
+
+rule MergeEvenoddPaths {
+  when: assignment node has evenodd = true AND multiple paths
+
+  ensures: paths merged into single <path> with fill-rule="evenodd"
+  -- Dark path provides the fill color
+  -- All path d strings concatenated (with transform offsets baked in)
+  -- This handles light "holes" nested inside dark shapes
+}
+
+-- === Post-processing (local) ===
+
+rule FilterCSS {
+  when: SVG body assembled
+
+  ensures: only CSS rules whose selectors match classes used in the
+    SVG body are included in the final <style> block
+  -- Rules matching [role="group"] always kept (accessibility focus)
+  -- @keyframes kept only if referenced by animation properties
+}
+
+rule DeriveSemanticIds {
+  when: SVG passes XML validation
+
+  ensures: auto-generated path ids (p0, p1, ...) renamed to
+    semantic ids based on parent group: [groupId]-1, [groupId]-2, ...
+  -- CSS selectors referencing old ids updated to new ids
+  -- Only applies to ids matching vtracer patterns (p/g + digits)
+}
+
+rule RemoveEmptyGroups {
+  when: SVG assembled
+
+  ensures: completely empty <g></g> elements removed iteratively
+}
+
+rule EmbedMetadata {
+  when: SVG body complete
+
+  ensures: <metadata id="mf-data"> block embedded with:
+    -- version, schema reference, utterance, lang, domain
+    -- NSM explications, frames, pragmatics
+    -- Visual guidelines, accessibility descriptions
+    -- Provenance (generator, timestamp, licence)
+  -- Metadata embedded as JSON inside CDATA section
+}
+
+rule AssembleFinalSVG {
+  when: all post-processing complete
+
+  ensures: final SVG follows mf-svg-schema document order:
+    1. <title> (utterance)
+    2. <desc> (visual description from Gemini assignment)
+    3. <metadata> (semantic SSoT)
+    4. <defs><style> (filtered + user CSS)
+    5. Semantic <g> elements (structured content)
+
+  ensures: SVG root has:
+    -- id="pictogram"
+    -- xmlns, role="img", aria-labelledby="title desc"
+    -- lang, tabindex="0", focusable="true"
+    -- data-domain, data-utterance
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant PathCompleteness {
+  -- Every path from the original SVG must appear exactly once
+  -- in the structured SVG (either in a semantic group or fallback)
+  for path in PathInventory.paths:
+    count(StructuredSVG where contains path.id) = 1
+}
+
+invariant GeometryIntegrity {
+  -- Path geometry (d attribute) in structured SVG must be identical
+  -- to the original rawSvg. No modification by Gemini.
+  for path in StructuredSVG.paths:
+    path.d = RawSVG.getPath(path.id).d
+}
+
+invariant UserStylePreservation {
+  -- User-applied CSS classes survive structuring.
+  -- If raw SVG path had class="azul", structured SVG path
+  -- retains "azul" in its class list.
+  for pathId in PathInventory.pathClasses:
+    PathInventory.pathClasses[pathId] subset_of StructuredSVG.getPath(pathId).classes
+}
+
+invariant ElementTreeAlignment {
+  -- Group ids in structured SVG should match element tree ids
+  -- as closely as possible. Every element id that has corresponding
+  -- paths should appear as a <g> id in the output.
+  -- Unmatched paths go to a "contexto" fallback group.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should the prompt explicitly list which element ids are mandatory vs optional in the output?"
+
+open question "When Gemini assigns paths incorrectly (wrong group), should there be a user-facing validation step before finalizing?"
+
+open question "Should the evenodd detection be done locally (bbox intersection check) instead of relying on Gemini to flag it?"

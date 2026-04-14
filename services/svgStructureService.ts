@@ -84,6 +84,8 @@ interface PathInventory {
     /** CSS classes applied to individual paths by the user */
     pathClasses: Record<string, string>;
     standalonePathIds: string[];
+    /** Path ids excluded as background (full-viewBox rectangles) */
+    backgroundPathIds: string[];
     viewBox: string;
     /** User-defined CSS rules from the raw SVG's <style> block */
     rawStyleRules: string;
@@ -300,6 +302,27 @@ export function ensurePathIds(svg: string): string {
     return new XMLSerializer().serializeToString(svgEl);
 }
 
+/**
+ * Detect if a path is the canvas background (full-viewBox rectangle).
+ * VTracer often outputs a first path that fills the entire canvas.
+ */
+function isBackgroundRect(d: string, tx: number, ty: number, viewBox: string): boolean {
+    // Background paths are typically at translate(0,0) with a very simple rectangular d
+    if (tx !== 0 || ty !== 0) return false;
+    // Parse viewBox
+    const vbParts = viewBox.split(/\s+/).map(Number);
+    if (vbParts.length !== 4) return false;
+    const [, , vbW, vbH] = vbParts;
+    // Extract numbers from d and check if it forms a rectangle covering the viewBox
+    const nums = d.match(/-?[0-9]+\.?[0-9]*/g)?.map(Number) ?? [];
+    if (nums.length < 4) return false;
+    // Heuristic: if the path contains the viewBox dimensions (width/height) it's likely the background
+    const hasWidth = nums.some(n => Math.abs(n - vbW) < 2);
+    const hasHeight = nums.some(n => Math.abs(n - vbH) < 2);
+    const startsAtOrigin = nums[0] === 0 && nums[1] === 0;
+    return startsAtOrigin && hasWidth && hasHeight;
+}
+
 export function buildPathInventory(svg: string): PathInventory {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svg, 'image/svg+xml');
@@ -308,13 +331,14 @@ export function buildPathInventory(svg: string): PathInventory {
     const viewBox = vbMatch?.[1] ?? '0 0 1024 1024';
 
     const paths: PathInfo[] = [];
+    const backgroundPathIds: string[] = [];
     const vtracerGroups: Record<string, string[]> = {};
     const groupClasses: Record<string, string> = {};
     const pathClasses: Record<string, string> = {};
     const standalonePathIds: string[] = [];
 
     const svgEl = doc.querySelector('svg');
-    if (!svgEl) return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, viewBox, rawStyleRules: '', cssFillMap: {} };
+    if (!svgEl) return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, backgroundPathIds: [], viewBox, rawStyleRules: '', cssFillMap: {} };
 
     // Extract user-defined CSS rules from <style> blocks in the raw SVG
     let rawStyleRules = '';
@@ -397,6 +421,13 @@ export function buildPathInventory(svg: string): PathInventory {
             const d = child.getAttribute('d') ?? '';
             const transform = child.getAttribute('transform') ?? '';
             const [tx, ty] = getTranslateOffset(transform);
+
+            // Skip background rectangle (full-canvas fill from VTracer)
+            if (isBackgroundRect(d, tx, ty, viewBox)) {
+                backgroundPathIds.push(pid);
+                continue;
+            }
+
             const [cx, cy] = getCentroid(d, tx, ty);
 
             // Capture path-level classes
@@ -408,7 +439,11 @@ export function buildPathInventory(svg: string): PathInventory {
         }
     }
 
-    return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, viewBox, rawStyleRules, cssFillMap };
+    if (backgroundPathIds.length > 0) {
+        console.info(`[inventory] Excluded ${backgroundPathIds.length} background path(s): ${backgroundPathIds.join(', ')}`);
+    }
+
+    return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, backgroundPathIds, viewBox, rawStyleRules, cssFillMap };
 }
 
 // ─── Gemini Prompt (v2: JSON assignment) ─────────────────────────────────────
@@ -450,8 +485,10 @@ correspondiente, usando las señales de color y posición.
 3. "paths" en un nodo padre que tiene "children" puede estar vacío []
 4. "evenodd": true cuando haya paths light cuyo centroide está dentro del bbox del path dark del mismo grupo. El ensamblador los fusionará con fill-rule="evenodd".
 5. "class": "k" para Agent, "f" para Object/Context/Action/Attribute
-6. Preservar los group-ids de vtracer cuando coincidan con la jerarquía del NLU
-7. Si un path no encaja en ningún grupo semántico, asígnalo a un grupo "contexto" con concept="Context"
+6. Los group-ids en el JSON DEBEN ser los ids de la jerarquía de elementos proporcionada.
+   Usar exactamente esos ids como keys en "groups" y "children".
+   Si sobran paths que no encajan en ningún elemento, asignarlos a un grupo "contexto".
+7. Si un path no encaja en ningún grupo semántico, asígnalo al grupo "contexto" con concept="Context"
 8. NO incluir paths con id vacío o nulo
 9. Emitir SOLO el JSON. Sin markdown, sin explicaciones, sin backticks, sin comentarios.
 10. JSON estricto: sin trailing commas, comillas dobles para keys y strings.`;
@@ -517,7 +554,7 @@ Utterance: "${nlu.utterance}"
 Actor: ${vg?.focus_actor ?? '?'} | Acción: ${vg?.action_core ?? '?'} | Objeto: ${vg?.object_core ?? '?'}
 Dominio: ${nlu.domain ?? 'general'} | Frames: ${frames}
 
-**JERARQUÍA REQUERIDA (ids exactos para los <g>):**
+**JERARQUÍA DE ELEMENTOS (usar estos ids como keys en "groups" y "children"):**
 ${formatElements(elements)}
 
 **${formatInventory(inventory)}**
@@ -639,6 +676,7 @@ function renderNode(
     node: AssignmentNode,
     originalPaths: Map<string, OriginalPathData>,
     groupClasses: Record<string, string>,
+    pathClasses: Record<string, string>,
     pathInfoMap: Map<string, PathInfo>,
     cssFillMap: Record<string, string> = {},
     indent = '  ',
@@ -648,14 +686,21 @@ function renderNode(
     const dominantRole = getDominantFillRole(allIds, pathInfoMap);
     const colorCls = fillRoleToColorClass(dominantRole);
 
-    // Merge: semantic class (k/f) + auto color class + user-applied classes
-    // Skip auto color class if user classes already define a fill
+    // Collect user classes from group AND from paths within this group
     const semanticCls = node.class ?? 'f';
-    const userCls = groupClasses[groupId] ?? '';
-    const userHasFill = userCls.split(/\s+/).some(c => cssFillMap[c]);
+    const groupUserCls = groupClasses[groupId] ?? '';
+    const pathUserClasses = (node.paths ?? [])
+        .map(pid => pathClasses[pid])
+        .filter(Boolean)
+        .flatMap(c => c.split(/\s+/))
+        .filter(c => c);
+    const allUserCls = [groupUserCls, ...new Set(pathUserClasses)].filter(Boolean).join(' ');
+
+    // Skip auto color class if any user class already defines a fill
+    const userHasFill = allUserCls.split(/\s+/).some(c => cssFillMap[c]);
     const clsParts = [semanticCls];
     if (!userHasFill) clsParts.push(colorCls);
-    if (userCls) clsParts.push(userCls);
+    if (allUserCls) clsParts.push(allUserCls);
     const cls = clsParts.join(' ');
     const label = escapeXmlAttr(node.label);
     const concept = escapeXmlAttr(node.concept);
@@ -695,6 +740,8 @@ function renderNode(
                 const transformAttr = p.transform ? ` transform="${p.transform}"` : '';
                 const classAttr = p.className ? ` class="${p.className}"` : '';
                 const otherAttrs = p.otherAttrs ? ` ${p.otherAttrs}` : '';
+                // Fills are preserved via CSS #id rules (see buildPathFillCSS)
+                // to ensure they override group-level class fills by specificity.
                 lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${classAttr}${transformAttr}${otherAttrs}/>`);
             }
         }
@@ -703,7 +750,7 @@ function renderNode(
     // Render children
     if (node.children) {
         for (const [childId, childNode] of Object.entries(node.children)) {
-            lines.push(renderNode(childId, childNode, originalPaths, groupClasses, pathInfoMap, cssFillMap, indent + '  '));
+            lines.push(renderNode(childId, childNode, originalPaths, groupClasses, pathClasses, pathInfoMap, cssFillMap, indent + '  '));
         }
     }
 
@@ -719,8 +766,10 @@ function assembleSVGFromAssignment(
     filteredCSS: string,
     viewBox: string,
     groupClasses: Record<string, string>,
+    pathClasses: Record<string, string>,
     pathInfoMap: Map<string, PathInfo>,
     cssFillMap: Record<string, string> = {},
+    excludePathIds: Set<string> = new Set(),
 ): string {
     const originalPaths = extractOriginalPaths(rawSvg);
 
@@ -732,7 +781,7 @@ function assembleSVGFromAssignment(
     }
     Object.values(assignment.groups).forEach(collectIds);
 
-    const allOriginalIds = Array.from(originalPaths.keys());
+    const allOriginalIds = Array.from(originalPaths.keys()).filter(id => !excludePathIds.has(id));
     const missing = allOriginalIds.filter(id => !assignedIds.has(id));
     if (missing.length > 0) {
         console.warn(`[assemble] paths sin asignar: ${missing.join(', ')}`);
@@ -750,7 +799,7 @@ function assembleSVGFromAssignment(
     }
 
     const bodyLines = Object.entries(assignment.groups).map(([gid, node]) =>
-        renderNode(gid, node, originalPaths, groupClasses, pathInfoMap, cssFillMap)
+        renderNode(gid, node, originalPaths, groupClasses, pathClasses, pathInfoMap, cssFillMap)
     );
 
     const body = bodyLines.join('\n');
@@ -990,6 +1039,18 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
     try {
         if (input.onProgress) input.onProgress('[ESTRUCTURAR] Iniciando pre-procesamiento local...');
 
+        // ── Guard: rawSvg must be a non-empty string ─────────────────────
+        if (!input.rawSvg || typeof input.rawSvg !== 'string') {
+            console.error('[ESTRUCTURAR] rawSvg is not a valid string:', {
+                type: typeof input.rawSvg,
+                isNull: input.rawSvg === null,
+                isUndefined: input.rawSvg === undefined,
+                constructor: input.rawSvg?.constructor?.name,
+                preview: String(input.rawSvg).slice(0, 100),
+            });
+            return { svg: '', success: false, error: 'rawSvg no es un string válido' };
+        }
+
         // ── Step 0: Ensure all paths/groups have ids ─────────────────────
         const rawSvgWithIds = ensurePathIds(input.rawSvg);
 
@@ -1033,8 +1094,8 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
         if (input.onStatus) input.onStatus('receiving');
 
         const rawJSON = response.text;
-        if (!rawJSON) {
-            return { svg: '', success: false, error: 'Gemini no retornó respuesta' };
+        if (!rawJSON || typeof rawJSON !== 'string') {
+            return { svg: '', success: false, error: 'Gemini no retornó respuesta válida' };
         }
 
         if (input.onProgress) {
@@ -1097,6 +1158,24 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
                 : inventory.rawStyleRules;
         }
 
+        // Generate per-path fill CSS rules from original fills.
+        // These use #id selectors which override group-level .class fills
+        // by CSS specificity, preserving the original colors from VTracer.
+        const pathFillRules = inventory.paths
+            .filter(p => {
+                // Skip paths whose fill is already handled by a user CSS class
+                const pCls = inventory.pathClasses[p.id];
+                if (pCls && pCls.split(/\s+/).some(c => inventory.cssFillMap[c])) return false;
+                return p.fill && p.fill !== '#000000';
+            })
+            .map(p => `#${p.id} { fill: ${p.fill}; }`)
+            .join('\n');
+        if (pathFillRules) {
+            filteredCSS = filteredCSS
+                ? `${filteredCSS}\n\n/* Original path fills */\n${pathFillRules}`
+                : pathFillRules;
+        }
+
         // ── Step 6: Assemble SVG locally ─────────────────────────────────
         let svgContent = assembleSVGFromAssignment(
             rawSvgWithIds,
@@ -1106,8 +1185,10 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
             filteredCSS,
             viewBox,
             inventory.groupClasses,
+            inventory.pathClasses,
             pathInfoMapForCSS,
             inventory.cssFillMap,
+            new Set(inventory.backgroundPathIds),
         );
 
         // ── Step 7: Post-process ─────────────────────────────────────────

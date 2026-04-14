@@ -1841,9 +1841,10 @@ const RowComponent: React.FC<{
             value={row.UTTERANCE}
             onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
             rows={1}
+            ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
             onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }}
-            className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light resize-none overflow-hidden hover:bg-amber-50 hover:cursor-text focus:bg-amber-50 transition-colors rounded"
-            style={{ maxHeight: '4.2em', lineHeight: '1.4em' }}
+            className="flex-1 w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light resize-none overflow-hidden hover:bg-amber-50 hover:cursor-text focus:bg-amber-50 transition-colors rounded self-center line-clamp-2"
+            style={{ lineHeight: '1.5rem' }}
           />
           <div id={`cascade-ctrl-${row.id}`} className="flex gap-2 transition-all">
             {row.status === 'processing' ? (

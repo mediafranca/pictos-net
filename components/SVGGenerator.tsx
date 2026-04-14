@@ -82,8 +82,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         if (!structuredSvgEntry) return '';
         const currentStyles = generateStylesheet(config);
         return structuredSvgEntry.svg
-            .replace(/<style>[\s\S]*?<\/style>/i, `<style>${currentStyles}</style>`)
-            .replace(/<g /g, '<g tabindex="0" style="cursor: pointer;" ');
+            .replace(/<style>[\s\S]*?<\/style>/i, `<style>${currentStyles}</style>`);
     }, [structuredSvgEntry, config]);
 
     // Raw SVG prepared for display.
@@ -168,51 +167,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             onUpdate({ rawSvg: cleaned });
         } catch (err) {
             console.error('cleanInlineStyles error:', err);
-        }
-    };
-
-    // Handle SVG interaction (Block Editing)
-    const handleSvgInteraction = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!structuredSvgEntry) return;
-
-        const target = e.target as Element;
-        const group = target.closest('g[role="group"]') || target.closest('[class*=""]');
-
-        if (group) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            // Get all available classes from config
-            const availableClasses = Object.keys(config.svgStyles || { f: {}, k: {} });
-
-            // Find current class
-            let currentClassIndex = -1;
-            for (let i = 0; i < availableClasses.length; i++) {
-                if (group.classList.contains(availableClasses[i])) {
-                    currentClassIndex = i;
-                    break;
-                }
-            }
-
-            // Remove current class and add next one (cycle through)
-            if (currentClassIndex >= 0) {
-                group.classList.remove(availableClasses[currentClassIndex]);
-            }
-            const nextIndex = (currentClassIndex + 1) % availableClasses.length;
-            group.classList.add(availableClasses[nextIndex]);
-
-            const svgRoot = e.currentTarget.querySelector('svg');
-            if (svgRoot) {
-                const s = new XMLSerializer();
-                const newSvgContent = s.serializeToString(svgRoot);
-
-                addSVG({
-                    ...structuredSvgEntry,
-                    svg: newSvgContent
-                });
-                // Keep row.structuredSvg in sync as the SSoT
-                onUpdate({ structuredSvg: newSvgContent });
-            }
         }
     };
 
@@ -515,8 +469,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     )}
                     <div
                         dangerouslySetInnerHTML={{ __html: injectSvgA11y(displaySvg, row.UTTERANCE, row.prompt) }}
-                        onClick={handleSvgInteraction}
-                        className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full cursor-pointer"
+                        className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
                     />
                 </div>
 
@@ -620,7 +573,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
                 <div className="flex gap-2">
                     <button
-                        onClick={handleFormat}
+                        onClick={() => handleFormat()}
                         disabled={!structureEligibility.eligible}
                         title={structureEligibility.eligible ? undefined : structureEligibility.reason}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-none'}`}
