@@ -5,63 +5,74 @@
   padding-left: 0;
 }
 
-.element-item {
+/* --- Node layout --- */
+
+.element-node {
   position: relative;
-  padding-left: 28px;
-  margin: 4px 0;
 }
 
-/* Threading visual - vertical line */
-.element-item::before {
-  content: '';
+.element-node.element-root {
+  padding-left: 0;
+}
+
+.element-node-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+/* --- Drawn tree connectors --- */
+
+.element-children {
+  padding-left: 20px;
+  position: relative;
+}
+
+.element-branch {
+  position: relative;
+  padding-left: 20px;
+}
+
+/* Connector container: positioned to the left of the branch */
+.branch-connector {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  pointer-events: none;
+}
+
+/* Vertical spine: runs from top of branch down */
+.branch-vertical {
   position: absolute;
   left: 8px;
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: 1.5px;
   background: #cbd5e1;
 }
 
-/* Last child - shorter line */
-.element-item:last-child::before {
-  height: 20px;
+/* Last child: vertical spine only goes to the midpoint of the node row */
+.branch-last > .branch-connector .branch-vertical {
+  bottom: auto;
+  height: 16px;
 }
 
-/* Horizontal connector line */
-.element-item::after {
-  content: '';
+/* Horizontal arm: from vertical spine to the node */
+.branch-horizontal {
   position: absolute;
   left: 8px;
-  top: 16px;
-  width: 12px;
-  height: 2px;
+  top: 15px;
+  width: 11px;
+  height: 1.5px;
   background: #cbd5e1;
 }
 
-/* Dot at connection point */
-.element-item .element-dot {
-  position: absolute;
-  left: 4px;
-  top: 12px;
-  width: 8px;
-  height: 8px;
-  background: white;
-  border: 2px solid #cbd5e1;
-  border-radius: 50%;
-  z-index: 1;
-}
+/* --- Element pill style --- */
 
-/* Root level items (no threading) */
-.element-item.element-root::before,
-.element-item.element-root::after {
-  display: none;
-}
-
-.element-item.element-root .element-dot {
-  display: none;
-}
-
-/* Element pill style */
 .element-pill {
   display: inline-flex;
   align-items: center;
@@ -77,6 +88,7 @@
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  user-select: none;
 }
 
 .element-pill:hover {
@@ -125,37 +137,74 @@
   box-shadow: none;
 }
 
-/* Drag and drop states */
-.element-item.dragging {
-  opacity: 0.5;
+/* --- Drag and drop --- */
+
+/* Dragged element: reduced opacity but still allows events to flow */
+.element-node.dragging {
+  opacity: 0.35;
+}
+
+.element-node.dragging .element-pill {
   cursor: grabbing;
 }
 
-.element-item.drag-over {
-  background: rgba(124, 58, 237, 0.05);
-  border-radius: 4px;
-}
-
-.element-item .drag-handle {
+/* Drag handle */
+.element-node .drag-handle {
   display: none;
   cursor: grab;
   color: #cbd5e1;
-  transition: color 0.2s;
+  transition: color 0.15s;
+  align-items: center;
+  flex-shrink: 0;
 }
 
-.element-item:hover .drag-handle {
+.element-node:hover > .element-node-row .drag-handle {
   display: inline-flex;
 }
 
-.element-item .drag-handle:hover {
+.element-node .drag-handle:hover {
   color: #7c3aed;
 }
 
-.element-item .drag-handle:active {
+.element-node .drag-handle:active {
   cursor: grabbing;
 }
 
-/* Action buttons */
+/* --- Drop zone indicators --- */
+
+.element-node.drop-before > .element-node-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  background: #7c3aed;
+  border-radius: 1px;
+  z-index: 5;
+}
+
+.element-node.drop-inside > .element-node-row {
+  background: rgba(124, 58, 237, 0.08);
+  border-radius: 8px;
+  outline: 2px dashed rgba(124, 58, 237, 0.3);
+  outline-offset: 2px;
+}
+
+.element-node.drop-after > .element-node-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #7c3aed;
+  border-radius: 1px;
+  z-index: 5;
+}
+
+/* --- Action buttons --- */
+
 .element-actions {
   display: inline-flex;
   gap: 2px;
@@ -163,7 +212,7 @@
   transition: opacity 0.2s;
 }
 
-.element-item:hover .element-actions {
+.element-node:hover > .element-node-row .element-actions {
   opacity: 1;
 }
 

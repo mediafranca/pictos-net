@@ -1942,7 +1942,7 @@ const RowComponent: React.FC<{
                       </button>
                     )}
                   </div>
-                  <div id="spatial-prompt" className="flex-1 mt-6 border-t pt-6 border-slate-200 flex flex-col gap-3">
+                  <div id="spatial-prompt" className={`flex-1 mt-6 border-t pt-6 border-slate-200 flex flex-col gap-3 transition-colors ${elementsManuallyEdited ? 'bg-amber-50 rounded-lg px-3' : ''}`}>
                     <label className="text-xs font-medium uppercase text-slate-500 block tracking-widest">{t('editor.spatialLogic')}</label>
                     {isPromptEditing ? (
                       <textarea
@@ -2156,7 +2156,8 @@ const SmartNLUEditor: React.FC<{
   onUpdate: (v: any) => void;
   config: GlobalConfig;
   onConfigChange: (c: Partial<GlobalConfig>) => void;
-}> = ({ data, onUpdate, config, onConfigChange }) => {
+  expanded?: boolean;
+}> = ({ data, onUpdate, config, onConfigChange, expanded = false }) => {
   const { t, lang: uiLang, setLang } = useTranslation();
   const nlu = useMemo<Partial<NLUData>>(() => {
     if (typeof data === 'string') {
@@ -2178,12 +2179,14 @@ const SmartNLUEditor: React.FC<{
     onUpdate(next);
   };
 
-  const renderEditableDict = (dict: Record<string, string> | undefined, path: string) => {
+  const formatKey = (key: string) => key.replace(/_/g, ' ');
+
+  const renderEditableDict = (dict: Record<string, string> | undefined, path: string, narrow?: boolean) => {
     return (
       <div className="space-y-2 text-xs bg-slate-50 p-2 border">
         {Object.entries(dict || {}).map(([key, value]) => (
-          <div key={key} className="grid grid-cols-3 gap-2 items-start">
-            <span className="font-mono text-slate-500 truncate col-span-1 pt-1">{key}</span>
+          <div key={key} className="flex gap-2 items-start">
+            <span className={`font-mono text-slate-500 pt-1 shrink-0 break-words ${narrow ? 'w-16' : 'w-28'}`}>{formatKey(key)}</span>
             <textarea
               rows={1}
               value={value}
@@ -2203,7 +2206,7 @@ const SmartNLUEditor: React.FC<{
                   el.style.height = el.scrollHeight + 'px';
                 }
               }}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 resize-none overflow-hidden"
+              className="flex-1 min-w-0 bg-white border-b outline-none focus:border-violet-400 resize-none overflow-hidden"
             />
           </div>
         ))}
@@ -2234,133 +2237,137 @@ const SmartNLUEditor: React.FC<{
 
   return (
     <div className="space-y-4">
-      {/* CONTEXTO section */}
-      <div id="nlu-context" className="border bg-white p-3 shadow-sm text-xs space-y-2">
-        <span className="nlu-key uppercase">{t('editor.context')}</span>
-        <div className="mt-2 space-y-2 pt-2 border-t">
-          {/* Language selector */}
-          <div className="grid grid-cols-3 gap-2 items-center">
-            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.language')}</label>
-            <select
-              value={config.lang}
-              onChange={e => {
-                const newLang = e.target.value;
-                const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(config.visualStylePrompt);
-                onConfigChange({
-                  lang: newLang,
-                  uiLang: newLang as 'es-419' | 'en-GB',
-                  ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
-                });
-                setLang(newLang as Locale);
-              }}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
-            >
-              <option value="es-419">Español</option>
-              <option value="en-GB">English</option>
-            </select>
-          </div>
-          {/* Domain selector */}
-          <div className="grid grid-cols-3 gap-2 items-center">
-            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.domain')}</label>
-            <select
-              value={nlu.domain || ''}
-              onChange={e => {
-                updateField(['domain'], e.target.value);
-                // Mark NLU as outdated so user can regenerate
-                onUpdate({ ...nlu, domain: e.target.value });
-              }}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
-            >
-              <option value="" disabled>{t('placeholders.selectOption')}</option>
-              {VOCAB.domain.map(d => <option key={d} value={d}>{getDomainLabel(d)}</option>)}
-            </select>
-          </div>
-          {/* Geo region (read-only) */}
-          <div className="grid grid-cols-3 gap-2 items-center">
-            <label className="font-mono text-slate-500 truncate col-span-1">{t('editor.region')}</label>
-            <div className="col-span-2 flex items-center gap-1 text-xs">
-              <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-500 italic'}>
-                {config.geoContext?.region || t('editor.regionNotConfigured')}
-              </span>
-              <span className="text-slate-500 cursor-help" title={t('editor.regionTooltip')}>
-                <HelpCircle size={12} />
-              </span>
+      {/* Top row: multi-column only in expanded (focus modal) view */}
+      <div className={`grid gap-4 items-start ${expanded ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
+        {/* CONTEXTO */}
+        <div id="nlu-context" className="border bg-white p-3 shadow-sm text-xs space-y-2">
+          <span className="nlu-key uppercase">{t('editor.context')}</span>
+          <div className="mt-2 space-y-2 pt-2 border-t">
+            <div className="flex gap-2 items-center">
+              <label className="font-mono text-slate-500 shrink-0 w-16">{t('editor.language')}</label>
+              <select
+                value={config.lang}
+                onChange={e => {
+                  const newLang = e.target.value;
+                  const isDefault = Object.values(DEFAULT_STYLE_PROMPTS).includes(config.visualStylePrompt);
+                  onConfigChange({
+                    lang: newLang,
+                    uiLang: newLang as 'es-419' | 'en-GB',
+                    ...(isDefault ? { visualStylePrompt: getDefaultStylePrompt(newLang) } : {}),
+                  });
+                  setLang(newLang as Locale);
+                }}
+                className="flex-1 min-w-0 bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+              >
+                <option value="es-419">Español</option>
+                <option value="en-GB">English</option>
+              </select>
             </div>
+            <div className="flex gap-2 items-center">
+              <label className="font-mono text-slate-500 shrink-0 w-16">{t('editor.domain')}</label>
+              <select
+                value={nlu.domain || ''}
+                onChange={e => {
+                  updateField(['domain'], e.target.value);
+                  onUpdate({ ...nlu, domain: e.target.value });
+                }}
+                className="flex-1 min-w-0 bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+              >
+                <option value="" disabled>{t('placeholders.selectOption')}</option>
+                {VOCAB.domain.map(d => <option key={d} value={d}>{getDomainLabel(d)}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2 items-center">
+              <label className="font-mono text-slate-500 shrink-0 w-16">{t('editor.region')}</label>
+              <div className="flex-1 flex items-center gap-1 text-xs">
+                <span className={config.geoContext?.region ? 'text-slate-700' : 'text-slate-500 italic'}>
+                  {config.geoContext?.region || t('editor.regionNotConfigured')}
+                </span>
+                <span className="text-slate-500 cursor-help" title={t('editor.regionTooltip')}>
+                  <HelpCircle size={12} />
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* METADATA CLASSIFICATION */}
+        <div className="border bg-white p-3 shadow-sm text-xs space-y-2">
+          <span className="nlu-key uppercase">{t('editor.metadataClassification')}</span>
+          <div className="mt-2 space-y-2 pt-2 border-t">
+            <div className="flex gap-2 items-center">
+              <label className="font-mono text-slate-500 shrink-0 w-20 break-words">{formatKey('speech_act')}</label>
+              <select
+                value={nlu.metadata?.speech_act || ''}
+                onChange={e => updateField(['metadata', 'speech_act'], e.target.value)}
+                className="flex-1 min-w-0 bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+              >
+                <option value="" disabled>Select...</option>
+                {VOCAB.speech_act.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2 items-center">
+              <label className="font-mono text-slate-500 shrink-0 w-20 break-words">{formatKey('intent')}</label>
+              <select
+                value={nlu.metadata?.intent || ''}
+                onChange={e => updateField(['metadata', 'intent'], e.target.value)}
+                className="flex-1 min-w-0 bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
+              >
+                <option value="" disabled>Select...</option>
+                {VOCAB.intent.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* FRAMES */}
+        {nlu.frames?.map((frame, fIdx) => (
+          <div key={fIdx} className="border bg-white p-3 shadow-sm text-xs space-y-2">
+            <div className="nlu-key uppercase">
+              {frame.frame_label || frame.frame_name}
+              {' '}<span className="font-mono lowercase text-violet-500" title={frame.frame_name}>({frame.lexical_unit})</span>
+            </div>
+            <div className="mt-2 space-y-2 pt-2 border-t">
+              {frame.frame_label && frame.frame_name !== frame.frame_label && (
+                <div className="text-xs text-slate-500 font-mono mb-1">FrameNet: {frame.frame_name}</div>
+              )}
+              {Object.entries(frame.roles || {}).map(([role, rawData]) => {
+                const data = rawData as NLUFrameRole;
+                return (
+                  <div key={role} className="flex gap-2">
+                    <span className="font-medium w-24 text-slate-500 shrink-0 break-words">{formatKey(role)}:</span>
+                    <span className="text-slate-900">{data.surface} <span className="text-xs text-violet-400">[{data.type}]</span></span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Second row: Logical Form + Pragmatics */}
+      <div className={`grid gap-4 ${expanded ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+        <div className="border bg-white p-3 shadow-sm text-xs space-y-2">
+          <span className="nlu-key uppercase">{t('editor.logicalForm')}</span>
+          <div className="mt-2 pt-2 border-t">
+            {renderEditableDict(nlu.logical_form as unknown as Record<string, string>, 'logical_form')}
+          </div>
+        </div>
+        <div className="border bg-white p-3 shadow-sm text-xs space-y-2">
+          <span className="nlu-key uppercase">{t('editor.pragmatics')}</span>
+          <div className="mt-2 pt-2 border-t">
+            {renderEditableDict(nlu.pragmatics as unknown as Record<string, string>, 'pragmatics')}
           </div>
         </div>
       </div>
 
-      {/* METADATA CLASSIFICATION */}
-      <details className="border bg-white p-3 shadow-sm text-xs" open>
-        <summary className="nlu-key cursor-pointer uppercase">{t('editor.metadataClassification')}</summary>
-        <div className="mt-3 space-y-2 pt-3 border-t">
-          <div className="grid grid-cols-3 gap-2 items-center">
-            <label className="font-mono text-slate-500 truncate col-span-1">speech_act</label>
-            <select
-              value={nlu.metadata?.speech_act || ''}
-              onChange={e => updateField(['metadata', 'speech_act'], e.target.value)}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
-            >
-              <option value="" disabled>Select...</option>
-              {VOCAB.speech_act.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-3 gap-2 items-center">
-            <label className="font-mono text-slate-500 truncate col-span-1">intent</label>
-            <select
-              value={nlu.metadata?.intent || ''}
-              onChange={e => updateField(['metadata', 'intent'], e.target.value)}
-              className="col-span-2 w-full bg-white border-b outline-none focus:border-violet-400 text-xs p-1"
-            >
-              <option value="" disabled>Select...</option>
-              {VOCAB.intent.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          </div>
+      {/* Bottom: Full-width NSM Explications */}
+      <div className="border bg-white p-3 shadow-sm text-xs space-y-2">
+        <span className="nlu-key uppercase">{t('editor.nsmExplications')}</span>
+        <div className="mt-2 pt-2 border-t">
+          {renderEditableDict(nlu.nsm_explications, 'nsm_explications', true)}
         </div>
-      </details>
-
-      {/* FRAMES */}
-      {nlu.frames?.map((frame, fIdx) => (
-        <details key={fIdx} className="border bg-white p-3 shadow-sm text-xs" open>
-          <summary className="nlu-key cursor-pointer uppercase">
-            {frame.frame_label || frame.frame_name}
-            {' '}<span className="font-mono lowercase text-violet-500" title={frame.frame_name}>({frame.lexical_unit})</span>
-          </summary>
-          <div className="mt-3 space-y-2 pt-3 border-t">
-            {frame.frame_label && frame.frame_name !== frame.frame_label && (
-              <div className="text-xs text-slate-500 font-mono mb-1">FrameNet: {frame.frame_name}</div>
-            )}
-            {Object.entries(frame.roles || {}).map(([role, rawData]) => {
-              const data = rawData as NLUFrameRole;
-              return (
-                <div key={role} className="flex gap-2">
-                  <span className="font-medium w-20 text-slate-500 shrink-0">{role}:</span>
-                  <span className="text-slate-900 truncate">{data.surface} <span className="text-xs text-violet-400">[{data.type}]</span></span>
-                </div>
-              )
-            })}
-          </div>
-        </details>
-      ))}
-
-      {/* DETAILED LINGUISTIC ANALYSIS — expanded by default */}
-      <details className="border bg-white p-3 shadow-sm text-xs" open>
-        <summary className="nlu-key cursor-pointer">{t('editor.detailedAnalysis').toUpperCase()}</summary>
-        <div className="mt-3 space-y-4 pt-3 border-t">
-          <div>
-            <h4 className="nlu-key mb-1">{t('editor.nsmExplications').toUpperCase()}</h4>
-            {renderEditableDict(nlu.nsm_explications, 'nsm_explications')}
-          </div>
-          <div>
-            <h4 className="nlu-key mb-1">{t('editor.logicalForm').toUpperCase()}</h4>
-            {renderEditableDict(nlu.logical_form as unknown as Record<string, string>, 'logical_form')}
-          </div>
-          <div>
-            <h4 className="nlu-key mb-1">{t('editor.pragmatics').toUpperCase()}</h4>
-            {renderEditableDict(nlu.pragmatics as unknown as Record<string, string>, 'pragmatics')}
-          </div>
-        </div>
-      </details>
+      </div>
     </div>
   );
 };
@@ -2430,6 +2437,83 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
   const safeElements = Array.isArray(elements) ? elements : [];
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; zone: 'before' | 'inside' | 'after' } | null>(null);
+
+  // --- Tree utilities ---
+
+  const findElement = (id: string, items: VisualElement[]): VisualElement | null => {
+    for (const item of items) {
+      if (item.id === id) return item;
+      if (item.children) {
+        const found = findElement(id, item.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const getSubtreeDepth = (el: VisualElement): number => {
+    if (!el.children || el.children.length === 0) return 1;
+    return 1 + Math.max(...el.children.map(getSubtreeDepth));
+  };
+
+  const getNodeDepth = (id: string, items: VisualElement[], depth = 1): number => {
+    for (const item of items) {
+      if (item.id === id) return depth;
+      if (item.children) {
+        const found = getNodeDepth(id, item.children, depth + 1);
+        if (found > 0) return found;
+      }
+    }
+    return 0;
+  };
+
+  const isDescendantOf = (ancestorId: string, nodeId: string, items: VisualElement[]): boolean => {
+    const ancestor = findElement(ancestorId, items);
+    if (!ancestor || !ancestor.children) return false;
+    for (const child of ancestor.children) {
+      if (child.id === nodeId) return true;
+      if (isDescendantOf(child.id, nodeId, items)) return true;
+    }
+    return false;
+  };
+
+  const removeFromTree = (items: VisualElement[], id: string): VisualElement[] => {
+    return items
+      .filter(item => item.id !== id)
+      .map(item => item.children ? { ...item, children: removeFromTree(item.children, id) } : item);
+  };
+
+  const insertInTree = (items: VisualElement[], targetId: string, node: VisualElement, zone: 'before' | 'inside' | 'after'): VisualElement[] => {
+    if (zone === 'inside') {
+      return items.map(item => {
+        if (item.id === targetId) {
+          return { ...item, children: [...(item.children || []), node] };
+        }
+        return item.children ? { ...item, children: insertInTree(item.children, targetId, node, zone) } : item;
+      });
+    }
+    // before / after: insert as sibling
+    const result: VisualElement[] = [];
+    for (const item of items) {
+      if (item.id === targetId && zone === 'before') result.push(node);
+      result.push(item.children ? { ...item, children: insertInTree(item.children, targetId, node, zone) } : item);
+      if (item.id === targetId && zone === 'after') result.push(node);
+    }
+    return result;
+  };
+
+  const insertInTreeFirst = (items: VisualElement[], targetId: string, node: VisualElement): VisualElement[] => {
+    return items.map(item => {
+      if (item.id === targetId) {
+        return { ...item, children: [node, ...(item.children || [])] };
+      }
+      return item.children ? { ...item, children: insertInTreeFirst(item.children, targetId, node) } : item;
+    });
+  };
+
+  // --- CRUD operations ---
 
   const addElement = (parentId: string | null = null) => {
     const newId = `elemento`;
@@ -2438,6 +2522,9 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
     if (parentId === null) {
       onUpdate([...safeElements, newElement]);
     } else {
+      // Check depth before adding
+      const parentDepth = getNodeDepth(parentId, safeElements);
+      if (parentDepth >= 5) return;
       const update = (items: VisualElement[]): VisualElement[] => {
         return items.map(item => {
           if (item.id === parentId) {
@@ -2451,7 +2538,6 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
       };
       onUpdate(update(safeElements));
     }
-    // Auto-select new element for editing
     setTimeout(() => {
       setEditingId(newId);
       setEditingValue(newId);
@@ -2459,17 +2545,8 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
   };
 
   const removeElement = (idToRemove: string) => {
-    const filter = (items: VisualElement[]): VisualElement[] => {
-      return items
-        .filter(item => item.id !== idToRemove)
-        .map(item => {
-          if (item.children) {
-            return { ...item, children: filter(item.children) };
-          }
-          return item;
-        });
-    };
-    onUpdate(filter(safeElements));
+    if (idToRemove === safeElements[0]?.id && getNodeDepth(idToRemove, safeElements) === 1) return; // protect root
+    onUpdate(removeFromTree(safeElements, idToRemove));
   };
 
   const updateElementId = (oldId: string, newId: string) => {
@@ -2479,18 +2556,99 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
     }
     const update = (items: VisualElement[]): VisualElement[] => {
       return items.map(item => {
-        if (item.id === oldId) {
-          return { ...item, id: newId.trim() };
-        }
-        if (item.children) {
-          return { ...item, children: update(item.children) };
-        }
-        return item;
+        if (item.id === oldId) return { ...item, id: newId.trim() };
+        return item.children ? { ...item, children: update(item.children) } : item;
       });
     };
     onUpdate(update(safeElements));
     setEditingId(null);
   };
+
+  // --- Drag handlers ---
+
+  const handleDragStart = (e: React.DragEvent, element: VisualElement) => {
+    e.stopPropagation();
+    setDraggedId(element.id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', element.id);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDropTarget(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, element: VisualElement, level: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggedId || draggedId === element.id) return;
+    if (isDescendantOf(draggedId, element.id, safeElements)) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const isRoot = level === 0;
+
+    let zone: 'before' | 'inside' | 'after';
+    if (isRoot) {
+      // Root only accepts 'inside'; upper half = first, lower half = last (handled at drop)
+      zone = 'inside';
+    } else {
+      const third = rect.height / 3;
+      if (y < third) zone = 'before';
+      else if (y < third * 2) zone = 'inside';
+      else zone = 'after';
+    }
+
+    // Depth validation for 'inside'
+    if (zone === 'inside') {
+      const draggedEl = findElement(draggedId, safeElements);
+      const targetDepth = getNodeDepth(element.id, safeElements);
+      if (draggedEl && targetDepth + getSubtreeDepth(draggedEl) > 5) return;
+    }
+
+    e.dataTransfer.dropEffect = 'move';
+    setDropTarget({ id: element.id, zone });
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation();
+    // Only clear if leaving the element entirely (not entering a child)
+    const related = e.relatedTarget as HTMLElement | null;
+    if (!e.currentTarget.contains(related)) {
+      setDropTarget(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, element: VisualElement, level: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!draggedId || draggedId === element.id) return;
+
+    const draggedEl = findElement(draggedId, safeElements);
+    if (!draggedEl) return;
+
+    let zone = dropTarget?.zone || 'inside';
+    const isRoot = level === 0;
+
+    // For root: determine first/last child from cursor position
+    if (isRoot && zone === 'inside') {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const removed = removeFromTree(safeElements, draggedId);
+      const result = y < rect.height / 2
+        ? insertInTreeFirst(removed, element.id, draggedEl)
+        : insertInTree(removed, element.id, draggedEl, 'inside');
+      onUpdate(result);
+    } else {
+      const removed = removeFromTree(safeElements, draggedId);
+      onUpdate(insertInTree(removed, element.id, draggedEl, zone));
+    }
+
+    setDraggedId(null);
+    setDropTarget(null);
+  };
+
+  // --- Render ---
 
   const handlePillClick = (element: VisualElement) => {
     setEditingId(element.id);
@@ -2509,12 +2667,34 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
   const renderElement = (element: VisualElement, level = 0, isLast = false) => {
     const isEditing = editingId === element.id;
     const isRoot = level === 0;
+    const isDragSource = draggedId === element.id;
+    const isDropTarget = dropTarget?.id === element.id;
+    const dropZoneClass = isDropTarget ? `drop-${dropTarget!.zone}` : '';
+    const canDrag = !isRoot;
+    const children = element.children || [];
+    const hasChildren = children.length > 0;
 
     return (
-      <div key={element.id} className={`element-item ${isRoot ? 'element-root' : ''}`}>
-        {!isRoot && <div className="element-dot" />}
+      <div
+        key={element.id}
+        className={`element-node ${isRoot ? 'element-root' : ''} ${isDragSource ? 'dragging' : ''} ${dropZoneClass}`}
+        onDragOver={e => handleDragOver(e, element, level)}
+        onDragLeave={handleDragLeave}
+        onDrop={e => handleDrop(e, element, level)}
+      >
+        {/* Node row */}
+        <div className="element-node-row">
+          {canDrag && (
+            <span
+              className="drag-handle"
+              draggable
+              onDragStart={e => handleDragStart(e, element)}
+              onDragEnd={handleDragEnd}
+            >
+              <GripVertical size={12} />
+            </span>
+          )}
 
-        <div className="flex items-center gap-2">
           {isEditing ? (
             <div className="element-pill element-editing">
               <input
@@ -2528,7 +2708,13 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
               />
             </div>
           ) : (
-            <div className="element-pill" onClick={() => handlePillClick(element)}>
+            <div
+              className="element-pill"
+              onClick={() => handlePillClick(element)}
+              draggable={canDrag}
+              onDragStart={e => handleDragStart(e, element)}
+              onDragEnd={handleDragEnd}
+            >
               {element.id}
             </div>
           )}
@@ -2541,38 +2727,55 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
             >
               <CornerDownRight size={12} />
             </button>
-            <button
-              onClick={() => removeElement(element.id)}
-              className="element-action-btn delete"
-              title={t('actions.delete')}
-            >
-              <X size={12} />
-            </button>
+            {!isRoot && (
+              <button
+                onClick={() => removeElement(element.id)}
+                className="element-action-btn delete"
+                title={t('actions.delete')}
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
         </div>
 
-        {element.children && element.children.length > 0 && (
-          <div>
-            {element.children.map((child, idx) =>
-              renderElement(child, level + 1, idx === element.children!.length - 1)
-            )}
+        {/* Children with drawn connectors */}
+        {hasChildren && (
+          <div className="element-children">
+            {children.map((child, idx) => {
+              const childIsLast = idx === children.length - 1;
+              return (
+                <div key={child.id} className={`element-branch ${childIsLast ? 'branch-last' : ''}`}>
+                  {/* Vertical spine + horizontal arm drawn via CSS */}
+                  <div className="branch-connector" aria-hidden="true">
+                    <div className="branch-vertical" />
+                    <div className="branch-horizontal" />
+                  </div>
+                  {renderElement(child, level + 1, childIsLast)}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
     );
   };
 
+  const hasRoot = safeElements.length > 0;
+
   return (
     <div className="border p-4 min-h-[120px] bg-white shadow-inner">
       <div className="element-tree">
         {safeElements.map((el, idx) => renderElement(el, 0, idx === safeElements.length - 1))}
       </div>
-      <button
-        onClick={() => addElement(null)}
-        className="mt-4 pt-3 border-t border-slate-200 text-left text-xs font-bold text-violet-600 hover:text-violet-900 transition-colors w-full flex items-center gap-2 uppercase tracking-wider"
-      >
-        <Plus size={14} /> {t('editor.addRootElement')}
-      </button>
+      {!hasRoot && (
+        <button
+          onClick={() => addElement(null)}
+          className="mt-4 pt-3 border-t border-slate-200 text-left text-xs font-bold text-violet-600 hover:text-violet-900 transition-colors w-full flex items-center gap-2 uppercase tracking-wider"
+        >
+          <Plus size={14} /> {t('editor.addRootElement')}
+        </button>
+      )}
     </div>
   );
 };
@@ -2672,10 +2875,10 @@ const FocusViewModal: React.FC<{
 
   const renderContent = () => {
     switch (mode) {
-      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} />;
+      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} expanded />;
       case 'visual': return (
-        <div className="flex flex-col h-full gap-6">
-          <div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 h-full gap-6">
+          <div className="flex flex-col">
             <label className="text-xs font-medium uppercase text-slate-500 block mb-2 tracking-widest">{t('editor.hierarchicalElements')}</label>
             <ElementsEditor elements={row.elements || []} onUpdate={val => {
               onUpdate({ elements: val, bitmapStatus: 'outdated' });
@@ -2709,7 +2912,7 @@ const FocusViewModal: React.FC<{
               </button>
             )}
           </div>
-          <div className="flex-1 mt-6 border-t pt-6 border-slate-200">
+          <div className={`flex flex-col lg:border-l lg:pl-6 border-slate-200 transition-colors ${elementsManuallyEdited ? 'bg-amber-50 rounded-lg p-4 lg:border-l-amber-200' : ''}`}>
             <label className="text-xs font-medium uppercase text-slate-500 block mb-3 tracking-widest">{t('editor.spatialLogic')}</label>
             {isPromptEditing ? (
               <textarea
