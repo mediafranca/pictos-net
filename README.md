@@ -9,7 +9,7 @@
 PICTOS.NET transforma intenciones comunicativas expresadas en lenguaje natural en pictogramas mediante un pipeline de razonamiento semántico. Es parte de la investigación doctoral de [Herbert Spencer](https://herbertspencer.net/cc) y de **[MediaFranca](https://github.com/mediafranca)** — una iniciativa de código abierto de bien público para la CAA.
 
 
-La rama de desarrollo `lab` contiene la siguiente versión:
+La rama de desarrollo `dev` contiene la siguiente versión:
 
 * ver: [next.PICTOS.net](https://next.pictos.net)
 * [![Netlify Status](https://api.netlify.com/api/v1/badges/c3a0cb25-110a-49a6-9d9b-05ccf7a72347/deploy-status)](https://app.netlify.com/projects/pictos-next/deploys)
