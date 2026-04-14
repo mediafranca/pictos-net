@@ -331,11 +331,10 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 const dims = await drawBitmapToCanvas(bitmap, CANVAS_ID);
                 if (!isMounted.current) return;
                 setImageDims(dims);
-                // Set viewBox AND explicit width/height on the hidden SVG.
-                // The WASM reads .width/.height to determine the output coordinate space.
+                // Only set viewBox; the WASM reads canvas.width/height (not svg.width/height)
+                // to determine coordinate space. Leaving explicit width/height off the svg
+                // lets CSS size it freely in the preview without a 1024px intrinsic lock.
                 hiddenSvg.setAttribute('viewBox', `0 0 ${dims.width} ${dims.height}`);
-                hiddenSvg.setAttribute('width', String(dims.width));
-                hiddenSvg.setAttribute('height', String(dims.height));
                 console.debug('[VectorizerModal] canvas dims:', dims.width, 'x', dims.height);
                 setCanvasReady(true);
             } catch (err) {
@@ -433,12 +432,21 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                 );
                 if (!isMounted.current || controller.signal.aborted) return;
 
-                // Ensure the SVG has correct dimensions after WASM may have modified them
-                if (hiddenSvg) {
-                    const vb = hiddenSvg.getAttribute('viewBox');
-                    console.debug('[VectorizerModal] post-trace viewBox:', vb,
-                        'width:', hiddenSvg.getAttribute('width'),
-                        'height:', hiddenSvg.getAttribute('height'));
+                // Re-enforce viewBox from the actual canvas pixel dimensions. The WASM
+                // writes paths in canvas pixel coordinates, so the viewBox must match
+                // canvas.width / canvas.height exactly. We restore it here in case the
+                // initial value was stale (dims state vs real canvas) or the WASM touched
+                // any attribute on the SVG element.
+                const canvasEl = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
+                if (hiddenSvg && canvasEl) {
+                    const cw = canvasEl.width;
+                    const ch = canvasEl.height;
+                    hiddenSvg.setAttribute('viewBox', `0 0 ${cw} ${ch}`);
+                    // Remove explicit width/height attrs so CSS can freely size the SVG
+                    // without being clamped by a 1024px intrinsic size in flex layout.
+                    hiddenSvg.removeAttribute('width');
+                    hiddenSvg.removeAttribute('height');
+                    console.debug('[VectorizerModal] post-trace viewBox enforced:', `0 0 ${cw} ${ch}`);
                 }
 
                 // Serialize the hidden SVG and store for display
@@ -754,7 +762,7 @@ export const VectorizerModal: React.FC<VectorizerModalProps> = ({
                             <div className="flex-1 flex items-center justify-center p-6 overflow-auto relative bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2016%2016%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Crect%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3Crect%20x%3D%228%22%20y%3D%228%22%20width%3D%228%22%20height%3D%228%22%20fill%3D%22%23f1f5f9%22%2F%3E%3C%2Fsvg%3E')]">
                                 {resultSvgHtml ? (
                                     <div
-                                        className={`max-w-full max-h-full [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:h-auto ${
+                                        className={`w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:drop-shadow-sm ${
                                             outlinePreview
                                                 ? '[&_path]:!fill-none [&_path]:!stroke-black [&_path]:![stroke-width:1px] [&_path]:![vector-effect:non-scaling-stroke] [&_rect]:!fill-none [&_rect]:!stroke-black [&_rect]:![stroke-width:1px] [&_circle:not([data-vertex])]:!fill-none [&_circle:not([data-vertex])]:!stroke-black [&_circle:not([data-vertex])]:![stroke-width:1px] [&_ellipse]:!fill-none [&_ellipse]:!stroke-black [&_ellipse]:![stroke-width:1px] [&_polygon]:!fill-none [&_polygon]:!stroke-black [&_polygon]:![stroke-width:1px]'
                                                 : ''
