@@ -1376,13 +1376,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
             {/* Example Libraries Section - Only show if libraries are available */}
             {availableLibraries.length > 0 && (
-              <div className="max-w-2xl mx-auto space-y-6">
+              <div className="space-y-6">
                 <div className="text-center space-y-2">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.exampleLibraries')}</h2>
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
-                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {availableLibraries.map((library: LibraryMetadata) => {
                     const slug = library.filename.replace(/(_graph.*)?\.json$/, '');
                     return (
