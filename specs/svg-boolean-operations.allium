@@ -1,0 +1,338 @@
+-- allium: 3
+-- svg-boolean-operations.allium
+
+-- Scope: Boolean path operations (union, subtract, intersect) over the
+--   current selection in the SVG editor. Intended primarily for
+--   post-vectorization cleanup: merging fragments that should be a single
+--   semantic shape, and correcting vectorization artefacts (stray dark-grey
+--   borders around black strokes, small white discs that should be
+--   subtracted from a larger disc to form a hole, etc.).
+-- Includes: Operand eligibility, operand ordering, identity of the result,
+--   placement in the semantic tree, style survival, empty-result handling,
+--   history.
+-- Excludes:
+--   - Multi-selection mechanics (external to this spec)
+--   - The polygon/Bezier clipping algorithm (library-provided black box)
+--   - Undo/redo machinery (inherited from the editor's history)
+--   - Vectorization itself (Phase 4, separate spec)
+-- Dependencies: SVG editor selection model, mf-svg-schema semantic tree,
+--   two-level CSS model (see docs/CSS_STYLING_ARCHITECTURE.md).
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value BooleanOp {
+  union
+  subtract
+  intersect
+}
+
+value ShapeKind {
+  path       -- <path>
+  primitive  -- <rect>, <circle>, <ellipse>, <polygon>, <polyline>
+  group      -- <g> with geometric descendants
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external Shape {
+  id: String
+  classes: Set<String>
+  kind: ShapeKind
+  parent: Shape?                 -- semantic parent in the SVG tree
+  zIndex: Integer                -- document order among siblings
+  depth: Integer                 -- distance from the SVG root
+  geometry: Geometry             -- abstract closed region(s) on the canvas
+  localOverrides: Set<CSSRule>   -- #id.class { ... } rules bound to this shape
+}
+
+external Selection {
+  shapes: [Shape]                -- ordered by user selection order
+  -- Provided by the editor's multi-select mechanism
+}
+
+external SVGEditor {
+  -- The hosting editor. Holds the document, selection, history, and the
+  -- library-class citation registry (citeClass/unciteClass).
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity BooleanResult {
+  shape: Shape
+  operation: BooleanOp
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Eligibility ===
+
+rule EligibleSelectionForUnionOrIntersect {
+  when: user invokes union or intersect
+
+  requires: Selection.shapes.count >= 2
+  requires: every shape in Selection has computable geometry
+
+  @invariant "group operand collapses first"
+    -- When a group <g> is among the operands, it is treated as the union
+    -- of its descendants' geometries. The group keeps its id and classes
+    -- through this collapse; the group's internal subtree is discarded.
+    -- Non-geometric descendants (text, images, foreignObject) disqualify
+    -- the group from participating (see IneligibleSelection).
+}
+
+rule EligibleSelectionForSubtract {
+  when: user invokes subtract
+
+  requires: Selection.shapes.count = 2
+  requires: both shapes have computable geometry
+
+  -- Subtract is always binary. To subtract a union of shapes, the user
+  -- unions them first, then subtracts.
+}
+
+rule IneligibleSelection {
+  when: user invokes a boolean operation but eligibility fails
+
+  ensures: no change to the document
+  ensures: user is notified of the reason (insufficient operands,
+    unsupported element type, empty/degenerate geometry)
+}
+
+-- === Operand ordering ===
+
+rule UnionAndIntersectOrdering {
+  when: op = union or op = intersect
+
+  @guidance "geometry is commutative"
+    -- Operand order does not change the resulting shape. Order still
+    -- matters for identity: the first shape in Selection is the Base
+    -- (see BaseShape).
+}
+
+rule SubtractOrdering {
+  when: op = subtract
+
+  @guidance "top bites bottom"
+    -- The shape with the higher zIndex (drawn on top) is removed from
+    -- the shape with the lower zIndex (drawn below).
+    -- Intuition: the top shape "leaves its bite" on the bottom shape.
+    -- The bottom shape is the Base.
+    -- This matches Inkscape/Illustrator convention.
+}
+
+-- === Identity of the result ===
+
+rule BaseShape {
+  when: a boolean operation is applied
+
+  ensures: the result inherits from a designated Base:
+    for union, intersect: Base = first shape in Selection order
+    for subtract:         Base = operand with the lower zIndex (the bitten one)
+
+  ensures: BooleanResult.shape.id = Base.id
+  ensures: BooleanResult.shape.classes = Base.classes
+  ensures: BooleanResult.shape.localOverrides = Base.localOverrides
+
+  @invariant "base identity survives"
+    -- The id, classes, and local CSS overrides of the Base are preserved
+    -- on the result. Non-base operands' classes and overrides are
+    -- discarded, subject to library-class garbage collection (see
+    -- LibraryClassGC).
+}
+
+-- === Placement in the tree ===
+
+rule ResultPlacement {
+  when: a boolean operation is applied
+
+  ensures: BooleanResult.shape is inserted at the Deepest Common Ancestor
+    (DCA) of all operands in the semantic tree
+
+  ensures: within the DCA, the result is placed at the zIndex of the Base
+    (or the Base's ancestor under the DCA, if the Base was deeper)
+
+  @guidance "cross-branch selection collapses toward root"
+    -- If operands live in different branches of the tree, their DCA is
+    -- shallower than their original parents. In the extreme case
+    -- (operands in disjoint top-level groups), the DCA is the SVG root.
+    -- This "collapse toward the root" is an acceptable loss of structural
+    -- nesting for cleanup workflows.
+
+  @invariant "non-base operands removed"
+    -- Every operand other than the Base is deleted from the tree. Their
+    -- geometry is absorbed into the result; their ids become free again.
+    -- For group operands, the group and its entire subtree are removed
+    -- (the group's geometry having been collapsed into the operand).
+}
+
+-- === Geometric outcome ===
+
+rule UnionOutcome {
+  when: op = union
+
+  ensures: BooleanResult.shape.geometry = geometric union of all operand geometries
+  -- Overlapping regions merge; internal edges disappear.
+}
+
+rule SubtractOutcome {
+  when: op = subtract
+
+  ensures: BooleanResult.shape.geometry = Base.geometry minus top-operand geometry
+}
+
+rule IntersectOutcome {
+  when: op = intersect
+
+  ensures: BooleanResult.shape.geometry = geometric intersection of all operand geometries
+}
+
+-- === Edge cases ===
+
+rule EmptyResult {
+  when: the computed geometry is empty (no area)
+
+  ensures: no change to the document
+  ensures: user is notified that the operation would produce an empty shape
+
+  @guidance "why reject rather than silently delete"
+    -- Examples: intersection of disjoint shapes; subtraction where the
+    -- top shape fully covers the bottom. In cleanup workflows this almost
+    -- always indicates user error. Preserving operands and surfacing the
+    -- reason is safer than silent deletion.
+}
+
+rule LibraryClassGC {
+  when: non-base operands are removed after a successful operation
+
+  ensures: for every class cited only by removed operands, the editor
+    decrements its citation count; library rules with zero citations
+    are garbage-collected per the existing unciteClass mechanism
+}
+
+-- === History ===
+
+rule RecordInHistory {
+  when: a boolean operation completes successfully
+
+  ensures: SVGEditor.history records a single atomic step that can be
+    undone to restore every operand at its original position, with its
+    original id, classes, local overrides, and subtree (for group operands)
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant TransformsBaked {
+  -- The result's geometry is expressed in the coordinate space of the DCA.
+  -- Any transform attributes on operands, or on their ancestors up to the
+  -- DCA, are baked into the path data before the boolean is computed.
+  -- The result therefore carries no transform of its own.
+}
+
+invariant NoSemanticRecovery {
+  -- Once applied, a boolean operation cannot be reversed except via undo.
+  -- This spec does not require preserving original operands as hidden
+  -- sources (unlike Figma's non-destructive boolean groups).
+}
+
+invariant IdUniqueness {
+  -- The surviving id (from Base) remains unique in the document because
+  -- every other operand (and its id) is removed.
+}
+
+invariant GeometryLocality {
+  -- Path geometry never leaves the browser during a boolean operation.
+  -- The clipping library runs locally.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface BooleanOperationControls {
+  -- Toolbar affordances for invoking boolean operations inside the
+  -- SVG editor.
+
+  @guidance "host: SelectionToolbar"
+    -- The boolean operation buttons live inside SelectionToolbar (the
+    -- floating toolbar that appears above the canvas while one or more
+    -- shapes are selected). They do NOT live in the side properties
+    -- panel: that panel is for attributes of a single shape, while
+    -- boolean operations are destructive multi-element actions and
+    -- belong with Group/Ungroup/Duplicate/Delete.
+
+  @guidance "position within SelectionToolbar"
+    -- Order: [Group] [Ungroup] | [Union] [Subtract] [Intersect]
+    --        | [Duplicate] [BringForward] [SendBackward]
+    --        | [ApplyClass] | [Delete]
+    -- The boolean block sits immediately after Group/Ungroup, separated
+    -- by dividers on both sides. Rationale: Group/Ungroup and the boolean
+    -- ops both combine multiple operands; placing them adjacent makes the
+    -- "operations on multi-selection" cluster legible.
+
+  @guidance "icons"
+    -- Icons follow Inkscape/Figma visual convention:
+    --   union     = two overlapping discs fully filled
+    --   subtract  = left disc with a right-disc-shaped bite taken out
+    --   intersect = lens (only the overlap region filled)
+
+  @guidance "enablement"
+    -- Each button is hidden (not just disabled) when the Selection does
+    -- not satisfy its eligibility rule. This mirrors how Group/Ungroup
+    -- already appear conditionally in SelectionToolbar.
+    --   Union, Intersect: visible when selection.count >= 2
+    --   Subtract:         visible when selection.count = 2
+    -- When visible but blocked by a secondary condition (e.g., group
+    -- contains non-geometric children), the button is disabled with a
+    -- tooltip explaining why.
+
+  @guidance "order hint for subtract"
+    -- When Subtract is visible (exactly 2 shapes selected), the UI marks
+    -- which shape is "top" (the one that bites) and which is "bottom"
+    -- (the Base). The user reorders via the existing BringForward /
+    -- SendBackward buttons, already in the same toolbar, before applying.
+
+  @guidance "keyboard shortcuts"
+    -- Union:     Cmd/Ctrl + Plus
+    -- Subtract:  Cmd/Ctrl + Minus
+    -- Intersect: Cmd/Ctrl + Asterisk
+    -- Aligned with Inkscape defaults. Shortcuts are active only when the
+    -- editor modal has focus and Selection satisfies eligibility.
+
+  @guidance "progress indicator"
+    -- Boolean operations on complex paths may exceed 100ms. Show a brief
+    -- spinner inside the active button (or disable the toolbar) during
+    -- computation. Run the clipping off the main thread (Web Worker) if
+    -- latency becomes noticeable on real workshop data.
+
+  @guidance "result selection"
+    -- After a successful operation the Selection is replaced by a
+    -- single-shape selection containing the result. This allows chaining
+    -- operations (e.g., subtract then immediately union with another).
+
+  exposes:
+    Selection.shapes
+    per-operation eligibility (visible/disabled + reason when disabled)
+    computation progress
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should a group operand with non-geometric descendants (text, image, foreignObject) disqualify the whole operation, or silently skip those descendants?"
+
+open question "When a group is an operand and one of its descendants has user-authored local overrides, those overrides are lost in the collapse. Should the editor warn the user before proceeding?"
+
+open question "For very complex paths (10k+ segments), should the operation run in a Web Worker with a cancellable progress UI?"
+
+open question "Should subtract support more than two operands as a convenience (implicitly: 'A minus union(B, C, ...)')? Adds UI ambiguity about which operand is the Base."

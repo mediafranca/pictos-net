@@ -124,7 +124,7 @@ export function parseSVGToDOM(svgString: string): SVGElement | null {
  * NOTE: DOMMatrix constructor expects CSS syntax (translate needs px units),
  * but SVG transforms are unitless. We parse manually to avoid silent failures.
  */
-function parseTransformToMatrix(transform: string | null): DOMMatrix {
+export function parseTransformToMatrix(transform: string | null): DOMMatrix {
     if (!transform || transform === 'none') return new DOMMatrix();
 
     // Match each SVG transform function: name(args)
@@ -214,7 +214,7 @@ function matrixToTransform(m: DOMMatrix): string {
  * Strategy: normalize path to absolute commands, transform each coordinate pair.
  * Handles M, L, C, Q, A, Z. Relative commands are first converted to absolute.
  */
-function bakeMatrixIntoPathD(d: string, m: DOMMatrix): string {
+export function bakeMatrixIntoPathD(d: string, m: DOMMatrix): string {
     if (!d) return d;
 
     // Tokenize: split into command + args chunks
