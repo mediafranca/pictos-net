@@ -759,54 +759,52 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }));
   }, [config]);
 
-  // Settle pending edits on (utterance, nlu, prompt) by diffing the current
-  // row against the last snapshot. Element edits are committed eagerly with op.
-  const settleEdits = useCallback((row: RowData): RowData => {
-    const snap = phaseSnapshotsRef.current[row.id];
-    if (!snap) return row;
+  // Pure settle: takes (row, snap) and returns { row, snap } with edits emitted.
+  // Mutating the ref inside a setRows updater is unsafe under StrictMode, which
+  // runs updaters twice — the second run would see the mutation from the first
+  // and skip emission. Callers capture snap before setRows and update after.
+  const settleEditsPure = useCallback((row: RowData, snap: PhaseSnapshot | undefined): { row: RowData; snap: PhaseSnapshot | undefined } => {
+    if (!snap) {
+      const hasActive = row.interventionLog?.sessions.some(s => !s.endedAt) ?? false;
+      if (!hasActive) return { row, snap: undefined };
+      return { row, snap: takeSnapshot(row) };
+    }
     let next = row;
     if (row.UTTERANCE !== snap.utterance) {
-      next = Recording.recordEdit(next, config, {
-        phase: 'utterance',
-        before: snap.utterance ?? '',
-        after: row.UTTERANCE,
-      });
+      next = Recording.recordEdit(next, config, { phase: 'utterance', before: snap.utterance ?? '', after: row.UTTERANCE });
     }
     if (JSON.stringify(row.NLU) !== JSON.stringify(snap.nlu)) {
-      next = Recording.recordEdit(next, config, {
-        phase: 'nlu',
-        before: snap.nlu,
-        after: row.NLU,
-      });
+      next = Recording.recordEdit(next, config, { phase: 'nlu', before: snap.nlu, after: row.NLU });
     }
     if ((row.prompt ?? '') !== (snap.prompt ?? '')) {
-      next = Recording.recordEdit(next, config, {
-        phase: 'prompt',
-        before: snap.prompt ?? '',
-        after: row.prompt ?? '',
-      });
+      next = Recording.recordEdit(next, config, { phase: 'prompt', before: snap.prompt ?? '', after: row.prompt ?? '' });
     }
-    phaseSnapshotsRef.current[row.id] = takeSnapshot(next);
-    return next;
+    return { row: next, snap: takeSnapshot(next) };
   }, [config]);
 
   const endRecordingSession = useCallback((rowId: string) => {
+    const oldSnap = phaseSnapshotsRef.current[rowId];
     setRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
-      const settled = settleEdits(r);
-      const ended = Recording.endSession(settled);
-      delete phaseSnapshotsRef.current[rowId];
-      return ended;
+      const { row: settled } = settleEditsPure(r, oldSnap);
+      return Recording.endSession(settled);
     }));
-  }, [settleEdits]);
+    delete phaseSnapshotsRef.current[rowId];
+  }, [settleEditsPure]);
+
+  // Side effects run from a useEffect so StrictMode's double-invocation of
+  // setState updaters does not double-call session lifecycle helpers.
+  const previousOpenRowIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = previousOpenRowIdRef.current;
+    if (prev && prev !== openRowId) endRecordingSession(prev);
+    if (openRowId && prev !== openRowId) startRecordingSession(openRowId);
+    previousOpenRowIdRef.current = openRowId;
+  }, [openRowId, startRecordingSession, endRecordingSession]);
 
   const handleOpenRowChange = useCallback((nextOpenId: string | null) => {
-    setOpenRowId(prev => {
-      if (prev && prev !== nextOpenId) endRecordingSession(prev);
-      if (nextOpenId && prev !== nextOpenId) startRecordingSession(nextOpenId);
-      return nextOpenId;
-    });
-  }, [startRecordingSession, endRecordingSession]);
+    setOpenRowId(nextOpenId);
+  }, []);
 
   // Element operations commit eagerly with explicit op kind.
   const recordElementOp = useCallback((rowId: string, op: ElementOpKind, before: unknown, after: unknown) => {
@@ -832,10 +830,20 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   }, []);
 
   // Settle pending edits before a regeneration, so the discard event is
-  // ordered after any unrecorded manual edit on the same phase.
+  // ordered after any unrecorded manual edit on the same phase. The snapshot
+  // is captured before setRows and updated after, keeping the updater pure
+  // so StrictMode's double-invocation does not skip emission.
   const settleRowEdits = useCallback((rowId: string) => {
-    setRows(prev => prev.map(r => r.id === rowId ? settleEdits(r) : r));
-  }, [settleEdits]);
+    const oldSnap = phaseSnapshotsRef.current[rowId];
+    let nextSnap: PhaseSnapshot | undefined = oldSnap;
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const result = settleEditsPure(r, oldSnap);
+      nextSnap = result.snap;
+      return result.row;
+    }));
+    if (nextSnap) phaseSnapshotsRef.current[rowId] = nextSnap;
+  }, [settleEditsPure]);
 
   // Record a discard event for a phase whose previous value is being replaced
   // by a fresh generation. Updates the phase snapshot to the new value so that
@@ -2156,15 +2164,15 @@ const RowComponent: React.FC<{
                         }}
                         onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                         autoFocus
-                        className="w-full min-h-[100px] border-none p-0 text-sm font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
+                        className="w-full min-h-[100px] text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
                       />
                     ) : (
                       <div
                         onClick={() => setIsPromptEditing(true)}
-                        className="w-full min-h-[100px] cursor-text text-sm font-light text-slate-700 leading-relaxed"
+                        className="w-full min-h-[100px] cursor-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
                       >
                         {row.prompt && row.elements && row.elements.length > 0 ? (
-                          <PromptRenderer prompt={row.prompt} elements={row.elements} />
+                          <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
                         ) : (
                           <div className="text-slate-500">{row.prompt || ""}</div>
                         )}
@@ -2597,7 +2605,7 @@ const SmartNLUEditor: React.FC<{
   );
 };
 
-const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[] }> = ({ prompt, elements }) => {
+const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[]; bare?: boolean }> = ({ prompt, elements, bare = false }) => {
   if (!prompt) return null;
 
   // Collect all element IDs recursively
@@ -2650,6 +2658,9 @@ const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[] }> = 
     return parts;
   };
 
+  if (bare) {
+    return <>{renderPromptWithPills()}</>;
+  }
   return (
     <div className="prompt-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200">
       {renderPromptWithPills()}
@@ -3156,15 +3167,15 @@ const FocusViewModal: React.FC<{
                 onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' })}
                 onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                 autoFocus
-                className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
+                className="w-full h-full text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
               />
             ) : (
               <div
                 onClick={() => setIsPromptEditing(true)}
-                className="w-full h-full cursor-text text-lg font-light text-slate-700 leading-relaxed"
+                className="w-full h-full cursor-text text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
               >
                 {row.prompt && row.elements && row.elements.length > 0 ? (
-                  <PromptRenderer prompt={row.prompt} elements={row.elements} />
+                  <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
                 ) : (
                   <div className="text-slate-500">{row.prompt || ""}</div>
                 )}
