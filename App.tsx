@@ -2164,7 +2164,9 @@ const RowComponent: React.FC<{
                         }}
                         onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                         autoFocus
-                        className="w-full min-h-[100px] text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+                        ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
+                        onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }}
+                        className="w-full min-h-[100px] text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none overflow-hidden"
                       />
                     ) : (
                       <div
