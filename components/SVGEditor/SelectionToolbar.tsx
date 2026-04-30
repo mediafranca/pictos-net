@@ -136,6 +136,20 @@ const PathEditToolbar: React.FC = () => {
     const pathEditTool = useSVGEditorStore(state => state.pathEditTool);
     const setPathEditTool = useSVGEditorStore(state => state.setPathEditTool);
     const toggleNodeSmooth = useSVGEditorStore(state => state.toggleNodeSmooth);
+    const applySimplifyOperation = useSVGEditorStore(state => state.applySimplifyOperation);
+    const pathEditMode = useSVGEditorStore(state => state.pathEditMode);
+
+    const handleSimplify = () => {
+        const result = applySimplifyOperation();
+        if (!result.ok && result.reason) {
+            console.warn('[simplify]', result.reason);
+        }
+    };
+
+    // Simplify only meaningful for path-like editable elements.
+    const simplifyEnabled = pathEditMode?.elementType === 'path'
+        || pathEditMode?.elementType === 'polygon'
+        || pathEditMode?.elementType === 'polyline';
 
     const centerX = LEFT_PANEL + (window.innerWidth - LEFT_PANEL - RIGHT_PANEL) / 2;
     const btnClass = "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-violet-800 rounded transition-colors";
@@ -199,6 +213,22 @@ const PathEditToolbar: React.FC = () => {
                 tabIndex={-1}
             >
                 <Spline size={13} aria-hidden="true" />
+            </button>
+
+            <div className="w-px h-5 bg-violet-600" />
+
+            {/* Simplify — refit polylines to Bezier curves on the path being edited */}
+            <button
+                onClick={handleSimplify}
+                disabled={!simplifyEnabled}
+                className={`${btnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                title={t('svgEditor.simplifyTooltip')}
+                aria-label={t('svgEditor.simplify')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <Sparkles size={13} aria-hidden="true" />
+                {t('svgEditor.simplify')}
             </button>
 
             <div className="w-px h-5 bg-violet-600" />

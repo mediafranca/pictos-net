@@ -883,12 +883,16 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         // simplifier. Operates on each selected <path> in place; non-path
         // elements are skipped (they don't have polyline noise to clean up).
         applySimplifyOperation: (tolerance: number = 0.5) => {
-            const { svgDocument, selectedElementIds, selectedElementId } = get();
+            const { svgDocument, selectedElementIds, selectedElementId, pathEditMode } = get();
             if (!svgDocument) return { ok: false, reason: 'No SVG loaded' };
 
+            // While in path edit mode the canonical "selection" is the path
+            // being edited. Fall back to it when the regular selection is empty.
             const ids = selectedElementIds.size > 0
                 ? Array.from(selectedElementIds)
-                : selectedElementId ? [selectedElementId] : [];
+                : selectedElementId ? [selectedElementId]
+                : pathEditMode?.elementId ? [pathEditMode.elementId]
+                : [];
             if (ids.length === 0) return { ok: false, reason: 'No selection' };
 
             const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
