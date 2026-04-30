@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
-  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, ClipboardList
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -2279,7 +2279,7 @@ const RowComponent: React.FC<{
               title={t('audit.openTooltip')}
               aria-label={t('audit.openLabel')}
             >
-              <ClipboardList size={14} />
+              <History size={14} />
             </button>
             <button
               onClick={(e) => {
