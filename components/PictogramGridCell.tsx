@@ -162,12 +162,14 @@ export const PictogramGridCell: React.FC<Props> = ({
       >
         {renderPictogram()}
 
-        {/* Hover overlay: stage pill + actions */}
+        {/* Hover overlay: stage pill (SVG stages only) + actions */}
         {stage !== 'none' && isHovered && (
           <>
-            <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded">
-              {stageLabel[stage]}
-            </div>
+            {(stage === 'trazado' || stage === 'estructurado') && (
+              <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded">
+                {stageLabel[stage]}
+              </div>
+            )}
             <div className="absolute bottom-2 right-2 flex gap-1">
               {(stage === 'trazado' || stage === 'estructurado') && (
                 <button

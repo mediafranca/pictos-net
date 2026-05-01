@@ -1824,6 +1824,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
           onRecordElementOp={(op, before, after) => recordElementOp(focusMode!.rowId, op, before, after)}
           onSettleField={() => settleRowEdits(focusMode!.rowId)}
+          onProcess={(step) => processStep(focusMode!.rowId, step)}
+          onStop={() => {
+            stopFlags.current[focusMode!.rowId] = true;
+            addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
+          }}
         />
       )}
 
@@ -3121,7 +3126,9 @@ const FocusViewModal: React.FC<{
   onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
   onRecordElementOp?: (op: ElementOpKind, before: VisualElement[], after: VisualElement[]) => void;
   onSettleField?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField }) => {
+  onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
+  onStop?: () => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -3327,6 +3334,22 @@ const FocusViewModal: React.FC<{
         <footer className="p-4 border-t bg-white flex justify-between gap-3">
           {/* Left actions */}
           <div className="flex gap-3">
+            {/* Regenerate this step (mirrors the per-step Play button in the row's StepBox).
+                For format step there is no single regenerate — vectorize and structure
+                live in the column-specific actions. */}
+            {(mode === 'nlu' || mode === 'visual' || mode === 'bitmap') && onProcess && (() => {
+              const status = mode === 'nlu' ? row.nluStatus : mode === 'visual' ? row.visualStatus : row.bitmapStatus;
+              const isProc = status === 'processing';
+              return isProc && onStop ? (
+                <button onClick={onStop} className="flex items-center gap-2 bg-orange-600 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-orange-700 transition-all shadow-lg animate-pulse" title={t('actions.stopProcess')}>
+                  <Square size={14} /> {t('actions.stopProcess')}
+                </button>
+              ) : (
+                <button onClick={() => onProcess(mode)} className="flex items-center gap-2 bg-orange-500 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-orange-600 transition-all shadow-lg" title={t('actions.regenerate')}>
+                  <Play size={14} /> {t('actions.regenerate')}
+                </button>
+              );
+            })()}
             {(mode === 'bitmap' || mode === 'format') && row.bitmap && (
               <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                 <Download size={14} /> PNG
