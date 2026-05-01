@@ -7,13 +7,15 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
-  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History,
+  List, LayoutGrid
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog } from './types';
 import * as Gemini from './services/geminiService';
+import * as Recording from './services/interventionRecording';
 import { useTranslation } from './hooks/useTranslation';
 import { useDialogA11y } from './hooks/useDialogA11y';
 import type { Locale } from './locales';
@@ -28,6 +30,8 @@ import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
+import { RowAuditPanel } from './components/RowAuditPanel';
+import { PictogramGridCell } from './components/PictogramGridCell';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
@@ -298,7 +302,24 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       nluDuration: typeof row.nluDuration === 'number' ? row.nluDuration : undefined,
       visualDuration: typeof row.visualDuration === 'number' ? row.visualDuration : undefined,
       bitmapDuration: typeof row.bitmapDuration === 'number' ? row.bitmapDuration : undefined,
+      interventionLog: sanitizeInterventionLog(row.interventionLog),
     };
+  };
+
+  // Close any session left "active" by a previous tab close. Without this
+  // sweep, an orphaned active session would coexist with a new one on next
+  // open of the same row, violating SingleActiveSessionPerRow.
+  const sanitizeInterventionLog = (log: any): RowInterventionLog | undefined => {
+    if (!log || !Array.isArray(log.sessions)) return undefined;
+    const orphanCutoff = new Date().toISOString();
+    const sessions = log.sessions
+      .filter((s: any) => s && typeof s.startedAt === 'string' && Array.isArray(s.events))
+      .map((s: any) => ({
+        startedAt: s.startedAt,
+        endedAt: typeof s.endedAt === 'string' ? s.endedAt : orphanCutoff,
+        events: s.events,
+      }));
+    return { sessions };
   };
 
   useEffect(() => {
@@ -578,7 +599,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (realText) autoCascadeRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
     setViewMode('list');
-    setOpenRowId(newId);
+    handleOpenRowChange(newId);
     setShowConfig(false);
     setSearchValue('');
     setIsSearching(false);
@@ -716,6 +737,137 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   };
 
+  // === Intervention recording (see specs/intervention-recording.allium) ===
+
+  // Snapshot of phase artifacts at session start / last commit, used to detect
+  // edits at settle moments (row close, regenerate). Element edits commit
+  // eagerly with explicit op, so they bypass this comparison.
+  type PhaseSnapshot = { utterance?: string; nlu?: unknown; elements?: unknown; prompt?: string };
+  const phaseSnapshotsRef = useRef<Record<string, PhaseSnapshot>>({});
+
+  const takeSnapshot = (row: RowData): PhaseSnapshot => ({
+    utterance: row.UTTERANCE,
+    nlu: row.NLU,
+    elements: row.elements,
+    prompt: row.prompt,
+  });
+
+  const startRecordingSession = useCallback((rowId: string) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const next = Recording.startSession(r, config);
+      phaseSnapshotsRef.current[rowId] = takeSnapshot(next);
+      return next;
+    }));
+  }, [config]);
+
+  // Pure settle: takes (row, snap) and returns { row, snap } with edits emitted.
+  // Mutating the ref inside a setRows updater is unsafe under StrictMode, which
+  // runs updaters twice — the second run would see the mutation from the first
+  // and skip emission. Callers capture snap before setRows and update after.
+  const settleEditsPure = useCallback((row: RowData, snap: PhaseSnapshot | undefined): { row: RowData; snap: PhaseSnapshot | undefined } => {
+    if (!snap) {
+      const hasActive = row.interventionLog?.sessions.some(s => !s.endedAt) ?? false;
+      if (!hasActive) return { row, snap: undefined };
+      return { row, snap: takeSnapshot(row) };
+    }
+    let next = row;
+    if (row.UTTERANCE !== snap.utterance) {
+      next = Recording.recordEdit(next, config, { phase: 'utterance', before: snap.utterance ?? '', after: row.UTTERANCE });
+    }
+    if (JSON.stringify(row.NLU) !== JSON.stringify(snap.nlu)) {
+      next = Recording.recordEdit(next, config, { phase: 'nlu', before: snap.nlu, after: row.NLU });
+    }
+    if ((row.prompt ?? '') !== (snap.prompt ?? '')) {
+      next = Recording.recordEdit(next, config, { phase: 'prompt', before: snap.prompt ?? '', after: row.prompt ?? '' });
+    }
+    return { row: next, snap: takeSnapshot(next) };
+  }, [config]);
+
+  const endRecordingSession = useCallback((rowId: string) => {
+    const oldSnap = phaseSnapshotsRef.current[rowId];
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const { row: settled } = settleEditsPure(r, oldSnap);
+      return Recording.endSession(settled);
+    }));
+    delete phaseSnapshotsRef.current[rowId];
+  }, [settleEditsPure]);
+
+  // Side effects run from a useEffect so StrictMode's double-invocation of
+  // setState updaters does not double-call session lifecycle helpers.
+  const previousOpenRowIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = previousOpenRowIdRef.current;
+    if (prev && prev !== openRowId) endRecordingSession(prev);
+    if (openRowId && prev !== openRowId) startRecordingSession(openRowId);
+    previousOpenRowIdRef.current = openRowId;
+  }, [openRowId, startRecordingSession, endRecordingSession]);
+
+  const handleOpenRowChange = useCallback((nextOpenId: string | null) => {
+    setOpenRowId(nextOpenId);
+  }, []);
+
+  // Element operations commit eagerly with explicit op kind.
+  const recordElementOp = useCallback((rowId: string, op: ElementOpKind, before: unknown, after: unknown) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const next = Recording.recordEdit(r, config, { phase: 'elements', op, before, after });
+      const snap = phaseSnapshotsRef.current[rowId];
+      if (snap) phaseSnapshotsRef.current[rowId] = { ...snap, elements: after };
+      return next;
+    }));
+  }, [config]);
+
+  const updateRowInterventionLog = useCallback((rowId: string, log: RowInterventionLog | null) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      if (log === null) {
+        const cleared = Recording.clearLog(r);
+        delete phaseSnapshotsRef.current[rowId];
+        return cleared;
+      }
+      return Recording.replaceLog(r, log);
+    }));
+  }, []);
+
+  // Settle pending edits before a regeneration, so the discard event is
+  // ordered after any unrecorded manual edit on the same phase. The snapshot
+  // is captured before setRows and updated after, keeping the updater pure
+  // so StrictMode's double-invocation does not skip emission.
+  const settleRowEdits = useCallback((rowId: string) => {
+    const oldSnap = phaseSnapshotsRef.current[rowId];
+    let nextSnap: PhaseSnapshot | undefined = oldSnap;
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const result = settleEditsPure(r, oldSnap);
+      nextSnap = result.snap;
+      return result.row;
+    }));
+    if (nextSnap) phaseSnapshotsRef.current[rowId] = nextSnap;
+  }, [settleEditsPure]);
+
+  // Record a discard event for a phase whose previous value is being replaced
+  // by a fresh generation. Updates the phase snapshot to the new value so that
+  // a subsequent settle does not also emit an edit event for this phase.
+  const recordPhaseRegen = useCallback((rowId: string, phase: 'utterance' | 'nlu' | 'elements' | 'prompt', before: unknown, after: unknown) => {
+    const hadValue = before !== undefined && before !== null && before !== '' &&
+      !(Array.isArray(before) && before.length === 0);
+    if (hadValue) {
+      setRows(prev => prev.map(r => {
+        if (r.id !== rowId) return r;
+        return Recording.recordDiscard(r, config, { phase, before });
+      }));
+    }
+    const snap = phaseSnapshotsRef.current[rowId];
+    if (snap) {
+      if (phase === 'nlu') snap.nlu = after;
+      else if (phase === 'elements') snap.elements = after;
+      else if (phase === 'prompt') snap.prompt = after as string;
+      else if (phase === 'utterance') snap.utterance = after as string;
+    }
+  }, [config]);
+
   const regeneratePrompt = async (rowId: string): Promise<boolean> => {
     const row = rows.find(r => r.id === rowId);
     if (!row || !row.NLU || !row.elements) {
@@ -724,6 +876,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
 
     stopFlags.current[rowId] = false;
+    settleRowEdits(rowId);
+    const beforePrompt = row.prompt;
     updateRowById(rowId, { visualStatus: 'processing' });
     const startTime = Date.now();
 
@@ -751,6 +905,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         visualDuration: duration,
         bitmapStatus: 'outdated'
       });
+      recordPhaseRegen(rowId, 'prompt', beforePrompt, newPrompt);
       addLog('success', `Prompt regenerado en ${duration.toFixed(1)}s: "${newPrompt.substring(0, 50)}..."`);
       return true;
     } catch (error) {
@@ -775,6 +930,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     stopFlags.current[rowId] = false;
     const statusKey = `${step}Status` as keyof RowData;
     const durationKey = `${step}Duration` as keyof RowData;
+
+    // Settle pending manual edits as edit events before recording any discards.
+    if (step !== 'bitmap') settleRowEdits(rowId);
+    const beforeNLU = row.NLU;
+    const beforeElements = row.elements;
+    const beforePrompt = row.prompt;
 
     updateRowById(rowId, { [statusKey]: 'processing' });
     const startTime = Date.now();
@@ -810,6 +971,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated' } : {}),
         ...(step === 'bitmap' ? { bitmap: result, status: 'completed' } : {})
       });
+      if (step === 'nlu') {
+        recordPhaseRegen(rowId, 'nlu', beforeNLU, result);
+      } else if (step === 'visual') {
+        recordPhaseRegen(rowId, 'elements', beforeElements, result.elements);
+        recordPhaseRegen(rowId, 'prompt', beforePrompt, result.prompt);
+      }
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
 
       if (step === 'bitmap') {
@@ -841,6 +1008,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
     stopFlags.current[row.id] = false;
     addLog('info', t('messages.cascadeStarted', { utterance: row.UTTERANCE }));
+
+    // Settle pending manual edits before the cascade discards downstream artifacts.
+    settleRowEdits(rowId);
+    const beforeNLU = row.NLU;
+    const beforeElements = row.elements;
+    const beforePrompt = row.prompt;
 
     const stepNames = { nlu: t('pipeline.understand'), visual: t('pipeline.compose'), bitmap: t('pipeline.produce') };
     let finalUpdates: Partial<RowData> = { status: 'processing' };
@@ -894,6 +1067,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       finalUpdates.status = 'completed';
       updateRowById(rowId, finalUpdates);
+
+      // Record discards for each downstream phase that had a previous value.
+      recordPhaseRegen(rowId, 'nlu', beforeNLU, nluResult);
+      recordPhaseRegen(rowId, 'elements', beforeElements, visualResult.elements);
+      recordPhaseRegen(rowId, 'prompt', beforePrompt, visualResult.prompt);
 
       const totalTime = (finalUpdates.nluDuration || 0) + (finalUpdates.visualDuration || 0) + (finalUpdates.bitmapDuration || 0);
       addLog('success', t('messages.cascadeComplete', { duration: totalTime.toFixed(1), utterance: row.UTTERANCE }));
@@ -1315,6 +1493,25 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 </label>
               </div>
 
+              {/* field-recording */}
+              <div id="field-recording">
+                <FieldLabel
+                  label={t('config.recordingModifications')}
+                  tooltip={t('config.recordingModificationsTooltip')}
+                />
+                <label className="flex items-center gap-3 cursor-pointer p-2.5 border bg-slate-50 hover:bg-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={config.recording?.enabled !== false}
+                    onChange={e => setConfig(prev => ({ ...prev, recording: { enabled: e.target.checked } }))}
+                    className="w-4 h-4 accent-violet-600"
+                  />
+                  <span className="text-xs font-medium text-slate-700">
+                    {(config.recording?.enabled !== false) ? t('config.recordingEnabled') : t('config.recordingDisabled')}
+                  </span>
+                </label>
+              </div>
+
               {/* field-tutorial */}
               <div id="field-tutorial" className="mt-auto pt-2">
                 <button
@@ -1334,20 +1531,48 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
-          <div id="sort-controls" className="mb-6 flex justify-end gap-2">
-            <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
-            <button
-              onClick={() => setSortBy('alphabetical')}
-              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-            >
-              {t('library.alphabetical')}
-            </button>
-            <button
-              onClick={() => setSortBy('completeness')}
-              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-            >
-              {t('library.completeness')}
-            </button>
+          <div id="sort-controls" className="mb-6 flex justify-between items-center gap-2">
+            {/* View mode switcher (left) — see specs/library-views.allium.
+                Default is grid; explicit 'list' is the only opt-out. */}
+            <div id="view-switcher" className="flex items-center gap-2">
+              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider mr-2">{t('library.viewMode')}</span>
+              <div className="inline-flex border border-slate-200 bg-white">
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
+                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'grid') === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewGrid')}
+                  aria-label={t('library.viewGrid')}
+                  aria-pressed={(config.libraryViewMode ?? 'grid') === 'grid'}
+                >
+                  <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
+                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewList')}
+                  aria-label={t('library.viewList')}
+                  aria-pressed={config.libraryViewMode === 'list'}
+                >
+                  <List size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            {/* Sort controls (right) */}
+            <div className="flex gap-2 items-center">
+              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
+              <button
+                onClick={() => setSortBy('alphabetical')}
+                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              >
+                {t('library.alphabetical')}
+              </button>
+              <button
+                onClick={() => setSortBy('completeness')}
+                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              >
+                {t('library.completeness')}
+              </button>
+            </div>
           </div>
         )}
         {viewMode === 'home' ? (
@@ -1376,13 +1601,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
             {/* Example Libraries Section - Only show if libraries are available */}
             {availableLibraries.length > 0 && (
-              <div className="max-w-2xl mx-auto space-y-6">
+              <div className="space-y-6">
                 <div className="text-center space-y-2">
                   <h2 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.exampleLibraries')}</h2>
                   <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
                 </div>
 
-                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {availableLibraries.map((library: LibraryMetadata) => {
                     const slug = library.filename.replace(/(_graph.*)?\.json$/, '');
                     return (
@@ -1459,12 +1684,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               </span>
             </p>
           </div>
-        ) : (
+        ) : config.libraryViewMode === 'list' ? (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
               return (
                 <RowComponent
-                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { setOpenRowId(v ? row.id : null); if (v) setShowConfig(false); }}
+                  key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { handleOpenRowChange(v ? row.id : null); if (v) setShowConfig(false); }}
                   onUpdate={u => updateRowById(row.id, u)} onProcess={s => processStep(row.id, s)}
                   onRegeneratePrompt={() => regeneratePrompt(row.id)}
                   onStop={() => {
@@ -1482,6 +1707,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                     });
                     // Remove row from state
                     setRows(prev => prev.filter(r => r.id !== row.id));
+                    // Clean up recording state if this row was open
+                    delete phaseSnapshotsRef.current[row.id];
+                    if (openRowId === row.id) setOpenRowId(null);
                     // If the deleted row was in focus mode, clear focus mode
                     if (focusMode?.rowId === row.id) {
                       setFocusMode(null);
@@ -1493,9 +1721,32 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
                   onOpenEditor={(source) => openSVGEditor(row.id, source)}
                   onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                  onSettleField={() => settleRowEdits(row.id)}
+                  onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
+                  onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
                 />
               );
             })}
+          </div>
+        ) : (
+          /* Pictogram grid view — default. See specs/library-views.allium */
+          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+            {filteredRows.map((row) => (
+              <PictogramGridCell
+                key={row.id}
+                row={row}
+                onUpdate={u => updateRowById(row.id, u)}
+                onCascade={() => processCascade(row.id)}
+                onStop={() => {
+                  stopFlags.current[row.id] = true;
+                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
+                }}
+                onFocus={step => setFocusMode({ step, rowId: row.id })}
+                onOpenEditor={source => openSVGEditor(row.id, source)}
+                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                onSettleField={() => settleRowEdits(row.id)}
+              />
+            ))}
           </div>
         )}
       </main>
@@ -1572,6 +1823,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onOpenEditor={(source) => openSVGEditor(focusMode!.rowId, source)}
           onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
+          onRecordElementOp={(op, before, after) => recordElementOp(focusMode!.rowId, op, before, after)}
+          onSettleField={() => settleRowEdits(focusMode!.rowId)}
+          onProcess={(step) => processStep(focusMode!.rowId, step)}
+          onStop={() => {
+            stopFlags.current[focusMode!.rowId] = true;
+            addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
+          }}
         />
       )}
 
@@ -1825,13 +2083,17 @@ const RowComponent: React.FC<{
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: (source?: 'raw' | 'structured') => void;
   onOpenVectorizer: () => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer }) => {
+  onSettleField?: () => void;
+  onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
+  onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
   const [isPromptEditing, setIsPromptEditing] = React.useState(false);
   const [isRegeneratingPrompt, setIsRegeneratingPrompt] = React.useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const [showAuditPanel, setShowAuditPanel] = React.useState(false);
 
   return (
     <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 scroll-mt-24 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
@@ -1840,6 +2102,8 @@ const RowComponent: React.FC<{
           <textarea
             value={row.UTTERANCE}
             onChange={e => onUpdate({ UTTERANCE: e.target.value, nluStatus: 'outdated', visualStatus: 'outdated', bitmapStatus: 'outdated' })}
+            onBlur={() => onSettleField?.()}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLTextAreaElement).blur(); } }}
             rows={1}
             ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
             onInput={e => { const el = e.target as HTMLTextAreaElement; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }}
@@ -1891,6 +2155,7 @@ const RowComponent: React.FC<{
                 onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })}
                 config={config}
                 onConfigChange={onConfigChange}
+                onSettleField={onSettleField}
               />
             </StepBox>
             <StepBox
@@ -1913,7 +2178,7 @@ const RowComponent: React.FC<{
                     <ElementsEditor elements={row.elements || []} onUpdate={val => {
                       onUpdate({ elements: val, bitmapStatus: 'outdated' });
                       setElementsManuallyEdited(true);
-                    }} />
+                    }} onRecordOp={(op, before, after) => onRecordElementOp?.(op, before, after)} />
                     {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
                       <button
                         onMouseDown={async (e) => {
@@ -1952,17 +2217,19 @@ const RowComponent: React.FC<{
                           onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' });
                           setPromptManuallyEdited(true);
                         }}
-                        onBlur={() => setIsPromptEditing(false)}
+                        onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                         autoFocus
-                        className="w-full min-h-[100px] border-none p-0 text-sm font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
+                        ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
+                        onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }}
+                        className="w-full min-h-[100px] text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none overflow-hidden"
                       />
                     ) : (
                       <div
                         onClick={() => setIsPromptEditing(true)}
-                        className="w-full min-h-[100px] cursor-text text-sm font-light text-slate-700 leading-relaxed"
+                        className="w-full min-h-[100px] cursor-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
                       >
                         {row.prompt && row.elements && row.elements.length > 0 ? (
-                          <PromptRenderer prompt={row.prompt} elements={row.elements} />
+                          <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
                         ) : (
                           <div className="text-slate-500">{row.prompt || ""}</div>
                         )}
@@ -2040,7 +2307,7 @@ const RowComponent: React.FC<{
             </StepBox>
           </div>
 
-          {/* Row Actions: Copy and Delete */}
+          {/* Row Actions: Copy, Audit, Delete */}
           <div className="px-8 pb-6 bg-slate-50/30 flex justify-end gap-2">
             <button
               onClick={(e) => {
@@ -2061,6 +2328,17 @@ const RowComponent: React.FC<{
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                setShowAuditPanel(true);
+              }}
+              className="p-2 border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all bg-white shadow-sm"
+              title={t('audit.openTooltip')}
+              aria-label={t('audit.openLabel')}
+            >
+              <History size={14} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 setShowDeleteConfirm(true);
               }}
               className="p-2 border border-slate-200 hover:border-rose-600 text-slate-500 hover:text-rose-600 transition-all bg-white shadow-sm"
@@ -2069,6 +2347,16 @@ const RowComponent: React.FC<{
               <Trash2 size={14} />
             </button>
           </div>
+
+          <RowAuditPanel
+            isOpen={showAuditPanel}
+            log={row.interventionLog}
+            utterance={row.UTTERANCE}
+            onClose={() => setShowAuditPanel(false)}
+            onReplace={(log) => onUpdateInterventionLog?.(log)}
+            onClear={() => onUpdateInterventionLog?.(null)}
+            onLog={onLog}
+          />
         </>
       )}
 
@@ -2158,7 +2446,8 @@ const SmartNLUEditor: React.FC<{
   config: GlobalConfig;
   onConfigChange: (c: Partial<GlobalConfig>) => void;
   expanded?: boolean;
-}> = ({ data, onUpdate, config, onConfigChange, expanded = false }) => {
+  onSettleField?: () => void;
+}> = ({ data, onUpdate, config, onConfigChange, expanded = false, onSettleField }) => {
   const { t, lang: uiLang, setLang } = useTranslation();
   const nlu = useMemo<Partial<NLUData>>(() => {
     if (typeof data === 'string') {
@@ -2237,7 +2526,7 @@ const SmartNLUEditor: React.FC<{
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" onBlur={() => onSettleField?.()}>
       {/* Top row: multi-column only in expanded (focus modal) view */}
       <div className={`grid gap-4 items-start ${expanded ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
         {/* CONTEXTO */}
@@ -2373,7 +2662,7 @@ const SmartNLUEditor: React.FC<{
   );
 };
 
-const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[] }> = ({ prompt, elements }) => {
+const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[]; bare?: boolean }> = ({ prompt, elements, bare = false }) => {
   if (!prompt) return null;
 
   // Collect all element IDs recursively
@@ -2426,6 +2715,9 @@ const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[] }> = 
     return parts;
   };
 
+  if (bare) {
+    return <>{renderPromptWithPills()}</>;
+  }
   return (
     <div className="prompt-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200">
       {renderPromptWithPills()}
@@ -2433,7 +2725,11 @@ const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[] }> = 
   );
 };
 
-const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: VisualElement[]) => void; }> = ({ elements, onUpdate }) => {
+const ElementsEditor: React.FC<{
+  elements: VisualElement[];
+  onUpdate: (v: VisualElement[]) => void;
+  onRecordOp?: (op: ElementOpKind, before: VisualElement[], after: VisualElement[]) => void;
+}> = ({ elements, onUpdate, onRecordOp }) => {
   const { t } = useTranslation();
   const safeElements = Array.isArray(elements) ? elements : [];
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2516,12 +2812,17 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
 
   // --- CRUD operations ---
 
+  const commitTree = (op: ElementOpKind, after: VisualElement[]) => {
+    onRecordOp?.(op, safeElements, after);
+    onUpdate(after);
+  };
+
   const addElement = (parentId: string | null = null) => {
     const newId = `elemento`;
     const newElement: VisualElement = { id: newId };
 
     if (parentId === null) {
-      onUpdate([...safeElements, newElement]);
+      commitTree('add', [...safeElements, newElement]);
     } else {
       // Check depth before adding
       const parentDepth = getNodeDepth(parentId, safeElements);
@@ -2537,7 +2838,7 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
           return item;
         });
       };
-      onUpdate(update(safeElements));
+      commitTree('add', update(safeElements));
     }
     setTimeout(() => {
       setEditingId(newId);
@@ -2547,7 +2848,7 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
 
   const removeElement = (idToRemove: string) => {
     if (idToRemove === safeElements[0]?.id && getNodeDepth(idToRemove, safeElements) === 1) return; // protect root
-    onUpdate(removeFromTree(safeElements, idToRemove));
+    commitTree('remove', removeFromTree(safeElements, idToRemove));
   };
 
   const updateElementId = (oldId: string, newId: string) => {
@@ -2561,7 +2862,7 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
         return item.children ? { ...item, children: update(item.children) } : item;
       });
     };
-    onUpdate(update(safeElements));
+    commitTree('rename', update(safeElements));
     setEditingId(null);
   };
 
@@ -2639,10 +2940,10 @@ const ElementsEditor: React.FC<{ elements: VisualElement[]; onUpdate: (v: Visual
       const result = y < rect.height / 2
         ? insertInTreeFirst(removed, element.id, draggedEl)
         : insertInTree(removed, element.id, draggedEl, 'inside');
-      onUpdate(result);
+      commitTree('reorder', result);
     } else {
       const removed = removeFromTree(safeElements, draggedId);
-      onUpdate(insertInTree(removed, element.id, draggedEl, zone));
+      commitTree('reorder', insertInTree(removed, element.id, draggedEl, zone));
     }
 
     setDraggedId(null);
@@ -2824,7 +3125,11 @@ const FocusViewModal: React.FC<{
   onOpenEditor?: (source?: 'raw' | 'structured') => void;
   onOpenVectorizer?: () => void;
   onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange }) => {
+  onRecordElementOp?: (op: ElementOpKind, before: VisualElement[], after: VisualElement[]) => void;
+  onSettleField?: () => void;
+  onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
+  onStop?: () => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -2876,7 +3181,7 @@ const FocusViewModal: React.FC<{
 
   const renderContent = () => {
     switch (mode) {
-      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} expanded />;
+      case 'nlu': return <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val, visualStatus: 'outdated', bitmapStatus: 'outdated' })} config={config} onConfigChange={onConfigChange} expanded onSettleField={onSettleField} />;
       case 'visual': return (
         <div className="grid grid-cols-1 lg:grid-cols-2 h-full gap-6">
           <div className="flex flex-col">
@@ -2884,7 +3189,7 @@ const FocusViewModal: React.FC<{
             <ElementsEditor elements={row.elements || []} onUpdate={val => {
               onUpdate({ elements: val, bitmapStatus: 'outdated' });
               setElementsManuallyEdited(true);
-            }} />
+            }} onRecordOp={(op, before, after) => onRecordElementOp?.(op, before, after)} />
             {elementsManuallyEdited && row.NLU && row.elements && row.elements.length > 0 && (
               <button
                 onMouseDown={async (e) => {
@@ -2919,17 +3224,17 @@ const FocusViewModal: React.FC<{
               <textarea
                 value={row.prompt || ""}
                 onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' })}
-                onBlur={() => setIsPromptEditing(false)}
+                onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                 autoFocus
-                className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed"
+                className="w-full h-full text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
               />
             ) : (
               <div
                 onClick={() => setIsPromptEditing(true)}
-                className="w-full h-full cursor-text text-lg font-light text-slate-700 leading-relaxed"
+                className="w-full h-full cursor-text text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
               >
                 {row.prompt && row.elements && row.elements.length > 0 ? (
-                  <PromptRenderer prompt={row.prompt} elements={row.elements} />
+                  <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
                 ) : (
                   <div className="text-slate-500">{row.prompt || ""}</div>
                 )}
@@ -2952,19 +3257,24 @@ const FocusViewModal: React.FC<{
         const hasRaw = !!row.rawSvg;
         const hasStructured = !!row.structuredSvg;
 
-        // Nothing: show trace + structure buttons
+        // Nothing yet: two-column layout. Left = trace CTA, right = disabled
+        // with a message pointing at the left. See specs/library-views.allium.
         if (!hasRaw && !hasStructured) {
           return (
-            <div className="flex flex-col items-center justify-center h-full gap-4 bg-slate-50">
-              <FileCode size={40} className="text-slate-400" />
-              <p className="text-sm text-slate-500">{t('svg.traceConverts')}</p>
-              <div className="flex gap-3">
+            <div className="flex flex-row gap-3 h-full bg-slate-50 p-6">
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-6">
+                <FileCode size={40} className="text-slate-400" />
+                <p className="text-sm text-slate-500 text-center">{t('svg.traceConverts')}</p>
                 <button
                   onClick={() => onOpenVectorizer?.()}
                   className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg"
                 >
                   {t('svg.traceSvg')}
                 </button>
+              </div>
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-100/50 border border-dashed border-slate-300 p-6 opacity-70">
+                <Layers size={40} className="text-slate-300" />
+                <p className="text-xs text-slate-500 text-center max-w-xs">{t('library.structureRequiresRaw')}</p>
                 <button
                   disabled
                   className="flex items-center gap-2 bg-slate-200 text-slate-400 px-6 py-3 font-bold uppercase text-xs tracking-widest cursor-not-allowed"
@@ -2976,14 +3286,15 @@ const FocusViewModal: React.FC<{
           );
         }
 
-        // Has SVG(s): show SVGGenerator (handles both raw+structured internally) + share
+        // Has SVG(s): two-column layout (raw left, structured right)
+        // See specs/library-views.allium § FocusModalFormatStep
         return (
           <div className="flex flex-col h-full bg-slate-50 p-6">
             <div className="mb-3">
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" />
             </div>
           </div>
         );
@@ -3024,6 +3335,22 @@ const FocusViewModal: React.FC<{
         <footer className="p-4 border-t bg-white flex justify-between gap-3">
           {/* Left actions */}
           <div className="flex gap-3">
+            {/* Regenerate this step (mirrors the per-step Play button in the row's StepBox).
+                For format step there is no single regenerate — vectorize and structure
+                live in the column-specific actions. */}
+            {(mode === 'nlu' || mode === 'visual' || mode === 'bitmap') && onProcess && (() => {
+              const status = mode === 'nlu' ? row.nluStatus : mode === 'visual' ? row.visualStatus : row.bitmapStatus;
+              const isProc = status === 'processing';
+              return isProc && onStop ? (
+                <button onClick={onStop} className="flex items-center gap-2 bg-orange-600 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-orange-700 transition-all shadow-lg animate-pulse" title={t('actions.stopProcess')}>
+                  <Square size={14} /> {t('actions.stopProcess')}
+                </button>
+              ) : (
+                <button onClick={() => onProcess(mode)} className="flex items-center gap-2 bg-orange-500 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-orange-600 transition-all shadow-lg" title={t('actions.regenerate')}>
+                  <Play size={14} /> {t('actions.regenerate')}
+                </button>
+              );
+            })()}
             {(mode === 'bitmap' || mode === 'format') && row.bitmap && (
               <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                 <Download size={14} /> PNG

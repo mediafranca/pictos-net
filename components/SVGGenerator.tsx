@@ -33,9 +33,16 @@ interface SVGGeneratorProps {
     onUpdate: (updates: Partial<RowData>) => void;
     onOpenEditor?: (source?: 'raw' | 'structured') => void;
     onOpenVectorizer?: () => void;
+    /**
+     * Layout direction for the dual-preview "completed" state.
+     *  'stacked' (default) — raw above structured, used inside narrow row columns.
+     *  'columns' — raw left, structured right; used by FocusViewModal's format step.
+     * See specs/library-views.allium.
+     */
+    layout?: 'stacked' | 'columns';
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer, layout = 'stacked' }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -343,11 +350,24 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     }
 
     if (status === 'completed' && structuredSvgEntry) {
+        const isColumns = layout === 'columns';
+        const previewWrapperClass = isColumns
+            ? 'flex-1 flex flex-row gap-3 min-h-0'
+            : 'flex-1 flex flex-col min-h-0';
+        const rawSectionStyle = isColumns
+            ? { flex: '1 1 0%', minHeight: 80 }
+            : { flex: '2 1 0%', minHeight: 80 };
+        const structuredSectionStyle = isColumns
+            ? { flex: '1 1 0%', minHeight: 120 }
+            : { flex: '3 1 0%', minHeight: 120 };
+        const rawMargin = isColumns ? '' : 'mb-2';
+        const structuredMargin = isColumns ? '' : 'mb-3';
         return (
             <div className="flex flex-col h-full">
+              <div className={previewWrapperClass}>
                 {/* Raw traced SVG — compact preview (only when rawSvg exists) */}
                 {rawSvg && (
-                    <div className="bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact mb-2" style={{ flex: '2 1 0%', minHeight: 80 }}>
+                    <div className={`bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact ${rawMargin}`} style={rawSectionStyle}>
                         <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                         <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                             {t('svg.traceLabel')}
@@ -412,7 +432,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 )}
 
                 {/* Structured SVG — main preview */}
-                <div className="bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview mb-3" style={{ flex: '3 1 0%', minHeight: 120 }}>
+                <div className={`bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview ${structuredMargin}`} style={structuredSectionStyle}>
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
                     <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
                         {t('svg.structureLabel')}
@@ -472,8 +492,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
                     />
                 </div>
+              </div>
 
-                <div className="flex gap-2">
+                <div className={`flex gap-2 ${isColumns ? 'mt-3' : ''}`}>
                     {/* Re-structure: go back to traced if a raw SVG is available */}
                     {row.rawSvg && (
                         <button

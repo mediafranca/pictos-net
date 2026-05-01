@@ -1,0 +1,441 @@
+-- allium: 3
+-- library-views.allium
+
+-- Scope: Two visualisation modes for the Library — the existing row list
+--   and a new pictogram grid — plus a related layout improvement on the
+--   "format" step of the focus modal so it shows trazado and estructurado
+--   side by side instead of toggling.
+-- Includes:
+--   - The LibraryViewMode setting (list | grid), default and persistence
+--   - The grid cell composition: pictogram on top, utterance + actions below
+--   - Click and hover model on the grid cell (pictogram, utterance, badges,
+--     play, hover overlay)
+--   - The two-column layout of the format step in FocusViewModal
+-- Excludes:
+--   - Sort logic (alphabetical / completeness) — already implemented; it
+--     applies unchanged to both view modes
+--   - The actions inside the focus modal (vectorize, structure, edit SVG,
+--     copy, download) — already implemented; this spec only restructures
+--     the format step's layout and exposes equivalent affordances on the
+--     grid cell rollover
+--   - The home view (welcome / empty library) — orthogonal
+-- Dependencies:
+--   - RowData (utterance, NLU, elements, prompt, bitmap, rawSvg,
+--     structuredSvg, plus *Status fields)
+--   - GlobalConfig (gains the libraryViewMode field)
+--   - FocusViewModal (gains a two-column format step)
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value LibraryViewMode {
+  list      -- the existing row list
+  grid      -- the new pictogram grid
+}
+
+value PictogramStage {
+  none           -- no image yet (Producir not run)
+  bitmap         -- raster from Producir
+  trazado        -- SVG from Vectorizar (rawSvg)
+  estructurado   -- semantic SVG from Estructurar (structuredSvg)
+}
+
+value FocusStep {
+  nlu        -- step 1: Comprender
+  visual     -- step 2: Componer (elements + prompt)
+  bitmap     -- step 3: Producir
+  format     -- step 4: SVG output (trazado + estructurado, SSOT)
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external Row {
+  -- The pictogram row managed by the main app. This spec reads its
+  -- artifacts and statuses; mutations are forwarded through existing
+  -- handlers (cascade, processStep, regenerate, edit utterance, etc.).
+  id: String
+  utterance: String
+  bitmap: String?           -- present iff Producir produced a bitmap
+  rawSvg: String?           -- present iff Vectorizar produced a trazado
+  structuredSvg: String?    -- present iff Estructurar produced an estructurado
+  nluStatus: StepStatus
+  visualStatus: StepStatus
+  bitmapStatus: StepStatus
+  status: StepStatus        -- aggregate cascade status
+}
+
+external GlobalConfig {
+  -- Application-wide configuration (already exists). This spec adds one
+  -- field; everything else (lang, credits, recording, etc.) is unchanged.
+  libraryViewMode: LibraryViewMode    -- new field, persisted with the rest
+}
+
+external FocusViewModal {
+  -- The maximised view of one step of one row. Already implemented for
+  -- nlu / visual / bitmap / format. This spec restructures the format step.
+  step: FocusStep
+  rowId: String
+}
+
+external VectorizerModal {
+  -- The VTracer wrapper modal. Triggered from the format step.
+}
+
+external SVGEditorModal {
+  -- The SVG editor (raw or structured source). Triggered from the format
+  -- step on either column.
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity LibraryView {
+  -- Top-level state of the Library page.
+  mode: LibraryViewMode
+}
+
+entity PictogramCell {
+  -- One cell of the grid view, bound to a Row.
+  row: Row
+  displayedStage: PictogramStage    -- which artifact is shown right now
+  hovered: Boolean                  -- pointer is over the pictogram area
+
+  states: idle, hovered
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DefaultViewIsGrid {
+  -- A first-time user opens the Library in grid mode. The list mode is
+  -- discoverable through the view switcher but is not the default —
+  -- the pictogram grid is the more honest representation of the
+  -- Library's character (a collection of generated images).
+  for fresh GlobalConfig:
+    GlobalConfig.libraryViewMode = grid
+}
+
+invariant ViewModePersists {
+  -- Switching modes writes the choice to GlobalConfig (which is persisted
+  -- via the same path as every other config field). Reloading the app
+  -- restores the last chosen mode.
+}
+
+invariant SortAppliesToBothViews {
+  -- The alphabetical / completeness sort buttons (top-right of the
+  -- Library) operate on the underlying row collection, not on the
+  -- presentation. Switching view modes does not change ordering.
+}
+
+invariant DisplayedStagePriority {
+  -- Each cell shows the most "downstream" available artifact:
+  --   if structuredSvg exists -> estructurado
+  --   else if rawSvg exists   -> trazado
+  --   else if bitmap exists   -> bitmap
+  --   else                    -> none
+  for cell in PictogramCell.all:
+    cell.displayedStage =
+      structuredSvg exists ? estructurado :
+      rawSvg exists        ? trazado :
+      bitmap exists        ? bitmap : none
+}
+
+invariant PictogramClickAlwaysOpensNLU {
+  -- Clicking the pictogram itself, regardless of the displayed stage,
+  -- opens the focus modal at step nlu (Comprender). The pictogram is the
+  -- consequence; clicking it traces back to the semantic origin.
+  -- Step-specific shortcuts go through the badges, not the picture.
+}
+
+invariant FormatRightColumnGated {
+  -- The estructurado column is interactive only when rawSvg exists,
+  -- because Estructurar consumes rawSvg as input. Without rawSvg the
+  -- right column is disabled and shows an explanation pointing at the
+  -- left column.
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === View mode switching ===
+
+rule SwitchToGrid {
+  when: user clicks the "grid" button in the view switcher
+  ensures:
+    GlobalConfig.libraryViewMode = grid
+    -- Library re-renders as a grid of PictogramCells, one per row.
+    -- Sort order is preserved.
+}
+
+rule SwitchToList {
+  when: user clicks the "list" button in the view switcher
+  ensures:
+    GlobalConfig.libraryViewMode = list
+    -- Library re-renders as the existing row list. Sort order preserved.
+}
+
+rule LoadPersistedViewMode {
+  when: the application initialises
+  ensures:
+    LibraryView.mode = GlobalConfig.libraryViewMode
+    -- If the field is missing (fresh install or pre-feature state),
+    -- LibraryView.mode = grid.
+}
+
+-- === Grid cell composition ===
+
+rule CellLayout {
+  when: a PictogramCell is rendered
+  ensures: vertical layout
+    top: pictogram area (square) showing displayedStage
+      or, if displayedStage = none, a large Play button in its place
+    bottom: utterance text + small Play button + 3 pipeline badges
+}
+
+rule CellHoverOverlay {
+  when: pointer enters the pictogram area of a PictogramCell
+  requires: cell.displayedStage != none
+  ensures:
+    a stage indicator pill appears in a corner of the pictogram, labelled
+    with the existing i18n term for the stage (bitmap | trazado | estructurado)
+    a strip of action buttons appears, equivalent to the row's bitmap
+    section: edit, re-trace, download
+    (these actions delegate to the existing handlers and do not need
+    new logic)
+}
+
+rule CellHoverEmpty {
+  when: pointer enters the pictogram area of a PictogramCell
+  requires: cell.displayedStage = none
+  ensures:
+    no overlay is shown
+    -- Nothing to label, nothing to act on. The large Play button is the
+    -- only affordance.
+}
+
+-- === Click model on the grid cell ===
+
+rule ClickPictogram {
+  when: user clicks the pictogram area of a PictogramCell
+  requires: cell.displayedStage != none
+  ensures:
+    FocusViewModal.step = nlu
+    FocusViewModal.rowId = cell.row.id
+    focus modal opens
+    -- Always nlu, regardless of displayedStage. Step-specific entry uses
+    -- the badges below the pictogram.
+}
+
+rule ClickPlaceholderPlay {
+  when: user clicks the large Play button shown when cell.displayedStage = none
+  ensures:
+    cascade is triggered for cell.row
+    focus modal does NOT open
+    -- Same handler the small Play below uses.
+}
+
+rule ClickSmallPlay {
+  when: user clicks the small Play button in the cell footer
+  ensures:
+    cascade is triggered for cell.row
+    focus modal does NOT open
+}
+
+rule ClickBadge {
+  when: user clicks pipeline badge N (1, 2, or 3) in the cell footer
+  ensures:
+    FocusViewModal.step = N=1 ? nlu : N=2 ? visual : bitmap
+    FocusViewModal.rowId = cell.row.id
+    focus modal opens
+    -- Equivalent to clicking the same badge in the row view.
+}
+
+rule ClickUtterance {
+  when: user clicks the utterance text in the cell footer
+  ensures:
+    the utterance becomes editable in place, with the same edit semantics
+    as in the row view (commit on blur / Enter / cascade trigger; recorded
+    by the intervention recorder if enabled)
+    focus modal does NOT open
+}
+
+rule ClickElsewhere {
+  when: user clicks the cell outside any of the targets above (e.g. cell
+        chrome, padding, badges container background)
+  ensures:
+    no action — the cell does not open the modal as a whole; only the
+    explicit targets do
+}
+
+-- === Format step (paso 4) two-column layout ===
+
+rule FormatStepRendering {
+  when: FocusViewModal.step = format
+  ensures: two-column layout
+    left  column: trazado (rawSvg) area
+    right column: estructurado (structuredSvg) area
+    both columns are visible at the same time; they do not toggle
+    each column hosts its own actions for its own artifact:
+      left:  edit SVG (raw), re-trace (Vectorizar), copy raw, download raw
+      right: edit SVG (structured), copy structured, download structured
+}
+
+rule LeftColumnEmptyState {
+  when: rawSvg = none and FocusViewModal.step = format
+  ensures:
+    left column shows an empty state with a single primary action: Vectorizar
+    that action invokes VectorizerModal on the row's bitmap (existing flow)
+}
+
+rule RightColumnDisabled {
+  when: rawSvg = none and FocusViewModal.step = format
+  ensures:
+    right column is disabled (visually muted, no interactive actions)
+    a short message points the user at the left column: "El estructurado
+    se genera a partir del trazado. Vectoriza primero." (es-419) or the
+    en-GB equivalent
+    no Estructurar button is shown until rawSvg exists
+}
+
+rule RightColumnReady {
+  when: rawSvg exists and structuredSvg = none and FocusViewModal.step = format
+  ensures:
+    right column is enabled
+    primary action: Estructurar (existing structureSVG handler) — produces
+    structuredSvg from rawSvg via the existing Gemini-based pipeline
+}
+
+rule RightColumnHasContent {
+  when: rawSvg exists and structuredSvg exists and FocusViewModal.step = format
+  ensures:
+    right column shows the structuredSvg with its full action set
+    a secondary "Re-Estructurar" affordance exists to regenerate
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface LibraryViewSwitcher {
+  -- Two-button toggle that lives at the top-LEFT of the Library page.
+  -- Mirrors the role of the existing top-right sort buttons but for
+  -- presentation rather than ordering.
+
+  @guidance "placement"
+    -- Top-left of the Library, parallel to the sort buttons on the right.
+    -- Visible while in list or grid mode; hidden in the home view.
+
+  @guidance "visual style"
+    -- Two icon buttons sharing a border, with the active one highlighted
+    -- (same idiom as the existing alphabetical / completeness pair).
+
+  @guidance "button order"
+    -- Grid first (default), list second. Matches the priority of the
+    -- two modes — grid is the canonical view, list is the fallback.
+
+  @guidance "icons"
+    -- grid = grid-of-squares icon (e.g. lucide LayoutGrid)
+    -- list = horizontal-rows icon (e.g. lucide List)
+    -- Match Inkscape/Figma vocabulary; no novel iconography.
+
+  exposes:
+    GlobalConfig.libraryViewMode (read/write)
+}
+
+surface PictogramGridCell {
+  -- One cell of the grid view. Bound to a Row.
+
+  @guidance "aspect ratio"
+    -- The pictogram area is square (1:1) regardless of the row's
+    -- aspectRatio config. Square is the consistent footprint for a grid;
+    -- non-square pictograms are letterboxed inside their square slot.
+
+  @guidance "responsive columns"
+    -- Number of columns adapts to viewport width. Suggested breakpoints:
+    --   <640px   : 2 columns
+    --   <1024px  : 3 columns
+    --   <1280px  : 4 columns
+    --   >=1280px : 5 columns
+    -- Tune in implementation; no hard requirement.
+
+  @guidance "stage-pill labels"
+    -- Use the existing translation keys, do not coin new vocabulary.
+    -- Map: bitmap -> editor.formatBitmap, trazado -> editor.formatRaw,
+    -- estructurado -> editor.formatStructured (or whatever keys already
+    -- name these states in the row view).
+
+  @guidance "play button parity"
+    -- The placeholder large Play and the footer small Play share icon and
+    -- handler. Only size differs. No new label.
+
+  @guidance "hover affordance gating"
+    -- The pointer-only design (rollover) is consistent with the rest of
+    -- the app. No keyboard equivalent is required for the pill itself
+    -- (it's purely informational); the action buttons should be reachable
+    -- by Tab in the same DOM order they appear visually.
+
+  exposes:
+    Row.utterance, Row.bitmap, Row.rawSvg, Row.structuredSvg
+    Row.nluStatus, Row.visualStatus, Row.bitmapStatus
+    cascade trigger, focus-modal trigger (nlu / visual / bitmap)
+    edit / re-trace / download actions for the displayed stage
+    inline utterance editing (delegates to existing row handler)
+}
+
+surface FocusModalFormatStep {
+  -- The fourth-step (format) view of FocusViewModal, restructured.
+
+  @guidance "two-column rule"
+    -- Left = trazado, right = estructurado. Symmetric framing; both
+    -- visible at all times. The current toggle UI is removed.
+
+  @guidance "column sizing"
+    -- 50/50 split on wide viewports. Stack vertically on narrow ones
+    -- (with the same left-then-right reading order) if needed.
+
+  @guidance "actions in each column"
+    -- Each column hosts the actions for ITS artifact. Cross-column actions
+    -- (Estructurar = right column produces from left column input) live
+    -- inside the right column as that column's primary generate action.
+
+  @guidance "disabled-state copy"
+    -- When rawSvg is missing, the right column shows the explanatory
+    -- message (see RightColumnDisabled). Add an i18n key for it; do not
+    -- repurpose unrelated keys.
+
+  exposes:
+    Row.rawSvg, Row.structuredSvg
+    edit / re-trace / copy / download per column
+    Estructurar action (gated on rawSvg presence)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- Resolved: default view is list, mode persists in GlobalConfig
+-- Resolved: sort buttons stay top-right, view switcher goes top-left
+-- Resolved: terms are bitmap / trazado / estructurado (existing i18n)
+-- Resolved: pictogram click always opens NLU step, badges are shortcuts
+-- Resolved: utterance click edits inline (same as row mode)
+-- Resolved: placeholder Play and footer Play share style/handler
+-- Resolved: format step right column disabled until rawSvg exists
+
+-- Open: Hover overlay on touch devices — touch has no hover. Should the
+--       overlay become tap-to-reveal (with first tap revealing, second
+--       activating)? Or are the actions reachable only via the focus modal
+--       on touch?
+
+-- Open: Cell selection / multi-select in grid mode — the row view has no
+--       multi-select either, but a grid invites it (pinterest-like). Out
+--       of scope for v1, but worth flagging.
+
+-- Open: Keyboard navigation across cells (arrow keys to move focus,
+--       Enter to open NLU modal, Space to trigger Play). Not addressed
+--       here but expected for accessibility parity.

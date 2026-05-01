@@ -1,6 +1,6 @@
 {
-  "generated": "2026-04-13T23:25:06.190Z",
-  "count": 12,
+  "generated": "2026-04-24T16:58:29.706Z",
+  "count": 14,
   "libraries": [
     {
       "filename": "a_mano_graph_2026-04-13.json",
@@ -39,6 +39,15 @@
       "filesize": 1963086
     },
     {
+      "filename": "expresiones_cotidianas_graph_2026-04-24.json",
+      "name": "Expresiones Cotidianas",
+      "location": "Viña del Mar, Región de Valparaíso, Chile",
+      "language": "es-419",
+      "items": 200,
+      "description": "pictonet_graph_dump",
+      "filesize": 54589774
+    },
+    {
       "filename": "icap_50_v2_graph_2026-03-05.json",
       "name": "ICAP 50 V2",
       "location": "Viña del Mar, Valparaiso Region, Chile",
@@ -46,6 +55,15 @@
       "items": 50,
       "description": "pictonet_graph_dump",
       "filesize": 24371291
+    },
+    {
+      "filename": "idiomatic_graph_2026-04-24.json",
+      "name": "Idiomatic",
+      "location": "Auckland, Auckland, Nueva Zelanda",
+      "language": "en-GB",
+      "items": 278,
+      "description": "pictonet_graph_dump",
+      "filesize": 75255926
     },
     {
       "filename": "ilustracion_moderna.json",

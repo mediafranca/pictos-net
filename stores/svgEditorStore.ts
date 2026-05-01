@@ -19,6 +19,12 @@ import {
 } from '../utils/styleUtils';
 import { flattenGroupTransforms } from '../utils/svgNormalizer';
 import { parsePathToNodes, serializeNodesToPath } from '../utils/pathParser';
+import { applyBoolean, applyBooleanN, applySimplify, type BooleanOp } from '../services/svgBooleanOps';
+import {
+    getAbsolutePathData,
+    checkBooleanEligibility,
+    sortByDocumentOrder,
+} from '../utils/svgBooleanHelpers';
 
 export interface SVGElement {
     id: string;
@@ -118,6 +124,15 @@ export interface EditorState {
     // Grouping actions
     groupElements: (ids: string[]) => void;
     ungroupElement: (groupId: string) => void;
+
+    // Boolean operations on the current selection.
+    // @see specs/svg-boolean-operations.allium
+    applyBooleanOperation: (op: BooleanOp) => { ok: boolean; reason?: string };
+
+    // Simplify (smart paths): refit polylines back to Bezier curves with
+    // Schneider's algorithm. Reduces node count and classifies vertices.
+    // Operates on each selected geometric element independently.
+    applySimplifyOperation: (tolerance?: number) => { ok: boolean; reason?: string };
 
     // Class application (additive, does NOT strip inline styles)
     addClassToElement: (elementId: string, className: string) => void;
@@ -610,7 +625,15 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
         },
 
         toggleSelection: (id: string) => {
-            const current = new Set(get().selectedElementIds);
+            const state = get();
+            const current = new Set(state.selectedElementIds);
+            // Bridge single-select → multi-select: if there's a single
+            // selectedElementId not yet in the multi-set, include it before
+            // toggling. Without this, shift+click after a normal click would
+            // drop the previously-selected element.
+            if (current.size === 0 && state.selectedElementId && state.selectedElementId !== id) {
+                current.add(state.selectedElementId);
+            }
             if (current.has(id)) {
                 current.delete(id);
             } else {
@@ -714,6 +737,194 @@ export const useSVGEditorStore = create<EditorState>((set, get) => {
             );
             commitSvg(nextSvg);
             set({ selectedElementId: null, selectedElementIds: new Set() });
+        },
+
+        // ── Boolean operations ─────────────────────────────────────────────────
+        // @see specs/svg-boolean-operations.allium
+        applyBooleanOperation: (op: BooleanOp) => {
+            const { svgDocument, selectedElementIds, selectedElementId } = get();
+            if (!svgDocument) return { ok: false, reason: 'No SVG loaded' };
+
+            const ids = selectedElementIds.size > 0
+                ? Array.from(selectedElementIds)
+                : selectedElementId ? [selectedElementId] : [];
+
+            const eligibility = checkBooleanEligibility(op, ids, svgDocument);
+            if (!eligibility.ok) return eligibility;
+
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const svgRoot = doc.querySelector('svg');
+            if (!svgRoot) return { ok: false, reason: 'Invalid SVG document' };
+
+            // Resolve operands and Base.
+            // For union/intersect: Base = first selected.
+            // For subtract: Base = bottom-Z (bitten); Top = top-Z (biter).
+            let baseId: string;
+            let topId: string | null = null;
+            if (op === 'subtract') {
+                const sorted = sortByDocumentOrder(ids, svgDocument);
+                baseId = sorted[0];
+                topId = sorted[1];
+            } else {
+                baseId = ids[0];
+            }
+
+            const baseEl = doc.querySelector(`#${CSS.escape(baseId)}`);
+            if (!baseEl) return { ok: false, reason: 'Base element missing' };
+
+            // Capture operand element references up front. Querying by id
+            // later (after the result <path> is inserted with the Base's id)
+            // would match the new path instead of the original element,
+            // because two elements would briefly share the same id.
+            const operandData: Array<{ id: string; d: string; el: Element }> = [];
+            for (const id of ids) {
+                const el = doc.querySelector(`#${CSS.escape(id)}`);
+                if (!el) return { ok: false, reason: `Element ${id} missing` };
+                const d = getAbsolutePathData(el, svgRoot);
+                if (!d) return { ok: false, reason: `Element ${id} has no usable geometry` };
+                operandData.push({ id, d, el });
+            }
+
+            // Compute the result.
+            let resultD: string | null = null;
+            if (op === 'union') {
+                resultD = applyBooleanN('union', operandData.map(o => o.d));
+            } else if (op === 'intersect') {
+                resultD = applyBooleanN('intersect', operandData.map(o => o.d));
+            } else {
+                const baseD = operandData.find(o => o.id === baseId)!.d;
+                const topD = operandData.find(o => o.id === topId)!.d;
+                resultD = applyBoolean('subtract', baseD, topD);
+            }
+
+            if (resultD === null) {
+                return { ok: false, reason: 'Operation produced an empty shape' };
+            }
+
+            // Replace the Base in-place with a <path> carrying the result.
+            // Other operands are removed. Result is placed at the SVG root
+            // (V1: collapse toward root; DCA logic comes later).
+            const surviving = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+            // Inherit Base identity (id, classes) per spec.
+            const baseClass = baseEl.getAttribute('class');
+            if (baseClass) surviving.setAttribute('class', baseClass);
+            // Preserve presentation attributes that survive at the path level.
+            // (Class-driven fills already covered above; these handle the
+            // common case where VTracer wrote inline fills.)
+            for (const attr of ['fill', 'stroke', 'stroke-width', 'opacity']) {
+                const v = baseEl.getAttribute(attr);
+                if (v) surviving.setAttribute(attr, v);
+            }
+            surviving.setAttribute('id', baseId);
+            surviving.setAttribute('d', resultD);
+            // For subtract and union, the result may be a compound path with
+            // sub-paths that represent holes. evenodd reliably renders holes
+            // regardless of winding order, which paper.js's reorient does not
+            // always preserve through the d-string round-trip.
+            // Setting both as attribute and inline style: presentation attrs
+            // have lower CSS specificity than type-selector rules in <style>,
+            // so the inline style guarantees evenodd wins.
+            if (op === 'subtract' || op === 'union') {
+                surviving.setAttribute('fill-rule', 'evenodd');
+                const existingStyle = surviving.getAttribute('style') || '';
+                surviving.setAttribute(
+                    'style',
+                    `${existingStyle ? existingStyle + ';' : ''}fill-rule:evenodd`
+                );
+            }
+
+            // Resolve the insertion anchor (Base's top-level ancestor under
+            // root) BEFORE removing operands.
+            const rootNode: Node = svgRoot;
+            let baseTopAncestor: Element = baseEl;
+            while (baseTopAncestor.parentNode && baseTopAncestor.parentNode !== rootNode) {
+                baseTopAncestor = baseTopAncestor.parentNode as Element;
+            }
+            const insertReference = baseTopAncestor.nextSibling;
+
+            // Remove every operand FIRST, then insert the result. Doing it the
+            // other way around briefly creates two elements sharing the same
+            // id (Base.id), and a later querySelector would match the new
+            // path instead of the original Base.
+            for (const { el } of operandData) {
+                el.remove();
+            }
+
+            // Insert the new path at the Base's z-position.
+            svgRoot.insertBefore(surviving, insertReference);
+
+            // Clean up groups that became empty after removing operands.
+            const purgeEmptyGroups = (root: Element) => {
+                Array.from(root.querySelectorAll('g')).reverse().forEach(g => {
+                    const hasElementChildren = Array.from(g.childNodes).some(
+                        node => node.nodeType === Node.ELEMENT_NODE
+                    );
+                    if (!hasElementChildren) g.remove();
+                });
+            };
+            purgeEmptyGroups(svgRoot);
+
+            const serialized = new XMLSerializer().serializeToString(doc);
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
+                serialized,
+                get().styleDefinitions,
+                get().keyframes
+            );
+            commitSvg(nextSvg);
+
+            // Result selection: the surviving Base.
+            set({ selectedElementId: baseId, selectedElementIds: new Set([baseId]) });
+            return { ok: true };
+        },
+
+        // ── Simplify (smart paths) ─────────────────────────────────────────────
+        // Refit polylines back to Bezier curves with paper.js's Schneider-fit
+        // simplifier. Operates on each selected <path> in place; non-path
+        // elements are skipped (they don't have polyline noise to clean up).
+        applySimplifyOperation: (tolerance: number = 0.5) => {
+            const { svgDocument, selectedElementIds, selectedElementId, pathEditMode } = get();
+            if (!svgDocument) return { ok: false, reason: 'No SVG loaded' };
+
+            // While in path edit mode the canonical "selection" is the path
+            // being edited. Fall back to it when the regular selection is empty.
+            const ids = selectedElementIds.size > 0
+                ? Array.from(selectedElementIds)
+                : selectedElementId ? [selectedElementId]
+                : pathEditMode?.elementId ? [pathEditMode.elementId]
+                : [];
+            if (ids.length === 0) return { ok: false, reason: 'No selection' };
+
+            const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+            const svgRoot = doc.querySelector('svg');
+            if (!svgRoot) return { ok: false, reason: 'Invalid SVG document' };
+
+            let touched = 0;
+            for (const id of ids) {
+                const el = doc.querySelector(`#${CSS.escape(id)}`);
+                if (!el) continue;
+                if (el.tagName.toLowerCase() !== 'path') continue;
+                const currentD = el.getAttribute('d');
+                if (!currentD) continue;
+                const simplified = applySimplify(currentD, tolerance);
+                if (!simplified) continue;
+                el.setAttribute('d', simplified);
+                touched++;
+            }
+
+            if (touched === 0) {
+                return { ok: false, reason: 'Selection has no <path> elements to simplify' };
+            }
+
+            const serialized = new XMLSerializer().serializeToString(doc);
+            const isRaw = get().svgSource === 'raw';
+            const nextSvg = isRaw ? serialized : applyUsedStylesToSvg(
+                serialized,
+                get().styleDefinitions,
+                get().keyframes
+            );
+            commitSvg(nextSvg);
+            return { ok: true };
         },
 
         addClassToElement: (elementId: string, className: string) => {

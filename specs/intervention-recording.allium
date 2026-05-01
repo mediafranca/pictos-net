@@ -1,0 +1,481 @@
+-- allium: 3
+-- intervention-recording.allium
+
+-- Scope: Recording of user interventions on the semantic phases of the pipeline
+-- Includes:
+--   - Per-row intervention log embedded inside the row JSON
+--   - Session envelope bound to opening/closing a row
+--   - Edit and discard events on phases: utterance, nlu, elements, prompt
+--   - Element-level operation kinds: add, remove, rename, reorder
+--   - Global toggle "Registrar modificaciones" in the Library settings
+--   - Context metadata snapshot per event (analysis language, geo context, model)
+-- Excludes:
+--   - Graphic post-processing phases: vectorize, structure
+--   - Configuration changes: lang, geoContext, visualStylePrompt, aspectRatio
+--   - Row management actions: create, delete, reorder, duplicate, import from library
+--   - Free-text rationale from the participant (captured outside the tool, in workshop)
+--   - Per-event identity. Attribution is provided once, at the Library level,
+--     by GlobalConfig.credits (existing field, "Autores/institución para
+--     atribución de la librería"). The intervention log carries no
+--     participant identifier of its own.
+-- Dependencies: RowData and GlobalConfig from types.ts (notably GlobalConfig.credits)
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Phase {
+  utterance   -- the input phrase typed by the participant
+  nlu         -- the NSM analysis output (NLUData)
+  elements    -- the visual hierarchy tree
+  prompt      -- the spatial articulation prompt
+}
+
+value EventKind {
+  edit        -- the participant manually changed the artifact
+  discard     -- the previous artifact was rejected and regenerated without manual change
+}
+
+value ElementOp {
+  add         -- a new node was inserted under a parent
+  remove      -- a node and its subtree were removed
+  rename      -- the id of an existing node was changed
+  reorder     -- a node was moved to a new position in the tree
+}
+
+value ContextSnapshot {
+  lang: String              -- analysis language at time of the event (e.g. "es-419")
+  geo_context: String?      -- geographic context if configured
+  model_id: String?         -- Gemini model that produced the discarded artifact (discard only)
+  ui_lang: String           -- interface language at time of the event
+}
+
+value InterventionEvent {
+  phase: Phase
+  kind: EventKind
+  at: Timestamp                 -- ISO 8601, captured at commit moment
+  op: ElementOp?                -- present iff phase = elements and kind = edit
+  before: Artifact?             -- previous state of the phase artifact (absent on first edit)
+  after: Artifact?              -- new state (absent when kind = discard)
+  context: ContextSnapshot
+}
+
+value Artifact {
+  -- Opaque container for the phase content at the moment of the event.
+  -- Shape depends on phase:
+  --   utterance -> String
+  --   nlu       -> NLUData JSON
+  --   elements  -> tree of { id, children } pairs
+  --   prompt    -> String
+  -- The recorder stores the artifact verbatim so that the corpus is reconstructible.
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity RecordingSetting {
+  -- Lives inside GlobalConfig and persists across sessions.
+  enabled: Boolean           -- default: true
+  -- The setting controls *writes*. Toggling does not erase prior logs.
+}
+
+entity RowInterventionLog {
+  -- Embedded inside the JSON of a Row. Travels with the row on copy and export.
+  sessions: [InterventionSession]
+}
+
+entity InterventionSession {
+  -- A session has no identifier of its own. Attribution is carried by
+  -- GlobalConfig.credits at the Library level. Sessions are ordered
+  -- implicitly by started_at within their containing log.
+  started_at: Timestamp
+  ended_at: Timestamp?            -- absent while active
+  events: [InterventionEvent]
+
+  states: active, closed
+
+  @invariant "monotonic time"
+    -- For every pair of consecutive events e_i, e_{i+1}: e_i.at <= e_{i+1}.at
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external Row {
+  -- A pictogram row in the main grid. This spec does not model its phase
+  -- content; it only references the boundaries at which interventions
+  -- are observed (open, close, commit on a phase, regenerate a phase).
+  states: closed, open
+  intervention_log: RowInterventionLog
+}
+
+external GlobalConfig {
+  -- The application-wide configuration object. This spec writes
+  -- RecordingSetting and reads other fields for ContextSnapshot
+  -- construction. Attribution travels through credits, which is
+  -- already part of GlobalConfig and is not redefined here.
+  recording: RecordingSetting
+  credits: String?          -- existing: "Autores/institución para atribución de la librería"
+  lang: String
+  geo_context: String?
+  ui_lang: String
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant SingleActiveSessionPerRow {
+  -- A row never has more than one active session at a time.
+  for row in Row.all:
+    count(row.intervention_log.sessions where state = active) <= 1
+}
+
+invariant EventsOnlyInsideSession {
+  -- Every event belongs to exactly one session, and is appended only while
+  -- that session is active.
+  for event in InterventionEvent.all:
+    exists session: InterventionSession
+      where session.events contains event
+      and event.at >= session.started_at
+      and (session.ended_at = none or event.at <= session.ended_at)
+}
+
+invariant DiscardHasNoAfter {
+  -- A discard event records what was rejected, not what replaced it.
+  -- The replacement is captured by subsequent events on the same phase
+  -- (or by the new artifact living in the row itself).
+  for event in InterventionEvent.all where event.kind = discard:
+    event.after = none
+    event.before exists
+}
+
+invariant EditOnElementsHasOp {
+  -- Element edits always carry an operation kind so that downstream
+  -- analysis can distinguish add / remove / rename / reorder without
+  -- diffing the trees.
+  for event in InterventionEvent.all where event.phase = elements and event.kind = edit:
+    event.op exists
+}
+
+invariant TogglingOffPreservesCorpus {
+  -- Disabling RecordingSetting must not mutate any existing log.
+  -- After RecordingSetting.enabled becomes false, prior sessions and
+  -- events remain byte-identical.
+}
+
+invariant LogTravelsWithRow {
+  -- The intervention log is part of the row JSON. Copying or exporting
+  -- the row carries the log; deleting the row deletes the log.
+  -- This applies to every export path: single-row JSON download,
+  -- copy-to-clipboard, share-link, and full Library export. A Library
+  -- export is a collection of rows, so each row's log travels with it
+  -- by construction. There is no separate "audit corpus" file.
+}
+
+invariant AttributionViaCredits {
+  -- The intervention log carries no participant identifier. Any
+  -- attribution required for the corpus is read from
+  -- GlobalConfig.credits, which is the Library-level field
+  -- already used for author/institution attribution.
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Session lifecycle ===
+
+rule SessionStart {
+  when: a Row transitions from closed to open
+  requires:
+    GlobalConfig.recording.enabled = true
+  ensures:
+    new InterventionSession created with:
+      started_at = now
+      state = active
+      events = []
+    session appended to Row.intervention_log.sessions
+}
+
+rule SessionStartSuppressed {
+  when: a Row transitions from closed to open
+  requires:
+    GlobalConfig.recording.enabled = false
+  ensures:
+    -- No session is created. No events will be recorded for this row
+    -- opening. Existing sessions in the log remain untouched.
+}
+
+rule SessionEnd {
+  when: a Row transitions from open to closed
+  requires:
+    Row has an active session
+  ensures:
+    active_session.state = closed
+    active_session.ended_at = now
+}
+
+-- === Phase commits become events ===
+
+rule UtteranceEdit {
+  when: the participant commits an edit to the utterance field
+  requires:
+    Row has an active session
+    new value differs from the previous value
+  ensures:
+    new InterventionEvent appended to active_session.events with:
+      phase = utterance
+      kind = edit
+      at = now
+      before = previous utterance string
+      after = new utterance string
+      context = current ContextSnapshot
+    -- Commit moments are deliberately limited to: blur of the input,
+    -- Enter key, and triggering regeneration. Auto-save on idle, Tab,
+    -- and form submit are not commit moments. Keeping the set small
+    -- avoids spurious events while typing.
+}
+
+rule NluEdit {
+  when: the participant commits an edit to the NLU artifact
+        through the NLU editing UI
+  requires:
+    Row has an active session
+    new NLU differs from the previous NLU
+  ensures:
+    new InterventionEvent appended with:
+      phase = nlu
+      kind = edit
+      before = previous NLUData
+      after = new NLUData
+      context = current ContextSnapshot
+}
+
+rule ElementsEdit {
+  when: the participant performs add | remove | rename | reorder
+        on the elements tree and the operation commits
+  requires:
+    Row has an active session
+  ensures:
+    new InterventionEvent appended with:
+      phase = elements
+      kind = edit
+      op = the operation kind
+      before = previous tree
+      after = new tree
+      context = current ContextSnapshot
+    -- A single user gesture that mutates more than one node
+    -- (e.g. remove parent removing its subtree) produces one event
+    -- whose before/after captures the full tree change.
+    -- Undo/Redo within the elements editor does not generate one
+    -- event per step. Only the net change between the last commit
+    -- and the current commit is recorded, with op derived from the
+    -- net structural diff.
+}
+
+rule PromptEdit {
+  when: the participant commits an edit to the spatial prompt
+  requires:
+    Row has an active session
+    new prompt differs from the previous prompt
+  ensures:
+    new InterventionEvent appended with:
+      phase = prompt
+      kind = edit
+      before = previous prompt string
+      after = new prompt string
+      context = current ContextSnapshot
+}
+
+-- === Regenerations become discard events ===
+
+rule PhaseRegenerationDiscard {
+  when: the participant triggers regeneration of a phase artifact
+        that has a current value, without manual edit of that artifact
+        (phase in { nlu, elements, prompt })
+  requires:
+    Row has an active session
+    the phase has a current artifact value
+  ensures:
+    new InterventionEvent appended with:
+      phase = the regenerated phase
+      kind = discard
+      before = the artifact being replaced
+      after = none
+      context = current ContextSnapshot with model_id of the discarded artifact
+    -- The new artifact produced by regeneration is not recorded as an
+    -- event by this rule. It becomes the "before" of any future event
+    -- on the same phase.
+}
+
+rule CascadeDiscard {
+  when: an upstream edit invalidates a downstream phase that holds a value
+        (utterance edit -> nlu, elements, prompt are invalidated)
+        (elements edit -> prompt is invalidated)
+        and the downstream phase is regenerated as part of the cascade
+  requires:
+    Row has an active session
+    the downstream phase had a current value before the cascade
+  ensures:
+    one discard InterventionEvent appended per regenerated downstream phase, with:
+      phase = the downstream phase
+      kind = discard
+      before = the value being replaced
+      context = current ContextSnapshot with model_id of the discarded artifact
+    -- The triggering edit event (e.g. utterance edit) is recorded
+    -- separately by its own edit rule. The cascade adds one discard
+    -- per downstream phase regenerated.
+}
+
+-- === Recording suppressed ===
+
+rule CommitSuppressedNoSession {
+  when: a phase commit or regeneration occurs on a row
+  requires:
+    Row has no active session
+  ensures:
+    no event is appended
+    the artifact change still happens on the row itself
+    -- This covers: recording globally disabled, or row was opened
+    -- while disabled and is still in that opening.
+}
+
+-- === Participant-driven CRUD on the log ===
+
+rule AuditPanelOpen {
+  when: the participant clicks the audit affordance on a row
+  ensures:
+    RowAuditPanel becomes visible for that row
+    the panel renders Row.intervention_log in editable form
+    -- The panel opens regardless of RecordingSetting.enabled, so that
+    -- past recordings remain inspectable and removable even after the
+    -- participant has paused or disabled recording.
+}
+
+rule AuditPanelEdit {
+  when: the participant edits the log content in the panel and saves
+  requires:
+    edited content is a structurally valid intervention_log
+    (parses as JSON, sessions and events conform to their value types)
+  ensures:
+    Row.intervention_log = edited value
+    -- This is participant-driven curation: removing sessions, redacting
+    -- specific events, or correcting context fields. It is distinct
+    -- from automatic appends performed by phase commit rules.
+}
+
+rule AuditPanelCopy {
+  when: the participant clicks copy in the audit panel
+  ensures:
+    Row.intervention_log JSON written to system clipboard
+    Row.intervention_log unchanged
+}
+
+rule AuditPanelDelete {
+  when: the participant confirms deletion in the audit panel
+  requires:
+    confirmation dialog acknowledged
+  ensures:
+    Row.intervention_log.sessions = []
+    any active session for this row is discarded
+    -- Only the log subobject is cleared; the row itself and all its
+    -- pictogram content are preserved. After deletion, future
+    -- interventions on this row may start a fresh session if
+    -- RecordingSetting.enabled = true.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface LibraryRecordingControl {
+  -- The switch and help icon shown in the Library section that exposes
+  -- RecordingSetting to the participant.
+
+  @guidance "switch placement"
+    -- The control sits in the Library settings area, alongside other
+    -- global toggles. Visible at all times the Library is visible.
+
+  @guidance "label"
+    -- The visible label is "Registrar modificaciones" (es-419) or
+    -- "Record modifications" (en-GB), localised through the existing
+    -- i18n pipeline.
+
+  @guidance "default state"
+    -- The setting is on by default for new installations. The state
+    -- persists across sessions in GlobalConfig.
+
+  @guidance "help icon and tooltip"
+    -- A help icon adjacent to the label opens a tooltip on hover or
+    -- focus. Tooltip text:
+    --   "Esta opción permite registrar la auditoría del pictograma,
+    --    en el caso que se ajuste y modifique."
+
+  @guidance "no destructive action"
+    -- Toggling the switch off must not present a confirmation dialog
+    -- about deleting prior recordings, because no deletion occurs.
+    -- Toggling on does not retroactively reconstruct missing events.
+
+  exposes:
+    RecordingSetting.enabled (read/write)
+}
+
+surface RowAuditPanel {
+  -- Per-row popup that exposes the row's intervention_log for
+  -- transparent CRUD: read, edit, copy, delete. The panel exists
+  -- so that recording is convivial: participants can see exactly
+  -- what was captured about their work and remove it freely.
+
+  @guidance "trigger placement"
+    -- Each row footer carries an "audit" button next to copy and
+    -- delete. The button is visible at all times, regardless of
+    -- RecordingSetting.enabled, because past recordings must remain
+    -- inspectable and removable after the participant pauses recording.
+
+  @guidance "panel content"
+    -- The popup renders Row.intervention_log as editable JSON.
+    -- All sessions and their events are visible at once.
+    -- Empty state: when the log has no sessions, the panel shows a
+    -- short explanation that no interventions have been recorded for
+    -- this pictogram.
+
+  @guidance "actions"
+    -- Save: persists the edited JSON back to the row.
+    -- Copy: writes the current log JSON to the system clipboard.
+    -- Delete: clears the log subobject; requires confirmation because
+    --   this destroys research data that cannot be reconstructed.
+    -- Close: dismisses the popup, discarding any unsaved edits.
+
+  @guidance "active session marker"
+    -- When the row currently has an active session, the panel shows
+    -- it with a clear marker. Editing or deleting an active session
+    -- ends it first.
+
+  @guidance "no surprise"
+    -- The panel never auto-saves while typing. All edits are explicit
+    -- through Save. Closing without Save discards changes.
+
+  exposes:
+    Row.intervention_log (read/write/delete)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- Resolved: no per-event identifier; attribution is the Library's credits field
+-- Resolved: switch state persists in GlobalConfig
+-- Resolved: tooltip text is set ("Esta opción permite registrar la auditoría del pictograma...")
+-- Resolved: row delete cascades to log delete (intrinsic, log lives inside row JSON)
+-- Resolved: only semantic phases (utterance, nlu, elements, prompt) are recorded
+-- Resolved: regenerations without manual edit are recorded as discard events
+-- Resolved: session boundary is row open/close
+-- Resolved: element edits carry an explicit op (add | remove | rename | reorder)
+-- Resolved: every export path (single row, library) carries the log; no separate corpus file
+-- Resolved: commit moments are limited to blur, Enter, regenerate (no auto-save / Tab / submit)
+-- Resolved: Undo/Redo in elements editor records only the net change at commit
+-- Resolved: corpus aggregation is out of scope; per-row logs are the unit, library export bundles them
+-- Resolved: participant has CRUD access to the log via RowAuditPanel

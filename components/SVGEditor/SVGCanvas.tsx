@@ -341,10 +341,13 @@ export default function SVGCanvas() {
                 e.preventDefault();
                 useSVGEditorStore.getState().undo();
             } else if (e.key === 'Escape') {
-                const { pathEditMode: pem } = useSVGEditorStore.getState();
-                if (pem) {
+                const state = useSVGEditorStore.getState();
+                if (state.pathEditMode) {
                     e.preventDefault();
-                    useSVGEditorStore.getState().exitPathEditMode();
+                    state.exitPathEditMode();
+                } else if (state.selectedElementId || state.selectedElementIds.size > 0) {
+                    e.preventDefault();
+                    state.clearSelection();
                 }
             }
         };
@@ -493,10 +496,18 @@ export default function SVGCanvas() {
 
     const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         if (useSVGEditorStore.getState().pathEditMode) return;
-        if (e.target === canvasStageRef.current) {
-            selectElement(null);
+        // Skip while a marquee just completed (the synthetic click that
+        // follows mouseup would otherwise wipe the marquee selection).
+        if (marqueeActive.current) return;
+        const target = e.target as Element;
+        // Clear only when the click landed on the stage div or the viewport
+        // wrapper (i.e., truly outside the SVG canvas). Clicks inside the
+        // SVG — including on its root background — are handled by the
+        // native click listener attached to svgElement.
+        if (target === canvasStageRef.current || target.id === 'canvas-viewport') {
+            useSVGEditorStore.getState().clearSelection();
         }
-    }, [selectElement]);
+    }, []);
 
     const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];

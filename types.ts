@@ -60,6 +60,43 @@ export interface VisualElement {
   children?: VisualElement[];
 }
 
+// === Intervention Recording (see specs/intervention-recording.allium) ===
+
+export type InterventionPhase = 'utterance' | 'nlu' | 'elements' | 'prompt';
+export type InterventionEventKind = 'edit' | 'discard';
+export type ElementOpKind = 'add' | 'remove' | 'rename' | 'reorder';
+
+export interface InterventionContext {
+  lang: string;
+  geoContext?: { lat: string; lng: string; region: string };
+  modelId?: string;
+  uiLang?: string;
+}
+
+export interface InterventionEvent {
+  phase: InterventionPhase;
+  kind: InterventionEventKind;
+  at: string; // ISO 8601
+  op?: ElementOpKind; // present iff phase = 'elements' and kind = 'edit'
+  before?: unknown;
+  after?: unknown; // absent when kind = 'discard'
+  context: InterventionContext;
+}
+
+export interface InterventionSession {
+  startedAt: string;
+  endedAt?: string;
+  events: InterventionEvent[];
+}
+
+export interface RowInterventionLog {
+  sessions: InterventionSession[];
+}
+
+export interface RecordingSetting {
+  enabled: boolean;
+}
+
 export interface RowData {
   id: string;
   UTTERANCE: string;
@@ -89,6 +126,9 @@ export interface RowData {
   nluDuration?: number;
   visualDuration?: number;
   bitmapDuration?: number;
+
+  // Intervention recording (see specs/intervention-recording.allium)
+  interventionLog?: RowInterventionLog;
 }
 
 export interface LogEntry {
@@ -134,7 +174,13 @@ export interface GlobalConfig {
   svgStyles?: {
     [className: string]: SVGStyleConfig;
   };
+  /** Intervention recording setting (see specs/intervention-recording.allium) */
+  recording?: RecordingSetting;
+  /** Library presentation mode (see specs/library-views.allium) */
+  libraryViewMode?: 'list' | 'grid';
 }
+
+export type LibraryViewMode = 'list' | 'grid';
 
 export const VOCAB = {
   speech_act: ['assertive', 'directive', 'commissive', 'expressive', 'declarative', 'interrogative'],

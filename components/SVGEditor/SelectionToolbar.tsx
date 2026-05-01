@@ -6,12 +6,64 @@
 import React, { useState } from 'react';
 import {
     Group, Ungroup, Paintbrush, Trash2, Copy,
-    ArrowUp, ArrowDown, Plus, Minus, Spline, X, MousePointer2,
+    ArrowUp, ArrowDown, Plus, Minus, Spline, X, MousePointer2, Sparkles,
 } from 'lucide-react';
 import { useSVGEditorStore } from '../../stores/svgEditorStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { StyleDefinition } from '../../lib/style-editor/lib/types';
 import { StylePickerModal } from './StylePickerModal';
+import { checkBooleanEligibility } from '../../utils/svgBooleanHelpers';
+import type { BooleanOp } from '../../services/svgBooleanOps';
+
+// ── Boolean operation icons ──────────────────────────────────────────────────
+// Lucide has no boolean-op iconography, so these are minimal inline SVGs
+// matching Inkscape/Figma convention. 13×13 to match neighbouring button icons.
+// Mask/clipPath ids are scoped via useId to avoid collisions across instances.
+
+const ICON_SIZE = 13;
+
+const UnionIcon: React.FC = () => (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="6" cy="8" r="4" fill="currentColor" />
+        <circle cx="10" cy="8" r="4" fill="currentColor" />
+    </svg>
+);
+
+const SubtractIcon: React.FC = () => {
+    const maskId = React.useId();
+    return (
+        <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" aria-hidden="true">
+            <mask id={maskId}>
+                <rect width="16" height="16" fill="white" />
+                <circle cx="10" cy="8" r="4" fill="black" />
+            </mask>
+            <circle cx="6" cy="8" r="4" fill="currentColor" mask={`url(#${maskId})`} />
+            <circle cx="10" cy="8" r="4" fill="none" stroke="currentColor" strokeOpacity="0.4" strokeWidth="0.8" strokeDasharray="1.2 1.2" />
+        </svg>
+    );
+};
+
+const IntersectIcon: React.FC = () => {
+    const clipId = React.useId();
+    return (
+        <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 16 16" aria-hidden="true">
+            <defs>
+                <clipPath id={clipId}>
+                    <circle cx="6" cy="8" r="4" />
+                </clipPath>
+            </defs>
+            <circle cx="6" cy="8" r="4" fill="none" stroke="currentColor" strokeOpacity="0.4" strokeWidth="0.8" strokeDasharray="1.2 1.2" />
+            <circle cx="10" cy="8" r="4" fill="none" stroke="currentColor" strokeOpacity="0.4" strokeWidth="0.8" strokeDasharray="1.2 1.2" />
+            <circle cx="10" cy="8" r="4" fill="currentColor" clipPath={`url(#${clipId})`} />
+        </svg>
+    );
+};
+
+const BOOL_ICON: Record<BooleanOp, React.FC> = {
+    union: UnionIcon,
+    subtract: SubtractIcon,
+    intersect: IntersectIcon,
+};
 
 const LEFT_PANEL = 288;
 const RIGHT_PANEL = 320;
@@ -84,6 +136,20 @@ const PathEditToolbar: React.FC = () => {
     const pathEditTool = useSVGEditorStore(state => state.pathEditTool);
     const setPathEditTool = useSVGEditorStore(state => state.setPathEditTool);
     const toggleNodeSmooth = useSVGEditorStore(state => state.toggleNodeSmooth);
+    const applySimplifyOperation = useSVGEditorStore(state => state.applySimplifyOperation);
+    const pathEditMode = useSVGEditorStore(state => state.pathEditMode);
+
+    const handleSimplify = () => {
+        const result = applySimplifyOperation();
+        if (!result.ok && result.reason) {
+            console.warn('[simplify]', result.reason);
+        }
+    };
+
+    // Simplify only meaningful for path-like editable elements.
+    const simplifyEnabled = pathEditMode?.elementType === 'path'
+        || pathEditMode?.elementType === 'polygon'
+        || pathEditMode?.elementType === 'polyline';
 
     const centerX = LEFT_PANEL + (window.innerWidth - LEFT_PANEL - RIGHT_PANEL) / 2;
     const btnClass = "flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-violet-800 rounded transition-colors";
@@ -151,6 +217,22 @@ const PathEditToolbar: React.FC = () => {
 
             <div className="w-px h-5 bg-violet-600" />
 
+            {/* Simplify — refit polylines to Bezier curves on the path being edited */}
+            <button
+                onClick={handleSimplify}
+                disabled={!simplifyEnabled}
+                className={`${btnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                title={t('svgEditor.simplifyTooltip')}
+                aria-label={t('svgEditor.simplify')}
+                data-toolbar-item
+                tabIndex={-1}
+            >
+                <Sparkles size={13} aria-hidden="true" />
+                {t('svgEditor.simplify')}
+            </button>
+
+            <div className="w-px h-5 bg-violet-600" />
+
             <button
                 onClick={exitPathEditMode}
                 className={btnClass}
@@ -185,6 +267,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
         sendBackward,
         svgDocument,
         pathEditMode,
+        applyBooleanOperation,
+        applySimplifyOperation,
     } = useSVGEditorStore();
 
     const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -233,6 +317,36 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
     const handleSendBackward = () => {
         if (singleId) sendBackward(singleId);
     };
+
+    // Boolean operation handlers + per-op eligibility (for tooltip / disabled).
+    const booleanEligibility = (op: BooleanOp) =>
+        svgDocument ? checkBooleanEligibility(op, allIds, svgDocument) : { ok: false, reason: '' };
+
+    const handleBoolean = (op: BooleanOp) => {
+        const result = applyBooleanOperation(op);
+        if (!result.ok && result.reason) {
+            // Best-effort feedback: use the toolbar tooltip area for now.
+            // A toast component would be the proper home; deferred.
+            console.warn(`[boolean ${op}]`, result.reason);
+        }
+    };
+
+    const handleSimplify = () => {
+        const result = applySimplifyOperation();
+        if (!result.ok && result.reason) {
+            console.warn('[simplify]', result.reason);
+        }
+    };
+
+    // Simplify is enabled when at least one <path> is in the selection.
+    const simplifyEligible = (() => {
+        if (!svgDocument || allIds.length === 0) return false;
+        const doc = new DOMParser().parseFromString(svgDocument, 'image/svg+xml');
+        return allIds.some(id => {
+            const el = doc.querySelector(`#${CSS.escape(id)}`);
+            return el?.tagName.toLowerCase() === 'path';
+        });
+    })();
 
     const getCurrentClasses = (id: string): string[] => {
         if (!svgDocument || !id) return [];
@@ -287,6 +401,61 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ styleDefs })
                 )}
 
                 {(allIds.length >= 2 || (singleId && isGroup)) && divider}
+
+                {/* Boolean operations — multi-selection only */}
+                {/* @see specs/svg-boolean-operations.allium */}
+                {allIds.length >= 2 && (() => {
+                    const ops: BooleanOp[] = allIds.length === 2
+                        ? ['union', 'subtract', 'intersect']
+                        : ['union', 'intersect'];
+                    return (
+                        <>
+                            {ops.map(op => {
+                                const Icon = BOOL_ICON[op];
+                                const elig = booleanEligibility(op);
+                                const label = t(
+                                    op === 'union' ? 'svgEditor.boolUnion'
+                                    : op === 'subtract' ? 'svgEditor.boolSubtract'
+                                    : 'svgEditor.boolIntersect'
+                                );
+                                return (
+                                    <button
+                                        key={op}
+                                        onClick={() => handleBoolean(op)}
+                                        disabled={!elig.ok}
+                                        className={`${btnClass} disabled:opacity-40 disabled:cursor-not-allowed`}
+                                        title={elig.ok ? label : ((elig as { ok: false; reason: string }).reason || label)}
+                                        aria-label={label}
+                                        data-toolbar-item
+                                        tabIndex={-1}
+                                    >
+                                        <Icon />
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                            {divider}
+                        </>
+                    );
+                })()}
+
+                {/* Simplify — any <path> in selection */}
+                {simplifyEligible && (
+                    <>
+                        <button
+                            onClick={handleSimplify}
+                            className={btnClass}
+                            title={t('svgEditor.simplifyTooltip')}
+                            aria-label={t('svgEditor.simplify')}
+                            data-toolbar-item
+                            tabIndex={-1}
+                        >
+                            <Sparkles size={13} aria-hidden="true" />
+                            {t('svgEditor.simplify')}
+                        </button>
+                        {divider}
+                    </>
+                )}
 
                 {/* Duplicate — single selection */}
                 {singleId && (
