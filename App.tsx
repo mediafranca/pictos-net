@@ -1532,27 +1532,28 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
           <div id="sort-controls" className="mb-6 flex justify-between items-center gap-2">
-            {/* View mode switcher (left) — see specs/library-views.allium */}
+            {/* View mode switcher (left) — see specs/library-views.allium.
+                Default is grid; explicit 'list' is the only opt-out. */}
             <div id="view-switcher" className="flex items-center gap-2">
               <span className="text-xs font-medium uppercase text-slate-500 tracking-wider mr-2">{t('library.viewMode')}</span>
               <div className="inline-flex border border-slate-200 bg-white">
                 <button
-                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
-                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'list') === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewList')}
-                  aria-label={t('library.viewList')}
-                  aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
-                >
-                  <List size={14} aria-hidden="true" />
-                </button>
-                <button
                   onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
-                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'grid') === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
                   title={t('library.viewGrid')}
                   aria-label={t('library.viewGrid')}
-                  aria-pressed={config.libraryViewMode === 'grid'}
+                  aria-pressed={(config.libraryViewMode ?? 'grid') === 'grid'}
                 >
                   <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
+                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewList')}
+                  aria-label={t('library.viewList')}
+                  aria-pressed={config.libraryViewMode === 'list'}
+                >
+                  <List size={14} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1683,27 +1684,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               </span>
             </p>
           </div>
-        ) : config.libraryViewMode === 'grid' ? (
-          /* Pictogram grid view — see specs/library-views.allium */
-          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
-            {filteredRows.map((row) => (
-              <PictogramGridCell
-                key={row.id}
-                row={row}
-                onUpdate={u => updateRowById(row.id, u)}
-                onCascade={() => processCascade(row.id)}
-                onStop={() => {
-                  stopFlags.current[row.id] = true;
-                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
-                }}
-                onFocus={step => setFocusMode({ step, rowId: row.id })}
-                onOpenEditor={source => openSVGEditor(row.id, source)}
-                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
-                onSettleField={() => settleRowEdits(row.id)}
-              />
-            ))}
-          </div>
-        ) : (
+        ) : config.libraryViewMode === 'list' ? (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
               return (
@@ -1746,6 +1727,26 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 />
               );
             })}
+          </div>
+        ) : (
+          /* Pictogram grid view — default. See specs/library-views.allium */
+          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+            {filteredRows.map((row) => (
+              <PictogramGridCell
+                key={row.id}
+                row={row}
+                onUpdate={u => updateRowById(row.id, u)}
+                onCascade={() => processCascade(row.id)}
+                onStop={() => {
+                  stopFlags.current[row.id] = true;
+                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
+                }}
+                onFocus={step => setFocusMode({ step, rowId: row.id })}
+                onOpenEditor={source => openSVGEditor(row.id, source)}
+                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                onSettleField={() => settleRowEdits(row.id)}
+              />
+            ))}
           </div>
         )}
       </main>
