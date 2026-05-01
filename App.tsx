@@ -7,7 +7,8 @@ import {
   Play, BookOpen, Search, FileDown, Square, Settings,
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
-  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History
+  ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History,
+  List, LayoutGrid
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -30,6 +31,7 @@ import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import { RowAuditPanel } from './components/RowAuditPanel';
+import { PictogramGridCell } from './components/PictogramGridCell';
 import type { VectorizerResult } from './services/vtracerService';
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
@@ -1529,20 +1531,47 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {viewMode === 'list' && rows.length > 0 && (
-          <div id="sort-controls" className="mb-6 flex justify-end gap-2">
-            <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
-            <button
-              onClick={() => setSortBy('alphabetical')}
-              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-            >
-              {t('library.alphabetical')}
-            </button>
-            <button
-              onClick={() => setSortBy('completeness')}
-              className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-            >
-              {t('library.completeness')}
-            </button>
+          <div id="sort-controls" className="mb-6 flex justify-between items-center gap-2">
+            {/* View mode switcher (left) — see specs/library-views.allium */}
+            <div id="view-switcher" className="flex items-center gap-2">
+              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider mr-2">{t('library.viewMode')}</span>
+              <div className="inline-flex border border-slate-200 bg-white">
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
+                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'list') === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewList')}
+                  aria-label={t('library.viewList')}
+                  aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
+                >
+                  <List size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
+                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewGrid')}
+                  aria-label={t('library.viewGrid')}
+                  aria-pressed={config.libraryViewMode === 'grid'}
+                >
+                  <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            {/* Sort controls (right) */}
+            <div className="flex gap-2 items-center">
+              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
+              <button
+                onClick={() => setSortBy('alphabetical')}
+                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              >
+                {t('library.alphabetical')}
+              </button>
+              <button
+                onClick={() => setSortBy('completeness')}
+                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+              >
+                {t('library.completeness')}
+              </button>
+            </div>
           </div>
         )}
         {viewMode === 'home' ? (
@@ -1653,6 +1682,26 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 </span>
               </span>
             </p>
+          </div>
+        ) : config.libraryViewMode === 'grid' ? (
+          /* Pictogram grid view — see specs/library-views.allium */
+          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+            {filteredRows.map((row) => (
+              <PictogramGridCell
+                key={row.id}
+                row={row}
+                onUpdate={u => updateRowById(row.id, u)}
+                onCascade={() => processCascade(row.id)}
+                onStop={() => {
+                  stopFlags.current[row.id] = true;
+                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
+                }}
+                onFocus={step => setFocusMode({ step, rowId: row.id })}
+                onOpenEditor={source => openSVGEditor(row.id, source)}
+                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                onSettleField={() => settleRowEdits(row.id)}
+              />
+            ))}
           </div>
         ) : (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
@@ -3200,19 +3249,24 @@ const FocusViewModal: React.FC<{
         const hasRaw = !!row.rawSvg;
         const hasStructured = !!row.structuredSvg;
 
-        // Nothing: show trace + structure buttons
+        // Nothing yet: two-column layout. Left = trace CTA, right = disabled
+        // with a message pointing at the left. See specs/library-views.allium.
         if (!hasRaw && !hasStructured) {
           return (
-            <div className="flex flex-col items-center justify-center h-full gap-4 bg-slate-50">
-              <FileCode size={40} className="text-slate-400" />
-              <p className="text-sm text-slate-500">{t('svg.traceConverts')}</p>
-              <div className="flex gap-3">
+            <div className="flex flex-row gap-3 h-full bg-slate-50 p-6">
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-6">
+                <FileCode size={40} className="text-slate-400" />
+                <p className="text-sm text-slate-500 text-center">{t('svg.traceConverts')}</p>
                 <button
                   onClick={() => onOpenVectorizer?.()}
                   className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg"
                 >
                   {t('svg.traceSvg')}
                 </button>
+              </div>
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-100/50 border border-dashed border-slate-300 p-6 opacity-70">
+                <Layers size={40} className="text-slate-300" />
+                <p className="text-xs text-slate-500 text-center max-w-xs">{t('library.structureRequiresRaw')}</p>
                 <button
                   disabled
                   className="flex items-center gap-2 bg-slate-200 text-slate-400 px-6 py-3 font-bold uppercase text-xs tracking-widest cursor-not-allowed"
@@ -3224,14 +3278,15 @@ const FocusViewModal: React.FC<{
           );
         }
 
-        // Has SVG(s): show SVGGenerator (handles both raw+structured internally) + share
+        // Has SVG(s): two-column layout (raw left, structured right)
+        // See specs/library-views.allium § FocusModalFormatStep
         return (
           <div className="flex flex-col h-full bg-slate-50 p-6">
             <div className="mb-3">
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" />
             </div>
           </div>
         );

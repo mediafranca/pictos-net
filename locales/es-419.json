@@ -47,7 +47,15 @@
     "sortBy": "Ordenar por:",
     "alphabetical": "Alfabético",
     "completeness": "Completitud",
-    "evaluation": "Evaluación"
+    "evaluation": "Evaluación",
+    "viewMode": "Vista:",
+    "viewList": "Vista de lista",
+    "viewGrid": "Vista de pictogramas",
+    "stageRaw": "SVG trazado",
+    "stageStructured": "SVG estructurado",
+    "openInFocus": "Abrir \"{utterance}\" en vista enfocada",
+    "untitled": "Sin título",
+    "structureRequiresRaw": "El estructurado se genera a partir del trazado. Vectoriza primero."
   },
   "home": {
     "graphArchitecture": "Arquitectura de Grafo",

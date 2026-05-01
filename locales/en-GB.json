@@ -47,7 +47,15 @@
     "sortBy": "Sort by:",
     "alphabetical": "Alphabetical",
     "completeness": "Completeness",
-    "evaluation": "Evaluation"
+    "evaluation": "Evaluation",
+    "viewMode": "View:",
+    "viewList": "List view",
+    "viewGrid": "Pictogram view",
+    "stageRaw": "Traced SVG",
+    "stageStructured": "Structured SVG",
+    "openInFocus": "Open \"{utterance}\" in focus view",
+    "untitled": "Untitled",
+    "structureRequiresRaw": "Structured form is generated from the traced SVG. Vectorise first."
   },
   "home": {
     "graphArchitecture": "Graph Architecture",

@@ -176,7 +176,11 @@ export interface GlobalConfig {
   };
   /** Intervention recording setting (see specs/intervention-recording.allium) */
   recording?: RecordingSetting;
+  /** Library presentation mode (see specs/library-views.allium) */
+  libraryViewMode?: 'list' | 'grid';
 }
+
+export type LibraryViewMode = 'list' | 'grid';
 
 export const VOCAB = {
   speech_act: ['assertive', 'directive', 'commissive', 'expressive', 'declarative', 'interrogative'],
