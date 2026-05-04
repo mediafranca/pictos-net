@@ -794,15 +794,30 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     delete phaseSnapshotsRef.current[rowId];
   }, [settleEditsPure]);
 
-  // Side effects run from a useEffect so StrictMode's double-invocation of
-  // setState updaters does not double-call session lifecycle helpers.
-  const previousOpenRowIdRef = useRef<string | null>(null);
+  // A row is "engaged" while ANY of its surfaces is active: the row
+  // expanded in list view, the focus modal open for it, the SVG editor
+  // open for it, or the vectorizer modal open for it. A single session
+  // covers one continuous engagement, so navigating list → focus modal
+  // → SVG editor for the same row stays inside one session.
+  // See specs/intervention-recording.allium § SessionContinuesAcrossSurfaces.
+  const previousEngagedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const prev = previousOpenRowIdRef.current;
-    if (prev && prev !== openRowId) endRecordingSession(prev);
-    if (openRowId && prev !== openRowId) startRecordingSession(openRowId);
-    previousOpenRowIdRef.current = openRowId;
-  }, [openRowId, startRecordingSession, endRecordingSession]);
+    const engaged = new Set<string>();
+    if (openRowId) engaged.add(openRowId);
+    if (focusMode?.rowId) engaged.add(focusMode.rowId);
+    if (svgEditorState.isOpen && svgEditorState.rowId) engaged.add(svgEditorState.rowId);
+    if (vectorizerState.isOpen && vectorizerState.rowId) engaged.add(vectorizerState.rowId);
+    const prev = previousEngagedRef.current;
+    // Rows that newly became engaged: start session
+    for (const id of engaged) {
+      if (!prev.has(id)) startRecordingSession(id);
+    }
+    // Rows that disengaged: end session
+    for (const id of prev) {
+      if (!engaged.has(id)) endRecordingSession(id);
+    }
+    previousEngagedRef.current = engaged;
+  }, [openRowId, focusMode, svgEditorState, vectorizerState, startRecordingSession, endRecordingSession]);
 
   const handleOpenRowChange = useCallback((nextOpenId: string | null) => {
     setOpenRowId(nextOpenId);
