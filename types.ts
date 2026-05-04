@@ -85,21 +85,32 @@ export interface SvgMetrics {
   structuralHash: string;   // 8-char fingerprint of all `d=` attributes
 }
 
-export interface InterventionContext {
+/**
+ * Portability header injected ONLY when a row leaves its containing
+ * library (e.g. "Copy Row" → clipboard). Inside a library export the
+ * library config already carries this information, so events never
+ * duplicate it. See specs/intervention-recording.allium § 1.
+ */
+export interface RowClipboardContext {
   lang: string;
-  geoContext?: { lat: string; lng: string; region: string };
-  modelId?: string;
   uiLang?: string;
+  geoContext?: { lat: string; lng: string; region: string };
 }
 
 export interface InterventionEvent {
+  /** Stable short id (8-char hex) generated at creation. Lets per-event
+   *  annotations and audit-panel curation survive reordering or partial
+   *  deletion of the events array. */
+  id: string;
   phase: InterventionPhase;
   kind: InterventionEventKind;
   at: string; // ISO 8601
   op?: ElementOpKind; // present iff phase = 'elements' and kind = 'edit'
   before?: unknown;
   after?: unknown; // absent when kind = 'discard'
-  context: InterventionContext;
+  /** Gemini model id that produced the artifact being discarded. Only
+   *  set on discard events for AI-generated phases (nlu, elements, prompt). */
+  modelId?: string;
 }
 
 export interface InterventionSession {
