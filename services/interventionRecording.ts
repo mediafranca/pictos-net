@@ -9,9 +9,9 @@ import {
   ElementOpKind,
   InterventionEvent,
   InterventionSession,
-  InterventionContext,
   RowInterventionLog,
   SvgMetrics,
+  RowClipboardContext,
 } from '../types';
 
 const isRecordingEnabled = (config: GlobalConfig): boolean =>
@@ -25,11 +25,30 @@ const getActiveSession = (log: RowInterventionLog): InterventionSession | null =
   return last && !last.endedAt ? last : null;
 };
 
-const buildContext = (config: GlobalConfig, modelId?: string): InterventionContext => ({
+/**
+ * Generate a stable short event id (8 hex chars). Uses crypto.getRandomValues
+ * when available; falls back to Math.random for tests / older environments.
+ */
+const newEventId = (): string => {
+  const bytes = new Uint8Array(4);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * Build the portability header for a row that leaves its containing
+ * library (e.g. "Copy Row" → clipboard). Inside a library export this
+ * function is NOT called — events do not carry context.
+ * See specs/intervention-recording.allium § CopyRowToClipboard.
+ */
+export const buildClipboardContext = (config: GlobalConfig): RowClipboardContext => ({
   lang: config.lang,
-  geoContext: config.geoContext,
   uiLang: config.uiLang,
-  ...(modelId ? { modelId } : {}),
+  geoContext: config.geoContext,
 });
 
 const cloneSnapshot = <T>(value: T): T => {
@@ -114,13 +133,14 @@ export const recordEdit = (
   if (valuesEqual(args.before, args.after)) return row;
   if (args.phase === 'elements' && !args.op) return row; // EditOnElementsHasOp
   const event: InterventionEvent = {
+    id: newEventId(),
     phase: args.phase,
     kind: 'edit',
     at: new Date().toISOString(),
     before: cloneSnapshot(args.before),
     after: cloneSnapshot(args.after),
-    context: buildContext(config, args.modelId),
     ...(args.op ? { op: args.op } : {}),
+    ...(args.modelId ? { modelId: args.modelId } : {}),
   };
   return appendEvent(row, event);
 };
@@ -140,11 +160,12 @@ export const recordDiscard = (
   if (!getActiveSession(getLog(row))) return row;
   if (args.before === undefined || args.before === null || args.before === '') return row;
   const event: InterventionEvent = {
+    id: newEventId(),
     phase: args.phase,
     kind: 'discard',
     at: new Date().toISOString(),
     before: cloneSnapshot(args.before),
-    context: buildContext(config, args.modelId),
+    ...(args.modelId ? { modelId: args.modelId } : {}),
   };
   return appendEvent(row, event);
 };
@@ -240,12 +261,12 @@ export const recordSvgEdit = (
   if (!getActiveSession(getLog(row))) return row;
   if (metricsEqual(args.before, args.after)) return row;
   const event: InterventionEvent = {
+    id: newEventId(),
     phase: args.phase,
     kind: 'edit',
     at: new Date().toISOString(),
     before: args.before,
     after: args.after,
-    context: buildContext(config),
   };
   return appendEvent(row, event);
 };
@@ -268,11 +289,12 @@ export const recordSvgDiscard = (
   if (!isRecordingEnabled(config)) return row;
   if (!getActiveSession(getLog(row))) return row;
   const event: InterventionEvent = {
+    id: newEventId(),
     phase: args.phase,
     kind: 'discard',
     at: new Date().toISOString(),
     before: args.before,
-    context: buildContext(config, args.modelId),
+    ...(args.modelId ? { modelId: args.modelId } : {}),
   };
   return appendEvent(row, event);
 };
