@@ -416,6 +416,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                                 <button
                                     onClick={() => {
+                                        if (rawSvg) onDiscardSvg?.('svg_raw', rawSvg);
                                         setRawSvg(null);
                                         onUpdate({ rawSvg: undefined });
                                         setConfirmingDelete(null);
@@ -474,6 +475,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                             <button
                                 onClick={() => {
+                                    if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                                     removeSVGByRowId(row.id);
                                     onUpdate({ structuredSvg: undefined });
                                     setConfirmingDelete(null);
@@ -523,9 +525,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     )}
 
-                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace */}
+                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace.
+                        The structured discard fires here (it won't be regenerated automatically).
+                        The raw discard fires later, when the vectorizer applies — by design,
+                        because cancelling the vectorizer should not lose the existing rawSvg. */}
                     <button
                         onClick={() => {
+                            if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                             removeSVGByRowId(row.id);
                             onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
