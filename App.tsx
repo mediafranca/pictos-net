@@ -40,6 +40,18 @@ import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './compo
 const STORAGE_KEY = 'pictonet_v19_storage';
 const CONFIG_KEY = 'pictonet_v19_config';
 const APP_VERSION = packageJson.version;
+/**
+ * Library export schema version. Increment when the shape of the
+ * exported JSON changes in a non-additive way. Importers branch on
+ * this to migrate older exports forward.
+ *
+ *   v1  pre-2026-05  events carry a per-event context object;
+ *                    svgs field is a JSON-stringified string
+ *   v2  2026-05      events drop context; events get a stable id;
+ *                    svgs is a real array; copy-row injects a
+ *                    portability context header
+ */
+const EXPORT_SCHEMA_VERSION = 2;
 
 interface LibraryMetadata {
   filename: string;
@@ -494,6 +506,27 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   };
 
+  /**
+   * Build a portable JSON document for a single row leaving the
+   * library context (Copy Row → clipboard). Includes the lang /
+   * uiLang / geoContext header so the row remains self-describing
+   * when pasted into a different library or read standalone.
+   * See specs/intervention-recording.allium § CopyRowToClipboard.
+   */
+  const buildRowClipboardJson = (row: RowData): string => {
+    const rowSvgs = svgs.filter(s => s.sourceRowId === row.id || s.id === row.id);
+    const portable = {
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
+      type: 'row-clipboard' as const,
+      timestamp: new Date().toISOString(),
+      context: Recording.buildClipboardContext(config),
+      row,
+      svgs: rowSvgs,
+    };
+    return JSON.stringify(portable, null, 2);
+  };
+
   const exportProject = () => {
     // Transform rows: convert "processing" status to "idle" or "completed"
     const sanitizedRows = rows.map((row: RowData) => {
@@ -515,12 +548,16 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     });
 
     const dataToExport = {
-      version: APP_VERSION,
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
       type: 'pictonet_graph_dump',
       timestamp: new Date().toISOString(),
       config,
       rows: sanitizedRows,
-      svgs: exportSVGs()
+      // svgs is now a real array, not a JSON-stringified string.
+      // The previous double-encoding was an accident — JSON.stringify
+      // of dataToExport will serialize the nested array natively.
+      svgs,
     };
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1819,6 +1856,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                       ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
                       : r));
                   }}
+                  onBuildRowClipboard={buildRowClipboardJson}
                 />
               );
             })}
@@ -2174,7 +2212,11 @@ const RowComponent: React.FC<{
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
   onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg }) => {
+  /** Builds the portable JSON for "Copy Row" — wraps the row with the
+   *  schema header and the RowClipboardContext so it stays self-describing
+   *  when pasted outside of a library. */
+  onBuildRowClipboard?: (row: RowData) => string;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2401,7 +2443,14 @@ const RowComponent: React.FC<{
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                navigator.clipboard.writeText(JSON.stringify(row, null, 2))
+                // Use the host-provided builder so the clipboard payload
+                // includes the schemaVersion header and the portability
+                // context. Falls back to a bare row dump only if no
+                // builder is wired (defensive — should not happen in App.tsx).
+                const payload = onBuildRowClipboard
+                  ? onBuildRowClipboard(row)
+                  : JSON.stringify(row, null, 2);
+                navigator.clipboard.writeText(payload)
                   .then(() => {
                     onLog('success', t('actions.copyRowSuccess', { utterance: row.UTTERANCE }));
                   })
