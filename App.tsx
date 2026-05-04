@@ -321,15 +321,36 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   // Close any session left "active" by a previous tab close. Without this
   // sweep, an orphaned active session would coexist with a new one on next
   // open of the same row, violating SingleActiveSessionPerRow.
+  // Also migrates v1 event shape forward: drop event.context (it lived in
+  // the library config); promote a missing event.id to a fresh short hex.
   const sanitizeInterventionLog = (log: any): RowInterventionLog | undefined => {
     if (!log || !Array.isArray(log.sessions)) return undefined;
     const orphanCutoff = new Date().toISOString();
+    const newId = (): string => {
+      const bytes = new Uint8Array(4);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    };
+    const migrateEvent = (e: any) => {
+      if (!e || typeof e !== 'object') return e;
+      // Lift modelId out of legacy context, then drop the context wrapper.
+      if (e.context && typeof e.context === 'object') {
+        if (e.context.modelId && !e.modelId) e.modelId = e.context.modelId;
+        delete e.context;
+      }
+      if (!e.id) e.id = newId();
+      return e;
+    };
     const sessions = log.sessions
       .filter((s: any) => s && typeof s.startedAt === 'string' && Array.isArray(s.events))
       .map((s: any) => ({
         startedAt: s.startedAt,
         endedAt: typeof s.endedAt === 'string' ? s.endedAt : orphanCutoff,
-        events: s.events,
+        events: s.events.map(migrateEvent),
       }));
     return { sessions };
   };
@@ -570,6 +591,69 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     addLog('success', t('messages.exportSuccess'));
   };
 
+  /**
+   * Migrate a parsed library JSON forward to the current export schema.
+   * Idempotent: passing a v2 document through it is a no-op.
+   *
+   * v1 → v2 changes:
+   *   - svgs: a JSON-stringified string → a real array
+   *   - InterventionEvent.context: drop (the library config carries it)
+   *   - InterventionEvent.id: generate if missing
+   *
+   * Tolerant: if any step fails, the original sub-tree is preserved.
+   */
+  const migrateLibraryJson = (raw: any): any => {
+    if (!raw || typeof raw !== 'object') return raw;
+    const v = raw.schemaVersion ?? 1;
+    if (v >= EXPORT_SCHEMA_VERSION) return raw; // already current
+
+    // v1 had a doubly-encoded svgs string. Parse it into the proper array.
+    if (typeof raw.svgs === 'string') {
+      try {
+        const parsed = JSON.parse(raw.svgs);
+        if (Array.isArray(parsed)) raw.svgs = parsed;
+      } catch {
+        raw.svgs = [];
+      }
+    }
+
+    // v1 events carried a context object and lacked stable ids.
+    // Strip the redundant context (library config carries it) and assign
+    // a fresh short id to any event missing one.
+    const newId = (): string => {
+      const bytes = new Uint8Array(4);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    };
+    if (Array.isArray(raw.rows)) {
+      for (const row of raw.rows) {
+        const log = row?.interventionLog;
+        if (!log || !Array.isArray(log.sessions)) continue;
+        for (const session of log.sessions) {
+          if (!Array.isArray(session?.events)) continue;
+          for (const event of session.events) {
+            // Lift modelId out of the legacy context (if it ever lived there).
+            const legacyContext = event?.context;
+            if (legacyContext && typeof legacyContext === 'object') {
+              if (legacyContext.modelId && !event.modelId) {
+                event.modelId = legacyContext.modelId;
+              }
+              delete event.context;
+            }
+            if (!event.id) event.id = newId();
+          }
+        }
+      }
+    }
+
+    raw.schemaVersion = EXPORT_SCHEMA_VERSION;
+    return raw;
+  };
+
   const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -584,7 +668,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     reader.onload = (event) => {
       try {
         const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
+        // Migrate forward as the very first step so the rest of the
+        // import flow only ever sees the current schema.
+        const parsed = migrateLibraryJson(JSON.parse(content));
         if (Array.isArray(parsed)) {
           const sanitized = parsed.map(sanitizeRow);
           setRows(sanitized);
