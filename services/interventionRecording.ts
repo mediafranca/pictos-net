@@ -81,6 +81,13 @@ export const endSession = (row: RowData): RowData => {
   const log = getLog(row);
   const active = getActiveSession(log);
   if (!active) return row;
+  // Drop empty sessions at close — they are noise (the participant
+  // engaged the row, made no recordable change, and disengaged).
+  // See specs/intervention-recording.allium § DropEmptySessionsAtEnd.
+  if (active.events.length === 0) {
+    const sessions = log.sessions.slice(0, -1);
+    return updateLog(row, { sessions });
+  }
   const closed: InterventionSession = { ...active, endedAt: new Date().toISOString() };
   const sessions = log.sessions.slice(0, -1).concat(closed);
   return updateLog(row, { sessions });
