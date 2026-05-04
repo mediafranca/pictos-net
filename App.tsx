@@ -13,7 +13,7 @@ import {
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
 import * as Gemini from './services/geminiService';
 import * as Recording from './services/interventionRecording';
 import { useTranslation } from './hooks/useTranslation';
@@ -1116,6 +1116,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     return count;
   };
 
+  // Captured at openSVGEditor time, read at handleSVGEditorSave time, so a
+  // svg_raw / svg_structured edit event can carry pre/post SvgMetrics
+  // without storing a copy of the SVG content itself.
+  // See specs/intervention-recording.allium § SvgEditorSessionEdit.
+  const svgEditorBeforeMetricsRef = useRef<{ rowId: string; phase: 'svg_raw' | 'svg_structured'; metrics: SvgMetrics } | null>(null);
+
   const openSVGEditor = (rowId: string, preferSource?: 'raw' | 'structured') => {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
@@ -1137,6 +1143,18 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (!svgToEdit) {
       addLog('error', t('messages.noSvgToEdit'));
       return;
+    }
+
+    // Snapshot metrics at open for the recording layer.
+    const beforeMetrics = Recording.computeSvgMetrics(svgToEdit);
+    if (beforeMetrics) {
+      svgEditorBeforeMetricsRef.current = {
+        rowId,
+        phase: source === 'structured' ? 'svg_structured' : 'svg_raw',
+        metrics: beforeMetrics,
+      };
+    } else {
+      svgEditorBeforeMetricsRef.current = null;
     }
 
     setSvgEditorState({
@@ -1178,6 +1196,23 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
     const savedRow = rows.find(r => r.id === svgEditorState.rowId);
     addLog('success', t('messages.svgUpdatedSuccess', { utterance: savedRow?.UTTERANCE }));
+
+    // Emit a svg_raw / svg_structured edit event with metrics before/after.
+    // The before was captured at openSVGEditor time; the after is the saved SVG.
+    const before = svgEditorBeforeMetricsRef.current;
+    const rowIdAtSave = svgEditorState.rowId;
+    if (before && rowIdAtSave === before.rowId) {
+      const afterMetrics = Recording.computeSvgMetrics(updatedSvg);
+      if (afterMetrics) {
+        setRows(prev => prev.map(r =>
+          r.id === rowIdAtSave
+            ? Recording.recordSvgEdit(r, config, { phase: before.phase, before: before.metrics, after: afterMetrics })
+            : r
+        ));
+      }
+    }
+    svgEditorBeforeMetricsRef.current = null;
+
     setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
   };
 
@@ -1881,7 +1916,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowId !== null && (
         <SVGEditorModal
           isOpen={svgEditorState.isOpen}
-          onClose={() => setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null })}
+          onClose={() => {
+            // Cancelled without saving: drop the captured before-metrics so they
+            // don't leak into a future edit. No event is emitted.
+            svgEditorBeforeMetricsRef.current = null;
+            setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
+          }}
           initialSvg={svgEditorState.svg}
           utterance={rows.find(r => r.id === svgEditorState.rowId)?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
