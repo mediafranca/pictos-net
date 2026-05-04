@@ -62,9 +62,28 @@ export interface VisualElement {
 
 // === Intervention Recording (see specs/intervention-recording.allium) ===
 
-export type InterventionPhase = 'utterance' | 'nlu' | 'elements' | 'prompt';
+export type InterventionPhase =
+  | 'utterance'
+  | 'nlu'
+  | 'elements'
+  | 'prompt'
+  | 'svg_raw'
+  | 'svg_structured';
 export type InterventionEventKind = 'edit' | 'discard';
 export type ElementOpKind = 'add' | 'remove' | 'rename' | 'reorder';
+
+/**
+ * Lightweight indicative summary of an SVG artifact, stored on
+ * intervention events for the svg_raw / svg_structured phases instead
+ * of the full SVG content (which can be hundreds of KB).
+ * See specs/intervention-recording.allium § SvgMetrics.
+ */
+export interface SvgMetrics {
+  size: number;             // byte length of the SVG string
+  entities: number;         // count of geometric DOM elements
+  classes: string[];        // ordered union of all class= values
+  structuralHash: string;   // 8-char fingerprint of all `d=` attributes
+}
 
 export interface InterventionContext {
   lang: string;
