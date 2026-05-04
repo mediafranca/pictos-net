@@ -1218,7 +1218,25 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
   const handleVectorizerApply = (result: VectorizerResult) => {
     if (!vectorizerState.rowId) return;
-    updateRowById(vectorizerState.rowId, { rawSvg: result.svg });
+    const rowId = vectorizerState.rowId;
+
+    // If a rawSvg already existed for this row, the apply replaces it —
+    // record the previous one as a discarded svg_raw candidate before
+    // overwriting. See specs/intervention-recording.allium § VectorizerApplyDiscardsRaw.
+    const existingRow = rows.find(r => r.id === rowId);
+    const previousRaw = existingRow?.rawSvg;
+    if (previousRaw) {
+      const previousMetrics = Recording.computeSvgMetrics(previousRaw);
+      if (previousMetrics) {
+        setRows(prev => prev.map(r =>
+          r.id === rowId
+            ? Recording.recordSvgDiscard(r, config, { phase: 'svg_raw', before: previousMetrics })
+            : r
+        ));
+      }
+    }
+
+    updateRowById(rowId, { rawSvg: result.svg });
     addLog('success', t('messages.vectorizationComplete', { traced: result.layersTraced, total: result.layersTotal, tier: result.tiersUsed }));
     if (result.warnings.length > 0) {
       result.warnings.forEach(w => addLog('info', w));
