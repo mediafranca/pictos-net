@@ -1812,6 +1812,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   onSettleField={() => settleRowEdits(row.id)}
                   onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
                   onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
+                  onDiscardSvg={(phase, previousSvg) => {
+                    const metrics = Recording.computeSvgMetrics(previousSvg);
+                    if (!metrics) return;
+                    setRows(prev => prev.map(r => r.id === row.id
+                      ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
+                      : r));
+                  }}
                 />
               );
             })}
@@ -1897,6 +1904,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onStop={() => {
             stopFlags.current[focusMode!.rowId] = true;
             addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
+          }}
+          onDiscardSvg={(phase, previousSvg) => {
+            const metrics = Recording.computeSvgMetrics(previousSvg);
+            if (!metrics) return;
+            setRows(prev => prev.map(r => r.id === focusMode!.rowId
+              ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
+              : r));
           }}
         />
       )}
@@ -2159,7 +2173,8 @@ const RowComponent: React.FC<{
   onSettleField?: () => void;
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog }) => {
+  onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2371,6 +2386,7 @@ const RowComponent: React.FC<{
                       onUpdate={onUpdate}
                       onOpenEditor={onOpenEditor}
                       onOpenVectorizer={onOpenVectorizer}
+                      onDiscardSvg={onDiscardSvg}
                     />
                   </div>
                 )}
@@ -3202,7 +3218,8 @@ const FocusViewModal: React.FC<{
   onSettleField?: () => void;
   onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
   onStop?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop }) => {
+  onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -3367,7 +3384,7 @@ const FocusViewModal: React.FC<{
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} />
             </div>
           </div>
         );
