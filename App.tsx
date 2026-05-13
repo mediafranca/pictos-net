@@ -2437,12 +2437,12 @@ const RowComponent: React.FC<{
                         autoFocus
                         ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } }}
                         onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }}
-                        className="w-full min-h-[100px] text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none overflow-hidden"
+                        className="w-full min-h-[100px] text-xs text-slate-600 leading-loose p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none overflow-hidden"
                       />
                     ) : (
                       <div
                         onClick={() => setIsPromptEditing(true)}
-                        className="w-full min-h-[100px] cursor-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
+                        className="w-full min-h-[100px] cursor-text text-xs text-slate-600 leading-loose p-3 bg-slate-50 rounded border border-slate-200"
                       >
                         {row.prompt && row.elements && row.elements.length > 0 ? (
                           <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
@@ -2918,8 +2918,9 @@ const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[]; bare
 
       // Check if quoted text is an element ID
       if (elementIds.includes(quotedText)) {
+        const isRoot = elements.length > 0 && quotedText === elements[0].id;
         parts.push(
-          <span key={match.index} className="element-pill">
+          <span key={match.index} className={isRoot ? 'element-pill prompt-pill element-pill--root' : 'element-pill prompt-pill'}>
             {quotedText}
           </span>
         );
@@ -2943,7 +2944,7 @@ const PromptRenderer: React.FC<{ prompt: string; elements: VisualElement[]; bare
     return <>{renderPromptWithPills()}</>;
   }
   return (
-    <div className="prompt-text text-sm text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200">
+    <div className="prompt-text text-xs text-slate-600 leading-loose p-3 bg-slate-50 rounded border border-slate-200">
       {renderPromptWithPills()}
     </div>
   );
@@ -3235,7 +3236,7 @@ const ElementsEditor: React.FC<{
             </div>
           ) : (
             <div
-              className="element-pill"
+              className={`element-pill${isRoot ? ' element-pill--root' : ''}`}
               onClick={() => handlePillClick(element)}
               draggable={canDrag}
               onDragStart={e => handleDragStart(e, element)}
@@ -3451,12 +3452,12 @@ const FocusViewModal: React.FC<{
                 onChange={e => onUpdate({ prompt: e.target.value, bitmapStatus: 'outdated' })}
                 onBlur={() => { setIsPromptEditing(false); onSettleField?.(); }}
                 autoFocus
-                className="w-full h-full text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+                className="w-full h-full text-xs text-slate-600 leading-loose p-3 bg-slate-50 rounded border border-slate-200 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
               />
             ) : (
               <div
                 onClick={() => setIsPromptEditing(true)}
-                className="w-full h-full cursor-text text-lg text-slate-600 leading-relaxed p-3 bg-slate-50 rounded border border-slate-200"
+                className="w-full h-full cursor-text text-xs text-slate-600 leading-loose p-3 bg-slate-50 rounded border border-slate-200"
               >
                 {row.prompt && row.elements && row.elements.length > 0 ? (
                   <PromptRenderer prompt={row.prompt} elements={row.elements} bare />
