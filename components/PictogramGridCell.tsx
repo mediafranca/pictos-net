@@ -222,14 +222,14 @@ export const PictogramGridCell: React.FC<Props> = ({
               if (e.key === 'Escape') setIsEditingUtterance(false);
             }}
             autoFocus
-            rows={2}
-            className="text-xs font-medium text-slate-900 uppercase tracking-wide bg-amber-50 border border-amber-200 rounded p-2 outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+            rows={3}
+            className="text-xs font-medium text-slate-900 uppercase tracking-wide bg-amber-50 border border-amber-200 rounded p-2 outline-none focus:ring-2 focus:ring-violet-300 resize-none text-center w-full min-h-[4.5rem]"
           />
         ) : (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setIsEditingUtterance(true); }}
-            className="text-xs font-medium text-slate-900 uppercase tracking-wide hover:bg-amber-50 rounded p-2 text-left line-clamp-2 cursor-text"
+            className="text-xs font-medium text-slate-900 uppercase tracking-wide hover:bg-amber-50 rounded p-2 text-center line-clamp-3 cursor-text w-full min-h-[4.5rem] flex items-center justify-center"
           >
             {row.UTTERANCE || t('library.untitled')}
           </button>

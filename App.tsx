@@ -1731,7 +1731,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 <button
                   onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
                   className={`p-2 transition-all ${(config.libraryViewMode ?? 'list') === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewList')}
+                  title={t('library.viewListTooltip')}
                   aria-label={t('library.viewList')}
                   aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
                 >
@@ -1740,7 +1740,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 <button
                   onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
                   className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewGrid')}
+                  title={t('library.viewGridTooltip')}
                   aria-label={t('library.viewGrid')}
                   aria-pressed={config.libraryViewMode === 'grid'}
                 >
