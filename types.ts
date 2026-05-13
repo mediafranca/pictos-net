@@ -62,25 +62,55 @@ export interface VisualElement {
 
 // === Intervention Recording (see specs/intervention-recording.allium) ===
 
-export type InterventionPhase = 'utterance' | 'nlu' | 'elements' | 'prompt';
+export type InterventionPhase =
+  | 'utterance'
+  | 'nlu'
+  | 'elements'
+  | 'prompt'
+  | 'svg_raw'
+  | 'svg_structured';
 export type InterventionEventKind = 'edit' | 'discard';
 export type ElementOpKind = 'add' | 'remove' | 'rename' | 'reorder';
 
-export interface InterventionContext {
+/**
+ * Lightweight indicative summary of an SVG artifact, stored on
+ * intervention events for the svg_raw / svg_structured phases instead
+ * of the full SVG content (which can be hundreds of KB).
+ * See specs/intervention-recording.allium § SvgMetrics.
+ */
+export interface SvgMetrics {
+  size: number;             // byte length of the SVG string
+  entities: number;         // count of geometric DOM elements
+  classes: string[];        // ordered union of all class= values
+  structuralHash: string;   // 8-char fingerprint of all `d=` attributes
+}
+
+/**
+ * Portability header injected ONLY when a row leaves its containing
+ * library (e.g. "Copy Row" → clipboard). Inside a library export the
+ * library config already carries this information, so events never
+ * duplicate it. See specs/intervention-recording.allium § 1.
+ */
+export interface RowClipboardContext {
   lang: string;
-  geoContext?: { lat: string; lng: string; region: string };
-  modelId?: string;
   uiLang?: string;
+  geoContext?: { lat: string; lng: string; region: string };
 }
 
 export interface InterventionEvent {
+  /** Stable short id (8-char hex) generated at creation. Lets per-event
+   *  annotations and audit-panel curation survive reordering or partial
+   *  deletion of the events array. */
+  id: string;
   phase: InterventionPhase;
   kind: InterventionEventKind;
   at: string; // ISO 8601
   op?: ElementOpKind; // present iff phase = 'elements' and kind = 'edit'
   before?: unknown;
   after?: unknown; // absent when kind = 'discard'
-  context: InterventionContext;
+  /** Gemini model id that produced the artifact being discarded. Only
+   *  set on discard events for AI-generated phases (nlu, elements, prompt). */
+  modelId?: string;
 }
 
 export interface InterventionSession {

@@ -36,12 +36,18 @@ export function useDialogA11y({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Focus trap: cycle Tab/Shift+Tab within the dialog
+  // Keep a stable ref to onClose so handleKeyDown never changes identity
+  // even when the caller passes a new inline arrow function on every render.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Focus trap: cycle Tab/Shift+Tab within the dialog.
+  // Empty deps → stable reference. Uses onCloseRef to always call the latest onClose.
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -74,16 +80,16 @@ export function useDialogA11y({
         }
       }
     },
-    [onClose]
+    [] // stable — reads onClose via ref
   );
 
+  // Auto-focus on open; restore focus on close.
+  // Runs only when isOpen changes, never on prop/callback identity changes.
   useEffect(() => {
     if (!isOpen) return;
 
-    // Save the element that had focus before opening
     previousFocusRef.current = document.activeElement as HTMLElement;
 
-    // Auto-focus the first focusable element inside the dialog
     const raf = requestAnimationFrame(() => {
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -92,23 +98,25 @@ export function useDialogA11y({
       if (firstFocusable) {
         firstFocusable.focus();
       } else {
-        // Fallback: make the dialog itself focusable
         dialog.setAttribute('tabindex', '-1');
         dialog.focus();
       }
     });
 
-    document.addEventListener('keydown', handleKeyDown);
-
     return () => {
       cancelAnimationFrame(raf);
-      document.removeEventListener('keydown', handleKeyDown);
-
-      // Restore focus to the previously focused element
       if (previousFocusRef.current && typeof previousFocusRef.current.focus === 'function') {
         previousFocusRef.current.focus();
       }
     };
+  }, [isOpen]);
+
+  // Attach/detach the key handler. handleKeyDown is stable so this only
+  // re-runs when isOpen changes, not on every parent render.
+  useEffect(() => {
+    if (!isOpen) return;
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, handleKeyDown]);
 
   const dialogProps: DialogA11yResult['dialogProps'] = {

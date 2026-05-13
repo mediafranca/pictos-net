@@ -111,13 +111,14 @@ entity PictogramCell {
 -- Invariants
 ------------------------------------------------------------
 
-invariant DefaultViewIsGrid {
-  -- A first-time user opens the Library in grid mode. The list mode is
+invariant DefaultViewIsList {
+  -- A first-time user opens the Library in list mode. The grid mode is
   -- discoverable through the view switcher but is not the default —
-  -- the pictogram grid is the more honest representation of the
-  -- Library's character (a collection of generated images).
+  -- the row layout makes the pipeline state and the per-row controls
+  -- legible, and that legibility matters more on the first encounter
+  -- than the visual catalogue character of the grid.
   for fresh GlobalConfig:
-    GlobalConfig.libraryViewMode = grid
+    GlobalConfig.libraryViewMode = list
 }
 
 invariant ViewModePersists {
@@ -185,7 +186,7 @@ rule LoadPersistedViewMode {
   ensures:
     LibraryView.mode = GlobalConfig.libraryViewMode
     -- If the field is missing (fresh install or pre-feature state),
-    -- LibraryView.mode = grid.
+    -- LibraryView.mode = list.
 }
 
 -- === Grid cell composition ===
@@ -336,12 +337,12 @@ surface LibraryViewSwitcher {
     -- (same idiom as the existing alphabetical / completeness pair).
 
   @guidance "button order"
-    -- Grid first (default), list second. Matches the priority of the
-    -- two modes — grid is the canonical view, list is the fallback.
+    -- List first (default), grid second. The first slot is the default
+    -- mode, mirroring the priority that DefaultViewIsList enforces.
 
   @guidance "icons"
-    -- grid = grid-of-squares icon (e.g. lucide LayoutGrid)
     -- list = horizontal-rows icon (e.g. lucide List)
+    -- grid = grid-of-squares icon (e.g. lucide LayoutGrid)
     -- Match Inkscape/Figma vocabulary; no novel iconography.
 
   exposes:

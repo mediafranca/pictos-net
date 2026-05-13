@@ -13,7 +13,7 @@ import {
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
 import * as Gemini from './services/geminiService';
 import * as Recording from './services/interventionRecording';
 import { useTranslation } from './hooks/useTranslation';
@@ -40,6 +40,18 @@ import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './compo
 const STORAGE_KEY = 'pictonet_v19_storage';
 const CONFIG_KEY = 'pictonet_v19_config';
 const APP_VERSION = packageJson.version;
+/**
+ * Library export schema version. Increment when the shape of the
+ * exported JSON changes in a non-additive way. Importers branch on
+ * this to migrate older exports forward.
+ *
+ *   v1  pre-2026-05  events carry a per-event context object;
+ *                    svgs field is a JSON-stringified string
+ *   v2  2026-05      events drop context; events get a stable id;
+ *                    svgs is a real array; copy-row injects a
+ *                    portability context header
+ */
+const EXPORT_SCHEMA_VERSION = 2;
 
 interface LibraryMetadata {
   filename: string;
@@ -309,15 +321,36 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   // Close any session left "active" by a previous tab close. Without this
   // sweep, an orphaned active session would coexist with a new one on next
   // open of the same row, violating SingleActiveSessionPerRow.
+  // Also migrates v1 event shape forward: drop event.context (it lived in
+  // the library config); promote a missing event.id to a fresh short hex.
   const sanitizeInterventionLog = (log: any): RowInterventionLog | undefined => {
     if (!log || !Array.isArray(log.sessions)) return undefined;
     const orphanCutoff = new Date().toISOString();
+    const newId = (): string => {
+      const bytes = new Uint8Array(4);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    };
+    const migrateEvent = (e: any) => {
+      if (!e || typeof e !== 'object') return e;
+      // Lift modelId out of legacy context, then drop the context wrapper.
+      if (e.context && typeof e.context === 'object') {
+        if (e.context.modelId && !e.modelId) e.modelId = e.context.modelId;
+        delete e.context;
+      }
+      if (!e.id) e.id = newId();
+      return e;
+    };
     const sessions = log.sessions
       .filter((s: any) => s && typeof s.startedAt === 'string' && Array.isArray(s.events))
       .map((s: any) => ({
         startedAt: s.startedAt,
         endedAt: typeof s.endedAt === 'string' ? s.endedAt : orphanCutoff,
-        events: s.events,
+        events: s.events.map(migrateEvent),
       }));
     return { sessions };
   };
@@ -494,6 +527,27 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   };
 
+  /**
+   * Build a portable JSON document for a single row leaving the
+   * library context (Copy Row → clipboard). Includes the lang /
+   * uiLang / geoContext header so the row remains self-describing
+   * when pasted into a different library or read standalone.
+   * See specs/intervention-recording.allium § CopyRowToClipboard.
+   */
+  const buildRowClipboardJson = (row: RowData): string => {
+    const rowSvgs = svgs.filter(s => s.sourceRowId === row.id || s.id === row.id);
+    const portable = {
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
+      type: 'row-clipboard' as const,
+      timestamp: new Date().toISOString(),
+      context: Recording.buildClipboardContext(config),
+      row,
+      svgs: rowSvgs,
+    };
+    return JSON.stringify(portable, null, 2);
+  };
+
   const exportProject = () => {
     // Transform rows: convert "processing" status to "idle" or "completed"
     const sanitizedRows = rows.map((row: RowData) => {
@@ -515,12 +569,16 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     });
 
     const dataToExport = {
-      version: APP_VERSION,
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
       type: 'pictonet_graph_dump',
       timestamp: new Date().toISOString(),
       config,
       rows: sanitizedRows,
-      svgs: exportSVGs()
+      // svgs is now a real array, not a JSON-stringified string.
+      // The previous double-encoding was an accident — JSON.stringify
+      // of dataToExport will serialize the nested array natively.
+      svgs,
     };
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -531,6 +589,69 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     a.click();
     URL.revokeObjectURL(url);
     addLog('success', t('messages.exportSuccess'));
+  };
+
+  /**
+   * Migrate a parsed library JSON forward to the current export schema.
+   * Idempotent: passing a v2 document through it is a no-op.
+   *
+   * v1 → v2 changes:
+   *   - svgs: a JSON-stringified string → a real array
+   *   - InterventionEvent.context: drop (the library config carries it)
+   *   - InterventionEvent.id: generate if missing
+   *
+   * Tolerant: if any step fails, the original sub-tree is preserved.
+   */
+  const migrateLibraryJson = (raw: any): any => {
+    if (!raw || typeof raw !== 'object') return raw;
+    const v = raw.schemaVersion ?? 1;
+    if (v >= EXPORT_SCHEMA_VERSION) return raw; // already current
+
+    // v1 had a doubly-encoded svgs string. Parse it into the proper array.
+    if (typeof raw.svgs === 'string') {
+      try {
+        const parsed = JSON.parse(raw.svgs);
+        if (Array.isArray(parsed)) raw.svgs = parsed;
+      } catch {
+        raw.svgs = [];
+      }
+    }
+
+    // v1 events carried a context object and lacked stable ids.
+    // Strip the redundant context (library config carries it) and assign
+    // a fresh short id to any event missing one.
+    const newId = (): string => {
+      const bytes = new Uint8Array(4);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(bytes);
+      } else {
+        for (let i = 0; i < 4; i++) bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    };
+    if (Array.isArray(raw.rows)) {
+      for (const row of raw.rows) {
+        const log = row?.interventionLog;
+        if (!log || !Array.isArray(log.sessions)) continue;
+        for (const session of log.sessions) {
+          if (!Array.isArray(session?.events)) continue;
+          for (const event of session.events) {
+            // Lift modelId out of the legacy context (if it ever lived there).
+            const legacyContext = event?.context;
+            if (legacyContext && typeof legacyContext === 'object') {
+              if (legacyContext.modelId && !event.modelId) {
+                event.modelId = legacyContext.modelId;
+              }
+              delete event.context;
+            }
+            if (!event.id) event.id = newId();
+          }
+        }
+      }
+    }
+
+    raw.schemaVersion = EXPORT_SCHEMA_VERSION;
+    return raw;
   };
 
   const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -547,7 +668,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     reader.onload = (event) => {
       try {
         const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
+        // Migrate forward as the very first step so the rest of the
+        // import flow only ever sees the current schema.
+        const parsed = migrateLibraryJson(JSON.parse(content));
         if (Array.isArray(parsed)) {
           const sanitized = parsed.map(sanitizeRow);
           setRows(sanitized);
@@ -794,15 +917,30 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     delete phaseSnapshotsRef.current[rowId];
   }, [settleEditsPure]);
 
-  // Side effects run from a useEffect so StrictMode's double-invocation of
-  // setState updaters does not double-call session lifecycle helpers.
-  const previousOpenRowIdRef = useRef<string | null>(null);
+  // A row is "engaged" while ANY of its surfaces is active: the row
+  // expanded in list view, the focus modal open for it, the SVG editor
+  // open for it, or the vectorizer modal open for it. A single session
+  // covers one continuous engagement, so navigating list → focus modal
+  // → SVG editor for the same row stays inside one session.
+  // See specs/intervention-recording.allium § SessionContinuesAcrossSurfaces.
+  const previousEngagedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const prev = previousOpenRowIdRef.current;
-    if (prev && prev !== openRowId) endRecordingSession(prev);
-    if (openRowId && prev !== openRowId) startRecordingSession(openRowId);
-    previousOpenRowIdRef.current = openRowId;
-  }, [openRowId, startRecordingSession, endRecordingSession]);
+    const engaged = new Set<string>();
+    if (openRowId) engaged.add(openRowId);
+    if (focusMode?.rowId) engaged.add(focusMode.rowId);
+    if (svgEditorState.isOpen && svgEditorState.rowId) engaged.add(svgEditorState.rowId);
+    if (vectorizerState.isOpen && vectorizerState.rowId) engaged.add(vectorizerState.rowId);
+    const prev = previousEngagedRef.current;
+    // Rows that newly became engaged: start session
+    for (const id of engaged) {
+      if (!prev.has(id)) startRecordingSession(id);
+    }
+    // Rows that disengaged: end session
+    for (const id of prev) {
+      if (!engaged.has(id)) endRecordingSession(id);
+    }
+    previousEngagedRef.current = engaged;
+  }, [openRowId, focusMode, svgEditorState, vectorizerState, startRecordingSession, endRecordingSession]);
 
   const handleOpenRowChange = useCallback((nextOpenId: string | null) => {
     setOpenRowId(nextOpenId);
@@ -1101,6 +1239,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     return count;
   };
 
+  // Captured at openSVGEditor time, read at handleSVGEditorSave time, so a
+  // svg_raw / svg_structured edit event can carry pre/post SvgMetrics
+  // without storing a copy of the SVG content itself.
+  // See specs/intervention-recording.allium § SvgEditorSessionEdit.
+  const svgEditorBeforeMetricsRef = useRef<{ rowId: string; phase: 'svg_raw' | 'svg_structured'; metrics: SvgMetrics } | null>(null);
+
   const openSVGEditor = (rowId: string, preferSource?: 'raw' | 'structured') => {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
@@ -1122,6 +1266,18 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (!svgToEdit) {
       addLog('error', t('messages.noSvgToEdit'));
       return;
+    }
+
+    // Snapshot metrics at open for the recording layer.
+    const beforeMetrics = Recording.computeSvgMetrics(svgToEdit);
+    if (beforeMetrics) {
+      svgEditorBeforeMetricsRef.current = {
+        rowId,
+        phase: source === 'structured' ? 'svg_structured' : 'svg_raw',
+        metrics: beforeMetrics,
+      };
+    } else {
+      svgEditorBeforeMetricsRef.current = null;
     }
 
     setSvgEditorState({
@@ -1163,12 +1319,47 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
     const savedRow = rows.find(r => r.id === svgEditorState.rowId);
     addLog('success', t('messages.svgUpdatedSuccess', { utterance: savedRow?.UTTERANCE }));
+
+    // Emit a svg_raw / svg_structured edit event with metrics before/after.
+    // The before was captured at openSVGEditor time; the after is the saved SVG.
+    const before = svgEditorBeforeMetricsRef.current;
+    const rowIdAtSave = svgEditorState.rowId;
+    if (before && rowIdAtSave === before.rowId) {
+      const afterMetrics = Recording.computeSvgMetrics(updatedSvg);
+      if (afterMetrics) {
+        setRows(prev => prev.map(r =>
+          r.id === rowIdAtSave
+            ? Recording.recordSvgEdit(r, config, { phase: before.phase, before: before.metrics, after: afterMetrics })
+            : r
+        ));
+      }
+    }
+    svgEditorBeforeMetricsRef.current = null;
+
     setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
   };
 
   const handleVectorizerApply = (result: VectorizerResult) => {
     if (!vectorizerState.rowId) return;
-    updateRowById(vectorizerState.rowId, { rawSvg: result.svg });
+    const rowId = vectorizerState.rowId;
+
+    // If a rawSvg already existed for this row, the apply replaces it —
+    // record the previous one as a discarded svg_raw candidate before
+    // overwriting. See specs/intervention-recording.allium § VectorizerApplyDiscardsRaw.
+    const existingRow = rows.find(r => r.id === rowId);
+    const previousRaw = existingRow?.rawSvg;
+    if (previousRaw) {
+      const previousMetrics = Recording.computeSvgMetrics(previousRaw);
+      if (previousMetrics) {
+        setRows(prev => prev.map(r =>
+          r.id === rowId
+            ? Recording.recordSvgDiscard(r, config, { phase: 'svg_raw', before: previousMetrics })
+            : r
+        ));
+      }
+    }
+
+    updateRowById(rowId, { rawSvg: result.svg });
     addLog('success', t('messages.vectorizationComplete', { traced: result.layersTraced, total: result.layersTotal, tier: result.tiersUsed }));
     if (result.warnings.length > 0) {
       result.warnings.forEach(w => addLog('info', w));
@@ -1533,27 +1724,27 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         {viewMode === 'list' && rows.length > 0 && (
           <div id="sort-controls" className="mb-6 flex justify-between items-center gap-2">
             {/* View mode switcher (left) — see specs/library-views.allium.
-                Default is grid; explicit 'list' is the only opt-out. */}
+                Default is list; explicit 'grid' is the only opt-in. */}
             <div id="view-switcher" className="flex items-center gap-2">
               <span className="text-xs font-medium uppercase text-slate-500 tracking-wider mr-2">{t('library.viewMode')}</span>
               <div className="inline-flex border border-slate-200 bg-white">
                 <button
-                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
-                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'grid') === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewGrid')}
-                  aria-label={t('library.viewGrid')}
-                  aria-pressed={(config.libraryViewMode ?? 'grid') === 'grid'}
-                >
-                  <LayoutGrid size={14} aria-hidden="true" />
-                </button>
-                <button
                   onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
-                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewList')}
+                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'list') === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewListTooltip')}
                   aria-label={t('library.viewList')}
-                  aria-pressed={config.libraryViewMode === 'list'}
+                  aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
                 >
                   <List size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
+                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
+                  title={t('library.viewGridTooltip')}
+                  aria-label={t('library.viewGrid')}
+                  aria-pressed={config.libraryViewMode === 'grid'}
+                >
+                  <LayoutGrid size={14} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1684,7 +1875,27 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               </span>
             </p>
           </div>
-        ) : config.libraryViewMode === 'list' ? (
+        ) : config.libraryViewMode === 'grid' ? (
+          /* Pictogram grid view — see specs/library-views.allium */
+          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
+            {filteredRows.map((row) => (
+              <PictogramGridCell
+                key={row.id}
+                row={row}
+                onUpdate={u => updateRowById(row.id, u)}
+                onCascade={() => processCascade(row.id)}
+                onStop={() => {
+                  stopFlags.current[row.id] = true;
+                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
+                }}
+                onFocus={step => setFocusMode({ step, rowId: row.id })}
+                onOpenEditor={source => openSVGEditor(row.id, source)}
+                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                onSettleField={() => settleRowEdits(row.id)}
+              />
+            ))}
+          </div>
+        ) : (
           <div id="list-view" className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.map((row) => {
               return (
@@ -1724,29 +1935,17 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   onSettleField={() => settleRowEdits(row.id)}
                   onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
                   onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
+                  onDiscardSvg={(phase, previousSvg) => {
+                    const metrics = Recording.computeSvgMetrics(previousSvg);
+                    if (!metrics) return;
+                    setRows(prev => prev.map(r => r.id === row.id
+                      ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
+                      : r));
+                  }}
+                  onBuildRowClipboard={buildRowClipboardJson}
                 />
               );
             })}
-          </div>
-        ) : (
-          /* Pictogram grid view — default. See specs/library-views.allium */
-          <div id="grid-view" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
-            {filteredRows.map((row) => (
-              <PictogramGridCell
-                key={row.id}
-                row={row}
-                onUpdate={u => updateRowById(row.id, u)}
-                onCascade={() => processCascade(row.id)}
-                onStop={() => {
-                  stopFlags.current[row.id] = true;
-                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
-                }}
-                onFocus={step => setFocusMode({ step, rowId: row.id })}
-                onOpenEditor={source => openSVGEditor(row.id, source)}
-                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
-                onSettleField={() => settleRowEdits(row.id)}
-              />
-            ))}
           </div>
         )}
       </main>
@@ -1830,6 +2029,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             stopFlags.current[focusMode!.rowId] = true;
             addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
           }}
+          onDiscardSvg={(phase, previousSvg) => {
+            const metrics = Recording.computeSvgMetrics(previousSvg);
+            if (!metrics) return;
+            setRows(prev => prev.map(r => r.id === focusMode!.rowId
+              ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
+              : r));
+          }}
         />
       )}
 
@@ -1866,7 +2072,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       {svgEditorState.isOpen && svgEditorState.svg && svgEditorState.rowId !== null && (
         <SVGEditorModal
           isOpen={svgEditorState.isOpen}
-          onClose={() => setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null })}
+          onClose={() => {
+            // Cancelled without saving: drop the captured before-metrics so they
+            // don't leak into a future edit. No event is emitted.
+            svgEditorBeforeMetricsRef.current = null;
+            setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
+          }}
           initialSvg={svgEditorState.svg}
           utterance={rows.find(r => r.id === svgEditorState.rowId)?.UTTERANCE || ''}
           onSave={handleSVGEditorSave}
@@ -2086,7 +2297,12 @@ const RowComponent: React.FC<{
   onSettleField?: () => void;
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog }) => {
+  onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
+  /** Builds the portable JSON for "Copy Row" — wraps the row with the
+   *  schema header and the RowClipboardContext so it stays self-describing
+   *  when pasted outside of a library. */
+  onBuildRowClipboard?: (row: RowData) => string;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2298,6 +2514,7 @@ const RowComponent: React.FC<{
                       onUpdate={onUpdate}
                       onOpenEditor={onOpenEditor}
                       onOpenVectorizer={onOpenVectorizer}
+                      onDiscardSvg={onDiscardSvg}
                     />
                   </div>
                 )}
@@ -2312,7 +2529,14 @@ const RowComponent: React.FC<{
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                navigator.clipboard.writeText(JSON.stringify(row, null, 2))
+                // Use the host-provided builder so the clipboard payload
+                // includes the schemaVersion header and the portability
+                // context. Falls back to a bare row dump only if no
+                // builder is wired (defensive — should not happen in App.tsx).
+                const payload = onBuildRowClipboard
+                  ? onBuildRowClipboard(row)
+                  : JSON.stringify(row, null, 2);
+                navigator.clipboard.writeText(payload)
                   .then(() => {
                     onLog('success', t('actions.copyRowSuccess', { utterance: row.UTTERANCE }));
                   })
@@ -3129,7 +3353,8 @@ const FocusViewModal: React.FC<{
   onSettleField?: () => void;
   onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
   onStop?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop }) => {
+  onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -3294,7 +3519,7 @@ const FocusViewModal: React.FC<{
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} />
             </div>
           </div>
         );

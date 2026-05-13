@@ -40,9 +40,17 @@ interface SVGGeneratorProps {
      * See specs/library-views.allium.
      */
     layout?: 'stacked' | 'columns';
+    /**
+     * Called just before an SVG artifact is discarded (replaced or cleared)
+     * by an action triggered from this component (Re-Estructurar today;
+     * extensible to Re-trace and per-section deletes). The host computes
+     * SvgMetrics on the discarded content and emits a discard event.
+     * See specs/intervention-recording.allium § ReStructurarDiscardsStructured.
+     */
+    onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer, layout = 'stacked' }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer, layout = 'stacked', onDiscardSvg }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -408,6 +416,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                                 <button
                                     onClick={() => {
+                                        if (rawSvg) onDiscardSvg?.('svg_raw', rawSvg);
                                         setRawSvg(null);
                                         onUpdate({ rawSvg: undefined });
                                         setConfirmingDelete(null);
@@ -466,6 +475,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                             <button
                                 onClick={() => {
+                                    if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                                     removeSVGByRowId(row.id);
                                     onUpdate({ structuredSvg: undefined });
                                     setConfirmingDelete(null);
@@ -499,6 +509,10 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                     {row.rawSvg && (
                         <button
                             onClick={() => {
+                                // Discard the existing structuredSvg before regenerating.
+                                if (row.structuredSvg) {
+                                    onDiscardSvg?.('svg_structured', row.structuredSvg);
+                                }
                                 removeSVGByRowId(row.id);
                                 onUpdate({ structuredSvg: undefined });
                                 setRawSvg(row.rawSvg!);
@@ -511,9 +525,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     )}
 
-                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace */}
+                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace.
+                        The structured discard fires here (it won't be regenerated automatically).
+                        The raw discard fires later, when the vectorizer applies — by design,
+                        because cancelling the vectorizer should not lose the existing rawSvg. */}
                     <button
                         onClick={() => {
+                            if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                             removeSVGByRowId(row.id);
                             onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
