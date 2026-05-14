@@ -1,6 +1,6 @@
 {
-  "generated": "2026-04-24T16:58:29.706Z",
-  "count": 14,
+  "generated": "2026-05-13T15:49:19.521Z",
+  "count": 15,
   "libraries": [
     {
       "filename": "a_mano_graph_2026-04-13.json",
@@ -39,13 +39,13 @@
       "filesize": 1963086
     },
     {
-      "filename": "expresiones_cotidianas_graph_2026-04-24.json",
+      "filename": "expresiones_cotidianas_graph_2026-04-26.json",
       "name": "Expresiones Cotidianas",
       "location": "Viña del Mar, Región de Valparaíso, Chile",
       "language": "es-419",
       "items": 200,
       "description": "pictonet_graph_dump",
-      "filesize": 54589774
+      "filesize": 54623508
     },
     {
       "filename": "icap_50_v2_graph_2026-03-05.json",
@@ -109,6 +109,15 @@
       "items": 6,
       "description": "pictonet_graph_dump",
       "filesize": 2586463
+    },
+    {
+      "filename": "tangram_graph_2026-04-27.json",
+      "name": "Tangram",
+      "location": "Viña del Mar, Valparaiso Region, Chile",
+      "language": "es",
+      "items": 6,
+      "description": "pictonet_graph_dump",
+      "filesize": 2400281
     },
     {
       "filename": "tramites.json",
