@@ -78,13 +78,13 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 1px solid #cbd5e1;
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border: 1px solid #ddd6fe;
   border-radius: 12px;
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
   font-size: 12px;
   font-weight: 500;
-  color: #475569;
+  color: #6d28d9;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -92,10 +92,10 @@
 }
 
 .element-pill:hover {
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border-color: #7c3aed;
-  color: #5b21b6;
-  box-shadow: 0 2px 4px rgba(124, 58, 237, 0.1);
+  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+  border-color: #a78bfa;
+  color: #4c1d95;
+  box-shadow: 0 2px 4px rgba(124, 58, 237, 0.12);
   transform: translateY(-1px);
 }
 
@@ -121,18 +121,28 @@
   min-width: 60px;
 }
 
-/* Element pill in prompt text */
-.prompt-text .element-pill {
-  margin: 0 2px;
-  padding: 2px 8px;
-  font-size: 11px;
-  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
-  border-color: #c4b5fd;
-  color: #6d28d9;
-  cursor: default;
+/* Root element pill — orange accent, both tree and prompt */
+.element-pill--root {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: #fed7aa;
+  color: #c2410c;
 }
 
-.prompt-text .element-pill:hover {
+.element-pill--root:hover {
+  background: linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%);
+  border-color: #fb923c;
+  color: #7c2d12;
+}
+
+/* Prompt-context pills: sizing and spacing overrides only */
+.prompt-pill {
+  margin: 0 2px;
+  padding: 2px 8px;
+  cursor: default;
+  vertical-align: middle;
+}
+
+.prompt-pill:hover {
   transform: none;
   box-shadow: none;
 }

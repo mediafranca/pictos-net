@@ -1,0 +1,578 @@
+-- allium: 3
+-- pap.allium
+-- Pictographic Annotated Portfolios
+
+-- Scope: A standalone web application for analysing pictogram libraries
+--   exported from pictos.net under the Annotated Portfolios design-research
+--   methodology (Gaver & Bowers). pap ingests library + row JSONs, presents
+--   them as a grid, and lets a single researcher attach annotations and
+--   tags at three levels: per pictogram, across batches of pictograms,
+--   and per intervention event.
+--
+-- Includes:
+--   - Static ingestion of library JSONs from /portfolios at build time
+--   - Grid view of pictograms (visual idiom mirrors pictos.net's grid)
+--   - Per-pictogram detail view: bitmap/SVG, full row metadata, intervention log
+--   - Annotations at three granularities: per pictogram, per batch (cross-row
+--     theme), per intervention event
+--   - Hybrid tag vocabulary: emergent (researcher-created) + reused
+--   - Filter by tag and by category
+--   - Local-edit / static-publish duality: writes happen to JSON files in
+--     the repo when running with the dev server; the production build is
+--     read-only by construction (no write endpoint exists in the bundle)
+--
+-- Excludes:
+--   - Multi-researcher collaboration (single researcher; no auth, no merge)
+--   - Comparison side-by-side of multiple pictograms (deferred to v2)
+--   - Statistics dashboards (counts, distributions) — deferred
+--   - Re-running pictos.net's pipeline; pap is read-only on the corpus,
+--     it never modifies bitmap, rawSvg, structuredSvg, NLU, elements, or
+--     prompt
+--   - Server-side persistence; everything that happens in production is
+--     read-only against the snapshot baked at build time
+--
+-- Methodology note (Gaver & Bowers' Annotated Portfolios):
+--   A portfolio is a collection of related artifacts (here: pictograms).
+--   Annotations are reflective observations that articulate themes
+--   crossing multiple artifacts; they are what turns a catalogue into
+--   design knowledge. pap therefore privileges *batch* annotations as
+--   first-class objects, not just decoration on individual items.
+--
+-- Dependencies (defined by pictos.net, consumed verbatim by pap):
+--   - LibraryJson  — the export shape of one pictos.net library
+--   - RowData      — one pictogram row inside a library
+--   - InterventionLog, InterventionSession, InterventionEvent
+--                  — see specs/intervention-recording.allium
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value AnnotationKind {
+  per_pictogram     -- a free-text note on a single row
+  batch             -- a theme applied to a SET of rows (the "annotated"
+                    -- in the methodology — the cross-cutting observation)
+  per_event         -- a note on a specific intervention event of a row
+}
+
+value TagOrigin {
+  emergent          -- the researcher coined this tag while annotating
+  reused            -- existing tag selected from the registry
+  -- The distinction is recorded so the corpus shows which vocabulary
+  -- emerged during analysis vs which was carried in.
+}
+
+value AnnotationAuthor {
+  -- A single value type with one canonical instance for the researcher.
+  -- Modelled explicitly so future multi-researcher work is a non-breaking
+  -- extension. For v1, every annotation has the same author.
+  id: String
+  display_name: String
+}
+
+------------------------------------------------------------
+-- External Entities (defined by pictos.net)
+------------------------------------------------------------
+
+external LibraryJson {
+  -- The JSON shape produced by pictos.net's "Export library" action.
+  -- pap reads this shape verbatim and never writes it back.
+  name: String
+  credits: String?
+  license: String
+  rows: [RowData]
+  -- Plus any additional fields pictos.net's export carries — pap stores
+  -- the full payload and exposes it in the metadata view, even fields
+  -- it does not specifically recognise.
+}
+
+external RowData {
+  -- A single pictogram with its pipeline state. See pictos.net's types.ts.
+  -- pap reads: id, UTTERANCE, NLU, elements, prompt, bitmap, rawSvg,
+  -- structuredSvg, *Status, *Duration, interventionLog, plus any other
+  -- fields the row carries.
+  id: String
+  utterance: String
+  intervention_log: InterventionLog?
+}
+
+external InterventionLog {
+  -- See pictos.net specs/intervention-recording.allium.
+  sessions: [InterventionSession]
+}
+
+external InterventionSession {
+  started_at: Timestamp
+  ended_at: Timestamp?
+  events: [InterventionEvent]
+}
+
+external InterventionEvent {
+  phase: String        -- utterance | nlu | elements | prompt | svg_raw | svg_structured
+  kind: String         -- edit | discard
+  at: Timestamp
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity Portfolio {
+  -- The top-level collection. One Portfolio per pap deployment.
+  -- Composed of all libraries dropped into /portfolios.
+  libraries: [Library]
+  annotations: [Annotation]
+  tags: TagRegistry
+  author: AnnotationAuthor
+}
+
+entity Library {
+  -- One imported pictos.net library, identified by its source file.
+  source_path: String         -- e.g. "portfolios/workshop-2026-04.json"
+  name: String                -- from LibraryJson.name
+  credits: String?            -- from LibraryJson.credits
+  license: String             -- from LibraryJson.license
+  rows: [RowData]
+}
+
+entity Pictogram {
+  -- A single addressable item in the portfolio. Wraps a RowData and
+  -- carries pap's analytical overlay (annotations, tags, categories).
+  -- Identity is (library.source_path, row.id) so the same row id from
+  -- two different libraries does not collide.
+  library: Library
+  row: RowData
+
+  @invariant "stable identity"
+    -- (library.source_path, row.id) uniquely identifies a Pictogram
+    -- across the entire portfolio.
+}
+
+entity Annotation {
+  -- A reflective note authored by the researcher. Three kinds, one shape.
+  id: String                  -- locally-generated, stable
+  kind: AnnotationKind
+  body: String                -- markdown allowed
+  created_at: Timestamp
+  updated_at: Timestamp
+  author: AnnotationAuthor
+
+  -- Targets vary by kind:
+  pictogram: Pictogram?       -- iff kind = per_pictogram
+  pictograms: [Pictogram]?    -- iff kind = batch (the cross-cutting set)
+  event_target: EventTarget?  -- iff kind = per_event
+
+  tags: [String]              -- ids of tags from TagRegistry
+  category: String?           -- a single coarse category (see CategoryRegistry)
+}
+
+value EventTarget {
+  -- Pointer into a specific intervention event. Resolved by:
+  --   pictogram (which row in which library)
+  --   session_index (the i-th session in the row's log)
+  --   event_index   (the j-th event in that session)
+  -- The pointer is implicit-by-position because intervention events
+  -- have no stable id of their own. If the underlying log is edited
+  -- (via pictos.net's audit panel), pre-existing per_event annotations
+  -- may dangle (see DanglingEventAnnotation).
+  pictogram: Pictogram
+  session_index: Integer
+  event_index: Integer
+}
+
+entity TagRegistry {
+  -- Single registry per portfolio. Each tag has a unique id (its slug).
+  tags: [Tag]
+}
+
+entity Tag {
+  id: String                  -- url-safe slug, unique within registry
+  label: String               -- human-readable, may differ from id
+  origin: TagOrigin
+  created_at: Timestamp
+  -- A tag is created either by the researcher coining it (origin =
+  -- emergent) or by being seeded into a controlled vocabulary file
+  -- (origin = reused). Once created, both kinds are reusable.
+}
+
+entity CategoryRegistry {
+  -- Categories are coarser than tags. A pictogram has at most one
+  -- category, but can carry many tags. Categories are open: the
+  -- researcher adds new ones as analysis progresses.
+  categories: [Category]
+}
+
+entity Category {
+  id: String
+  label: String
+}
+
+------------------------------------------------------------
+-- Persistence model
+------------------------------------------------------------
+
+-- pap's "database" is a small set of JSON files in the repo.
+
+entity AnnotationsFile {
+  -- Stored at /data/annotations.json (path is convention).
+  -- The single source of truth for annotations.
+  annotations: [Annotation]
+}
+
+entity TagsFile {
+  -- Stored at /data/tags.json.
+  tags: [Tag]
+}
+
+entity CategoriesFile {
+  -- Stored at /data/categories.json.
+  categories: [Category]
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant CorpusIsReadOnly {
+  -- pap NEVER writes to /portfolios/*.json. Library and row data are
+  -- inputs to the analysis, not outputs of it. Annotations live in
+  -- /data/*.json, never inside a library export.
+}
+
+invariant LocalEditOnly {
+  -- Writes (creating, updating, deleting annotations / tags / categories)
+  -- happen only when running the dev server (`npm run dev`). The dev
+  -- server exposes a write endpoint that the app uses; the production
+  -- bundle (`npm run build`) does not include this endpoint and the
+  -- app detects its absence and switches to read-only mode.
+}
+
+invariant SingleResearcher {
+  -- Every annotation has author = Portfolio.author. The author entity
+  -- is modelled explicitly to leave room for multi-researcher work
+  -- later, but v1 does not reconcile concurrent edits — there is one
+  -- editor running locally at a time.
+}
+
+invariant DanglingEventAnnotation {
+  -- A per_event annotation is anchored by (pictogram, session_index,
+  -- event_index). If the underlying intervention log changes shape
+  -- (events removed, sessions reindexed), the anchor may no longer
+  -- resolve. Such annotations are flagged in the UI as dangling and
+  -- listed in a "rescue" panel; pap never silently drops them.
+}
+
+invariant TagIdsAreSlugs {
+  -- Tag ids are lowercased, hyphen-separated, ASCII slugs derived from
+  -- the label. Two distinct labels that slugify to the same id are
+  -- merged into a single tag (the more recent label wins, with a
+  -- "merged from" note in the registry's history).
+}
+
+invariant AnnotationsBelongToCorpus {
+  -- Every per_pictogram and per_event annotation references a Pictogram
+  -- that exists in the loaded portfolio. If a library is removed from
+  -- /portfolios between runs, annotations referencing rows in that
+  -- library become orphaned and surface in the rescue panel.
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Ingestion ===
+
+rule IngestPortfolios {
+  when: pap starts (dev or production)
+  ensures:
+    Portfolio.libraries = the result of parsing every *.json in /portfolios
+    each parsed file becomes a Library with source_path = its filename
+    rows are exposed as Pictograms keyed by (library.source_path, row.id)
+
+  @guidance "tolerant parsing"
+    -- Files that fail to parse, or that lack the LibraryJson shape, are
+    -- skipped with a warning surfaced in the dev console. The app does
+    -- not crash on a malformed file.
+}
+
+rule IngestPersistence {
+  when: pap starts
+  ensures:
+    Portfolio.annotations  = AnnotationsFile.annotations  (or [] if missing)
+    Portfolio.tags         = TagsFile.tags                (or [] if missing)
+    -- The "database" files are loaded the same way as the corpus —
+    -- statically baked at build time, freshly read in dev mode.
+}
+
+-- === Display ===
+
+rule DisplayGrid {
+  when: the researcher opens the home view
+  ensures:
+    Portfolio.libraries.flatMap(rows) is rendered as a grid of cells
+    each cell shows the most-downstream available artifact:
+      structuredSvg → rawSvg → bitmap → "no image" placeholder
+    each cell shows utterance, library name, and tag chips
+    -- Visual idiom mirrors pictos.net's grid view; pap can copy the
+    -- PictogramGridCell concept verbatim.
+}
+
+rule DisplayDetail {
+  when: the researcher clicks a Pictogram in the grid
+  ensures:
+    a detail view opens showing:
+      - the pictogram (largest available stage)
+      - the utterance
+      - the full row metadata (NLU, elements, prompt, statuses, durations)
+      - the intervention log rendered as a chronological timeline
+      - the per_pictogram annotation (if any)
+      - all batch annotations that target this pictogram
+      - per_event annotation pins on the timeline
+    actions: edit annotation, apply tag, set category, open event annotation
+}
+
+-- === Annotation creation ===
+
+rule CreatePerPictogramAnnotation {
+  when: the researcher writes a per-pictogram note in the detail view
+        and commits (blur or save)
+  requires:
+    write endpoint is available (running locally)
+  ensures:
+    new Annotation appended to AnnotationsFile.annotations with:
+      kind = per_pictogram
+      pictogram = the current pictogram
+      author = Portfolio.author
+    AnnotationsFile.annotations is written to /data/annotations.json
+}
+
+rule CreateBatchAnnotation {
+  when: the researcher selects N pictograms (N >= 2) in the grid and
+        invokes "annotate selection"
+  requires:
+    write endpoint is available
+  ensures:
+    new Annotation appended with:
+      kind = batch
+      pictograms = the selected set
+      author = Portfolio.author
+
+  @guidance "batch annotation as theme"
+    -- The body of a batch annotation is encouraged to read as a theme
+    -- ("Pictograms where the participant edited politeness twice or
+    -- more"). The UI invites a title-then-description form to nudge
+    -- the researcher toward articulation, not just listing.
+}
+
+rule CreatePerEventAnnotation {
+  when: the researcher clicks a specific event on the intervention timeline
+        and adds a note
+  requires:
+    write endpoint is available
+  ensures:
+    new Annotation appended with:
+      kind = per_event
+      event_target = (pictogram, session_index, event_index)
+      author = Portfolio.author
+}
+
+rule UpdateAnnotation {
+  when: the researcher edits an existing annotation
+  requires:
+    write endpoint is available
+  ensures:
+    Annotation.body is updated
+    Annotation.updated_at = now
+    no new annotation is created (in-place edit)
+}
+
+rule DeleteAnnotation {
+  when: the researcher deletes an annotation (with confirmation)
+  requires:
+    write endpoint is available
+    the researcher confirms the deletion
+  ensures:
+    Annotation removed from AnnotationsFile.annotations
+}
+
+-- === Tagging ===
+
+rule ApplyTag {
+  when: the researcher applies a tag to an annotation
+  ensures:
+    if a Tag with that id exists, its id is appended to Annotation.tags
+    if no such Tag exists, a new emergent Tag is created in TagRegistry
+      with origin = emergent, then its id is applied
+}
+
+rule RemoveTag {
+  when: the researcher removes a tag from an annotation
+  ensures:
+    the tag id is removed from Annotation.tags
+    if no annotation references the tag any more, the Tag remains in
+    the registry (history is preserved; orphan tags are not auto-deleted)
+}
+
+-- === Filtering ===
+
+rule FilterByTag {
+  when: the researcher selects one or more tag chips in the filter panel
+  ensures:
+    the grid shows only Pictograms that have at least one Annotation
+    referencing one of the selected tags (any-of, not all-of)
+
+  @guidance "any-of vs all-of"
+    -- v1 uses any-of. all-of (intersection) is a future toggle.
+}
+
+rule FilterByCategory {
+  when: the researcher selects a category in the filter panel
+  ensures:
+    the grid shows only Pictograms that have an Annotation with
+    category = the selected category
+}
+
+rule ClearFilters {
+  when: the researcher clears all active filters
+  ensures:
+    the grid shows all Pictograms in the portfolio
+}
+
+-- === Read-only mode in production ===
+
+rule DetectReadOnly {
+  when: pap initialises
+  ensures:
+    pap probes the write endpoint (e.g. HEAD /api/data)
+    if the probe fails (404 or any non-success): app enters read-only
+      mode for the rest of the session
+    if the probe succeeds: app enters editable mode
+
+  @guidance "no localStorage fallback"
+    -- A failed probe in production is the expected state. pap does NOT
+    -- fall back to localStorage for annotation drafts, deliberately —
+    -- the published portfolio's annotations are exactly the JSON files
+    -- baked at build time, no more.
+}
+
+rule ReadOnlyHidesEditAffordances {
+  when: pap is in read-only mode
+  ensures:
+    annotation editors render text as plain markdown, no input field
+    "create annotation" / "apply tag" / "delete" actions are absent
+      (not just disabled — gone from the DOM where reasonable)
+    the filter panel and the timeline remain fully interactive
+
+  @guidance "edited offline, viewed online"
+    -- The implicit contract: the published version is a snapshot of an
+    -- annotated corpus at a moment in time, suitable for sharing with
+    -- a thesis committee or publishing alongside a paper. To update,
+    -- the researcher edits locally, commits, redeploys.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface PortfolioGrid {
+  -- Home view of pap. The researcher's primary entry point.
+
+  @guidance "visual idiom"
+    -- Mirrors pictos.net's PictogramGridCell composition: square
+    -- pictogram on top, utterance below, tag chips replacing the
+    -- pipeline badges. No Play button, no cascade trigger — pap
+    -- never runs the pipeline.
+
+  @guidance "selection mode"
+    -- A toggle (or shift-click) enters multi-select mode. While in
+    -- multi-select, an "Annotate selection" button appears that
+    -- opens the batch annotation editor.
+
+  @guidance "read-only state"
+    -- In read-only mode (production), the cells are clickable to open
+    -- the detail view but the multi-select / batch annotation entry
+    -- is not exposed.
+
+  exposes:
+    Portfolio.libraries (read)
+    selection state (read/write, ephemeral)
+    filter state (read/write, ephemeral)
+}
+
+surface PictogramDetail {
+  -- Modal or full-page view for a single Pictogram.
+
+  @guidance "layout"
+    -- Three-pane layout suggested:
+    --   left: pictogram + utterance + library + library credits
+    --   centre: metadata (NLU, elements, prompt) and intervention timeline
+    --   right: annotation panel (per_pictogram + batch annotations
+    --                            referencing this pictogram)
+    -- The intervention timeline supports clicking individual events to
+    -- open the per_event annotation editor.
+
+  exposes:
+    Pictogram (read)
+    Annotation (read in production, read/write in dev)
+}
+
+surface AnnotationEditor {
+  -- A small markdown-capable editor invoked for each annotation kind.
+
+  @guidance "title for batch annotations"
+    -- Per-pictogram and per-event annotations have only a body field.
+    -- Batch annotations have an explicit title field to nudge toward
+    -- the methodological emphasis on theme articulation.
+
+  @guidance "tag chip strip"
+    -- Below the body, a chip strip shows applied tags with an "+ tag"
+    -- affordance. The picker is autocomplete-over-registry that also
+    -- accepts "Enter to coin a new tag". Coined tags are immediately
+    -- visible to all subsequent annotations.
+
+  exposes:
+    Annotation (write in dev)
+    TagRegistry (read/write in dev)
+}
+
+surface FilterPanel {
+  -- Always-visible side or top panel.
+
+  @guidance "structure"
+    -- Two sections: "By tag" (chip cloud, click to toggle) and
+    -- "By category" (single-select dropdown). A "Clear filters" link.
+    -- The number of pictograms matching the current filter is shown.
+
+  exposes:
+    TagRegistry (read)
+    CategoryRegistry (read)
+    filter state (write)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should annotations support markdown rendering of element
+references — e.g. typing 'pictograma' between backticks renders as a
+link to that pictogram in the grid? Useful for batch annotation prose
+that mentions specific items, but adds parser complexity."
+
+open question "Tag autocomplete: should it suggest tags learned from the
+intervention log content (e.g. tags derived from edit phases that
+appear frequently in the row), or only from the registry?"
+
+open question "Versioning of the annotated portfolio: when the researcher
+publishes v2 of the same portfolio with different annotations, is there
+a way to surface diff vs v1, or are versions just successive deploys
+with no in-app comparison?"
+
+open question "Per_event annotations may dangle if pictos.net's audit
+panel later edits the intervention log. Is the rescue policy 'list and
+ask' (current spec), 'auto-resolve to nearest event by timestamp', or
+'block the audit panel from removing events that have annotations'?"
+
+open question "Export of analysis: is there value in a 'print to PDF'
+action that bakes the current filter + annotated corpus into a static
+artifact suitable for citation? v1 says no; the published web build
+already serves that role."

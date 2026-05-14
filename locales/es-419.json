@@ -147,7 +147,7 @@
     }
   },
   "config": {
-    "visualStylePrompt": "Prompt de Estilo Visual (Atributo de Nodo)",
+    "visualStylePrompt": "Prompt de Estilo Visual",
     "geoContext": "Contexto Geo-Lingüístico",
     "mapMode": "Modo Mapa",
     "simpleMode": "Simple",
