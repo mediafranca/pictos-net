@@ -59,7 +59,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const [processStartTime, setProcessStartTime] = useState<number | null>(null);
     const [elapsedTime, setElapsedTime] = useState(0);
     const [subStatus, setSubStatus] = useState<string>('');
-    const [rawSvg, setRawSvg] = useState<string | null>(row.rawSvg || null);
+    // Local display state for the raw SVG. Initialised from row.rawSvg
+    // ONLY when the artifact is still valid (not discarded). If the user
+    // previously discarded it, the data persists on the row for telemetry
+    // but the editor starts hidden — re-trace re-validates it.
+    const [rawSvg, setRawSvg] = useState<string | null>(
+      row.rawSvgDiscarded ? null : (row.rawSvg || null)
+    );
     const [confirmingDelete, setConfirmingDelete] = useState<'raw' | 'structured' | null>(null);
     const [structureProgress, setStructureProgress] = useState(0);
     const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -71,7 +77,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     const structuredSvgEntry = React.useMemo(() => {
         const libSvg = getSVGByRowId(row.id);
 
-        if (row.structuredSvg) {
+        // A discarded structuredSvg is not surfaced to the editor / library
+        // view; the data is kept on the row only for telemetry & research.
+        if (row.structuredSvg && !row.structuredSvgDiscarded) {
             return {
                 id: libSvg?.id ?? `svg-${row.id}`,
                 utterance: row.UTTERANCE,
@@ -85,12 +93,18 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         if (libSvg) return libSvg;
 
         return undefined;
-    }, [row.id, row.structuredSvg, row.UTTERANCE, getSVGByRowId]);
+    }, [row.id, row.structuredSvg, row.structuredSvgDiscarded, row.UTTERANCE, getSVGByRowId]);
 
-    // Vectorization only needs a bitmap (VTracer is independent of NLU/elements)
-    const vectorizeEligibility = canVectorize({ bitmap: row.bitmap });
-    // Structuring requires rawSvg + NLU + non-empty elements (no bitmap needed)
-    const structureEligibility = canStructureSVG({ rawSvg: row.rawSvg, NLU: row.NLU, elements: row.elements });
+    // Vectorization only needs a bitmap (VTracer is independent of NLU/elements).
+    // A discarded bitmap is not eligible — the user opted out of it.
+    const vectorizeEligibility = canVectorize({ bitmap: row.bitmapDiscarded ? undefined : row.bitmap });
+    // Structuring requires rawSvg + NLU + non-empty elements (no bitmap needed).
+    // A discarded rawSvg is not eligible.
+    const structureEligibility = canStructureSVG({
+        rawSvg: row.rawSvgDiscarded ? undefined : row.rawSvg,
+        NLU: row.NLU,
+        elements: row.elements,
+    });
 
     // Dynamic Style Injection (Visual only)
     const displaySvg = React.useMemo(() => {
@@ -217,6 +231,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     // Determine status based on what SVG data is available for this row.
     // Priority: structuredSvg > active structuring > rawSvg > idle
     useEffect(() => {
+        // A discarded rawSvg counts as "no valid trace" for the purposes
+        // of this view (the data persists on the row for telemetry).
+        const validRawSvg = row.rawSvgDiscarded ? null : (row.rawSvg || null);
         if (structuredSvgEntry) {
             // Structuring finished while we were unmounted
             activeStructuring.delete(row.id);
@@ -224,7 +241,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         } else if (activeStructuring.has(row.id)) {
             // Remounted while structuring is still in progress — restore UI
             const startedAt = activeStructuring.get(row.id)!;
-            setRawSvg(row.rawSvg || null);
+            setRawSvg(validRawSvg);
             setStatus('structuring');
             setProcessStartTime(startedAt);
             setElapsedTime((Date.now() - startedAt) / 1000);
@@ -238,13 +255,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 setStructureProgress(estimatedProgress);
                 startHeartbeat();
             }
-        } else if (row.rawSvg) {
-            setRawSvg(row.rawSvg);
+        } else if (validRawSvg) {
+            setRawSvg(validRawSvg);
             setStatus('traced');
         } else {
             setStatus('idle');
         }
-    }, [structuredSvgEntry, row.id, row.rawSvg]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [structuredSvgEntry, row.id, row.rawSvg, row.rawSvgDiscarded]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const startHeartbeat = () => {
         const start = Date.now();
@@ -325,8 +342,8 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 lang: nluData.lang
             });
 
-            // Persist structured SVG to row
-            onUpdate({ structuredSvg: result.svg });
+            // Persist structured SVG to row, re-validating the artifact.
+            onUpdate({ structuredSvg: result.svg, structuredSvgDiscarded: false });
 
             activeStructuring.delete(row.id);
             setStatus('completed');
@@ -416,9 +433,13 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                                 <button
                                     onClick={() => {
+                                        // Discard: keep the binary on the row
+                                        // (for telemetry) but mark it invalid
+                                        // and hide it locally. The App-level
+                                        // onDiscardSvg handler sets
+                                        // rawSvgDiscarded=true.
                                         if (rawSvg) onDiscardSvg?.('svg_raw', rawSvg);
                                         setRawSvg(null);
-                                        onUpdate({ rawSvg: undefined });
                                         setConfirmingDelete(null);
                                     }}
                                     className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold uppercase tracking-wider rounded"
@@ -475,9 +496,12 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20 gap-2">
                             <button
                                 onClick={() => {
+                                    // Discard the structured SVG. Binary
+                                    // stays on the row; the App-level
+                                    // onDiscardSvg sets
+                                    // structuredSvgDiscarded=true.
                                     if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                                     removeSVGByRowId(row.id);
-                                    onUpdate({ structuredSvg: undefined });
                                     setConfirmingDelete(null);
                                     if (rawSvg) {
                                         setStatus('traced');
@@ -506,15 +530,17 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
                 <div className={`flex gap-2 ${isColumns ? 'mt-3' : ''}`}>
                     {/* Re-structure: go back to traced if a raw SVG is available */}
-                    {row.rawSvg && (
+                    {row.rawSvg && !row.rawSvgDiscarded && (
                         <button
                             onClick={() => {
-                                // Discard the existing structuredSvg before regenerating.
+                                // Re-Structure: record the discard for
+                                // telemetry; the regeneration below will
+                                // overwrite structuredSvg and clear the
+                                // discard flag on success.
                                 if (row.structuredSvg) {
                                     onDiscardSvg?.('svg_structured', row.structuredSvg);
                                 }
                                 removeSVGByRowId(row.id);
-                                onUpdate({ structuredSvg: undefined });
                                 setRawSvg(row.rawSvg!);
                                 handleFormat(row.rawSvg!);
                             }}
@@ -531,9 +557,12 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         because cancelling the vectorizer should not lose the existing rawSvg. */}
                     <button
                         onClick={() => {
+                            // Re-trace: discard current structuredSvg
+                            // (telemetry + flag). The new vectorize will
+                            // overwrite rawSvg and clear its flag in App's
+                            // handleVectorizerApply.
                             if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
                             removeSVGByRowId(row.id);
-                            onUpdate({ structuredSvg: undefined });
                             setRawSvg(null);
                             onOpenVectorizer?.();
                         }}

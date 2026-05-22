@@ -245,26 +245,32 @@ export const deleteBitmap = async (id: string): Promise<void> => {
 
 // ─── SVGs ────────────────────────────────────────────────────────────────────
 
+/**
+ * Write SVG fields for a row. Both fields are written as passed — an
+ * `undefined` value CLEARS the field on disk, it does not merge with the
+ * existing entry. Callers that want to update just one field must read
+ * the other one and pass it explicitly.
+ *
+ * (Previously this function merged undefined fields with the existing
+ * entry, which made it impossible to delete an SVG once persisted: a
+ * subsequent save with the field set to undefined silently resurrected
+ * the old value. The only caller in the codebase passes both fields, so
+ * removing the merge is safe.)
+ */
 export const saveSvgs = async (id: string, svgs: { rawSvg?: string; structuredSvg?: string }): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_SVGS], 'readwrite');
     const store = transaction.objectStore(STORE_SVGS);
-
-    const getReq = store.get(id);
-    getReq.onsuccess = () => {
-      const existing = getReq.result as SvgEntry | undefined;
-      const entry: SvgEntry = {
-        id,
-        timestamp: Date.now(),
-        rawSvg: svgs.rawSvg !== undefined ? svgs.rawSvg : existing?.rawSvg,
-        structuredSvg: svgs.structuredSvg !== undefined ? svgs.structuredSvg : existing?.structuredSvg,
-      };
-      const putReq = store.put(entry);
-      putReq.onsuccess = () => resolve();
-      putReq.onerror = () => reject(putReq.error);
+    const entry: SvgEntry = {
+      id,
+      timestamp: Date.now(),
+      rawSvg: svgs.rawSvg,
+      structuredSvg: svgs.structuredSvg,
     };
-    getReq.onerror = () => reject(getReq.error);
+    const putReq = store.put(entry);
+    putReq.onsuccess = () => resolve();
+    putReq.onerror = () => reject(putReq.error);
   });
 };
 

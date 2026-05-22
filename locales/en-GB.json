@@ -266,6 +266,7 @@
     "exportLibrary": "Export library (.json)",
     "downloadPngs": "Download PNGs ({count})",
     "exportSvgs": "Export SVGs ({count})",
+    "exportPdf": "Export PDF ({count})",
     "close": "Close",
     "addChild": "Add child",
     "element": "element",
@@ -320,6 +321,9 @@
     "stopRequested": "Stop requested for: \"{utterance}\"",
     "pngsExported": "{count} PNGs exported as ZIP.",
     "svgsExported": "{count} SVGs exported as ZIP.",
+    "pdfExported": "PDF exported ({count} pictograms, {pages} pages).",
+    "pdfExportCancelled": "PDF export cancelled.",
+    "pdfExportFailed": "PDF export failed: {error}",
     "promptRegenerationStopped": "Prompt regeneration stopped by user",
     "rowNotFound": "Row not found",
     "cascadeStep": "[CASCADE] Step {current}/{total}: {step}",
@@ -538,6 +542,13 @@
     "success": "✓ Pictogram \"{utterance}\" successfully shared with PICTOS",
     "exception": "Error sharing pictogram: {error}",
     "thanksMessage": "Thank you for sharing your pictogram with PICTOS. This pictogram will be visible to the entire community."
+  },
+  "pdfExport": {
+    "title": "Generating PDF…",
+    "progress": "Page {page} of {total}",
+    "currentItem": "Pictogram {n} of {total}: {utterance}",
+    "preparing": "Preparing pictograms…",
+    "cancel": "Cancel"
   },
   "footer": {
     "research": "Research",

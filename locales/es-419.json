@@ -266,6 +266,7 @@
     "exportLibrary": "Exportar librería (.json)",
     "downloadPngs": "Descargar PNGs ({count})",
     "exportSvgs": "Exportar SVGs ({count})",
+    "exportPdf": "Exportar PDF ({count})",
     "close": "Cerrar",
     "addChild": "Agregar hijo",
     "element": "elemento",
@@ -320,6 +321,9 @@
     "stopRequested": "Solicitud de detención para: \"{utterance}\"",
     "pngsExported": "{count} PNGs exportados como ZIP.",
     "svgsExported": "{count} SVGs exportados como ZIP.",
+    "pdfExported": "PDF exportado ({count} pictogramas, {pages} páginas).",
+    "pdfExportCancelled": "Exportación de PDF cancelada.",
+    "pdfExportFailed": "Falló la exportación de PDF: {error}",
     "promptRegenerationStopped": "Regeneración de prompt detenida por usuario",
     "rowNotFound": "No se encontró la fila",
     "cascadeStep": "[CASCADA] Paso {current}/{total}: {step}",
@@ -538,6 +542,13 @@
     "success": "✓ Pictograma \"{utterance}\" compartido exitosamente con PICTOS",
     "exception": "Error al compartir pictograma: {error}",
     "thanksMessage": "Gracias por compartir tu pictograma con PICTOS. Este pictograma será visible por toda la comunidad."
+  },
+  "pdfExport": {
+    "title": "Generando PDF…",
+    "progress": "Página {page} de {total}",
+    "currentItem": "Pictograma {n} de {total}: {utterance}",
+    "preparing": "Preparando pictogramas…",
+    "cancel": "Cancelar"
   },
   "footer": {
     "research": "Investigación",

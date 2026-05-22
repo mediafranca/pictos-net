@@ -1,7 +1,7 @@
 {
   "name": "pictos.net",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "module",
   "scripts": {
     "dev": "npm run copy-schemas && npm run optimize-thumbs && vite",
@@ -23,6 +23,7 @@
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "framer-motion": "^12.34.1",
+    "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "martinez-polygon-clipping": "^0.8.1",

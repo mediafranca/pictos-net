@@ -144,6 +144,15 @@ export interface RowData {
   rawSvg?: string; // Vectorized SVG from vtracer (raw)
   structuredSvg?: string; // mf-svg-schema compliant SVG (Gemini-processed)
 
+  // Discard flags. When true, the artifact is preserved on disk and in
+  // memory (for telemetry / research / regeneration) but is NOT
+  // considered valid by downstream consumers — notably the PDF picker,
+  // which falls through to the next downstream artifact. Cleared
+  // automatically whenever the matching artifact is (re)generated.
+  bitmapDiscarded?: boolean;
+  rawSvgDiscarded?: boolean;
+  structuredSvgDiscarded?: boolean;
+
   // Global Pipeline Status
   status: 'idle' | 'processing' | 'completed' | 'error';
 

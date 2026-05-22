@@ -6,10 +6,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/svg+xml" href="/pictos-iso.svg">
   <title>PICTOS · generative pictograms for AAC</title>
+  <link rel="preload" as="font" type="font/ttf" href="/fonts/Lexend.ttf" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@100;300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    /* Self-hosted Lexend (variable font). Same TTF is reused by the PDF
+       export service (see services/pdfExportService.ts), so a single file
+       on disk serves both the UI and printable output. */
+    @font-face {
+      font-family: 'Lexend';
+      src: url('/fonts/Lexend.ttf') format('truetype-variations'),
+           url('/fonts/Lexend.ttf') format('truetype');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+
     :root {
       --primary-dark: #1e1b4b;
       --furious-orange: #f97316; 
