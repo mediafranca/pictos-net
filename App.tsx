@@ -218,6 +218,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     annotatedContext: '',
     svgStyleDefs: INITIAL_STYLES,
     svgKeyframes: INITIAL_KEYFRAMES,
+    recording: { enabled: false },
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
@@ -1776,12 +1777,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 <label className="flex items-center gap-3 cursor-pointer p-2.5 border bg-slate-50 hover:bg-white transition-colors">
                   <input
                     type="checkbox"
-                    checked={config.recording?.enabled !== false}
+                    checked={config.recording?.enabled === true}
                     onChange={e => setConfig(prev => ({ ...prev, recording: { enabled: e.target.checked } }))}
                     className="w-4 h-4 accent-violet-600"
                   />
                   <span className="text-xs font-medium text-slate-700">
-                    {(config.recording?.enabled !== false) ? t('config.recordingEnabled') : t('config.recordingDisabled')}
+                    {config.recording?.enabled === true ? t('config.recordingEnabled') : t('config.recordingDisabled')}
                   </span>
                 </label>
               </div>

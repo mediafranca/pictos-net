@@ -117,7 +117,7 @@ value SvgMetrics {
 
 entity RecordingSetting {
   -- Lives inside GlobalConfig and persists across sessions.
-  enabled: Boolean           -- default: true
+  enabled: Boolean           -- default: false
   -- The setting controls *writes*. Toggling does not erase prior logs.
 }
 
@@ -602,7 +602,7 @@ surface LibraryRecordingControl {
     -- i18n pipeline.
 
   @guidance "default state"
-    -- The setting is on by default for new installations. The state
+    -- The setting is off by default for new installations. The state
     -- persists across sessions in GlobalConfig.
 
   @guidance "help icon and tooltip"
