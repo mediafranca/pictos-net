@@ -21,6 +21,7 @@ import { Play, Square, FileDown, RefreshCw, Edit } from 'lucide-react';
 import type { RowData, StepStatus } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { injectSvgA11y } from '../utils/svgAccessibility';
+import { validBitmap, validRawSvg, validStructuredSvg } from '../utils/rowArtifacts';
 
 type FocusStep = 'nlu' | 'visual' | 'bitmap' | 'format';
 type DisplayStage = 'none' | 'bitmap' | 'trazado' | 'estructurado';
@@ -37,9 +38,9 @@ interface Props {
 }
 
 const stageOf = (row: RowData): DisplayStage => {
-  if (row.structuredSvg) return 'estructurado';
-  if (row.rawSvg) return 'trazado';
-  if (row.bitmap) return 'bitmap';
+  if (validStructuredSvg(row)) return 'estructurado';
+  if (validRawSvg(row)) return 'trazado';
+  if (validBitmap(row)) return 'bitmap';
   return 'none';
 };
 
@@ -82,45 +83,51 @@ export const PictogramGridCell: React.FC<Props> = ({
 
   const downloadCurrent = () => {
     const slug = row.UTTERANCE.replace(/\s+/g, '_').toLowerCase() || 'pictogram';
-    if (stage === 'estructurado' && row.structuredSvg) {
-      const blob = new Blob([row.structuredSvg], { type: 'image/svg+xml' });
+    const structured = validStructuredSvg(row);
+    const raw = validRawSvg(row);
+    const bitmap = validBitmap(row);
+    if (stage === 'estructurado' && structured) {
+      const blob = new Blob([structured], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `${slug}.svg`; a.click();
       URL.revokeObjectURL(url);
-    } else if (stage === 'trazado' && row.rawSvg) {
-      const blob = new Blob([row.rawSvg], { type: 'image/svg+xml' });
+    } else if (stage === 'trazado' && raw) {
+      const blob = new Blob([raw], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `${slug}.svg`; a.click();
       URL.revokeObjectURL(url);
-    } else if (stage === 'bitmap' && row.bitmap) {
+    } else if (stage === 'bitmap' && bitmap) {
       const a = document.createElement('a');
-      a.href = row.bitmap; a.download = `${slug}.png`; a.click();
+      a.href = bitmap; a.download = `${slug}.png`; a.click();
     }
   };
 
   const renderPictogram = () => {
-    if (stage === 'estructurado' && row.structuredSvg) {
+    const structured = validStructuredSvg(row);
+    const raw = validRawSvg(row);
+    const bitmap = validBitmap(row);
+    if (stage === 'estructurado' && structured) {
       return (
         <div
           className="w-full h-full flex items-center justify-center p-4"
-          dangerouslySetInnerHTML={{ __html: injectSvgA11y(row.structuredSvg, row.UTTERANCE, row.prompt) }}
+          dangerouslySetInnerHTML={{ __html: injectSvgA11y(structured, row.UTTERANCE, row.prompt) }}
         />
       );
     }
-    if (stage === 'trazado' && row.rawSvg) {
+    if (stage === 'trazado' && raw) {
       return (
         <div
           className="w-full h-full flex items-center justify-center p-4"
-          dangerouslySetInnerHTML={{ __html: injectSvgA11y(row.rawSvg, row.UTTERANCE, row.prompt) }}
+          dangerouslySetInnerHTML={{ __html: injectSvgA11y(raw, row.UTTERANCE, row.prompt) }}
         />
       );
     }
-    if (stage === 'bitmap' && row.bitmap) {
+    if (stage === 'bitmap' && bitmap) {
       return (
         <img
-          src={row.bitmap}
+          src={bitmap}
           alt={row.UTTERANCE}
           className="max-w-full max-h-full object-contain"
         />
@@ -182,7 +189,7 @@ export const PictogramGridCell: React.FC<Props> = ({
                   <Edit size={14} />
                 </button>
               )}
-              {row.bitmap && (
+              {validBitmap(row) && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onOpenVectorizer(); }}

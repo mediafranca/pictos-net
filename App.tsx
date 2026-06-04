@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
 import * as Gemini from './services/geminiService';
 import * as Recording from './services/interventionRecording';
+import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
 import { useTranslation } from './hooks/useTranslation';
 import { useDialogA11y } from './hooks/useDialogA11y';
 import type { Locale } from './locales';
@@ -30,6 +31,8 @@ import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
+import { PDFExportModal } from './components/PDFExportModal';
+import { exportLibraryToPdf, pdfExportFilename, downloadPdf, PdfExportCancelledError, type PdfProgress } from './services/pdfExportService';
 import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
 import type { VectorizerResult } from './services/vtracerService';
@@ -215,9 +218,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     annotatedContext: '',
     svgStyleDefs: INITIAL_STYLES,
     svgKeyframes: INITIAL_KEYFRAMES,
+    recording: { enabled: false },
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
+  const [pdfExportProgress, setPdfExportProgress] = useState<PdfProgress | null>(null);
+  const pdfExportAbortRef = useRef<AbortController | null>(null);
   const [reduceMotion, setReduceMotion] = useState(() => {
     const stored = localStorage.getItem('pictonet_reduce_motion');
     return stored === null ? true : stored === 'true';
@@ -256,6 +262,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     return !localStorage.getItem('pictonet_onboarding_done');
   });
   const [isInitialized, setIsInitialized] = useState(false);
+  // Tracks row IDs whose IndexedDB SVG entry currently exists. Seeded from
+  // loadData (which reads IDB) and maintained by the save effect so that
+  // when a row's rawSvg AND structuredSvg both go undefined we can issue
+  // an explicit deleteSvgs(id). Without this, the save effect would skip
+  // the row entirely and the old SVG would resurrect on next reload.
+  const svgRowIdsRef = useRef<Set<string>>(new Set());
   const [availableLibraries, setAvailableLibraries] = useState<LibraryMetadata[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -398,6 +410,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               structuredSvg: svgsMap.get(row.id)?.structuredSvg || row.structuredSvg,
             })));
           }
+          // Seed the tracking ref with rows that have a non-empty SVG entry
+          // in IDB. Empty entries (both fields undefined) are treated as absent.
+          const seeded = new Set<string>();
+          svgsMap.forEach((value, id) => {
+            if (value.rawSvg || value.structuredSvg) seeded.add(id);
+          });
+          svgRowIdsRef.current = seeded;
         } catch (err) {
           console.error('Failed to load binary data from IndexedDB:', err);
         }
@@ -437,15 +456,28 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         .catch(err => console.error('[save] IDB bitmap write failed:', err));
     }
 
-    // 3. SVGs → IDB (fire-and-forget, non-blocking)
-    rows
-      .filter((row: RowData) => row.rawSvg || row.structuredSvg)
-      .forEach((row: RowData) => {
+    // 3. SVGs → IDB (fire-and-forget, non-blocking).
+    // We track row IDs that currently have an SVG entry in IDB (seeded
+    // from loadData). On every save:
+    //   - rows that now have at least one SVG -> saveSvgs (overwrites)
+    //   - rows that lost both SVGs since last render -> deleteSvgs
+    // This avoids spamming IDB with deletes for rows that never had SVGs.
+    const currentSvgIds = new Set<string>();
+    rows.forEach((row: RowData) => {
+      if (row.rawSvg || row.structuredSvg) {
+        currentSvgIds.add(row.id);
         IndexedDBService.saveSvgs(row.id, {
           rawSvg: row.rawSvg,
           structuredSvg: row.structuredSvg,
         }).catch(err => console.error('[save] SVG write failed:', err));
-      });
+      }
+    });
+    svgRowIdsRef.current.forEach(id => {
+      if (!currentSvgIds.has(id)) {
+        IndexedDBService.deleteSvgs(id).catch(err => console.error('[save] SVG delete failed:', err));
+      }
+    });
+    svgRowIdsRef.current = currentSvgIds;
   }, [rows, isInitialized, config]);
 
   // Load available libraries from index.json
@@ -1107,7 +1139,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         [durationKey]: duration,
         ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated' } : {}),
         ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated' } : {}),
-        ...(step === 'bitmap' ? { bitmap: result, status: 'completed' } : {})
+        ...(step === 'bitmap' ? { bitmap: result, bitmapDiscarded: false, status: 'completed' } : {})
       });
       if (step === 'nlu') {
         recordPhaseRegen(rowId, 'nlu', beforeNLU, result);
@@ -1235,7 +1267,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     let count = 0;
     if (row.NLU && row.nluStatus === 'completed') count++;
     if (row.elements && row.prompt && row.visualStatus === 'completed') count++;
-    if (row.bitmap && row.bitmapStatus === 'completed') count++;
+    if (hasValidBitmap(row) && row.bitmapStatus === 'completed') count++;
     return count;
   };
 
@@ -1252,15 +1284,22 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     let svgToEdit: string | undefined;
     let source: 'raw' | 'structured';
 
-    if (preferSource === 'raw' && row.rawSvg) {
-      svgToEdit = row.rawSvg;
+    // Use valid (non-discarded) SVGs only. If the caller explicitly asks
+    // for a phase that is currently discarded, fall through to the
+    // downstream-priority pick — opening the editor on a discarded
+    // artifact would be confusing (the user can no longer see it in the
+    // grid / row view).
+    const validRaw = validRawSvg(row);
+    const validStructured = validStructuredSvg(row);
+    if (preferSource === 'raw' && validRaw) {
+      svgToEdit = validRaw;
       source = 'raw';
-    } else if (preferSource === 'structured' && row.structuredSvg) {
-      svgToEdit = row.structuredSvg;
+    } else if (preferSource === 'structured' && validStructured) {
+      svgToEdit = validStructured;
       source = 'structured';
     } else {
-      svgToEdit = row.structuredSvg || row.rawSvg;
-      source = row.structuredSvg ? 'structured' : 'raw';
+      svgToEdit = validStructured || validRaw;
+      source = validStructured ? 'structured' : 'raw';
     }
 
     if (!svgToEdit) {
@@ -1293,10 +1332,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (!svgEditorState.rowId) return;
     const source = svgEditorState.svgSource;
 
-    // Write only to the origin field — do not promote rawSvg to structuredSvg
+    // Write only to the origin field — do not promote rawSvg to structuredSvg.
+    // Editing in the SVG editor also re-validates the artifact (clears the
+    // discard flag for the matching phase).
     const update: Partial<RowData> = source === 'structured'
-      ? { structuredSvg: updatedSvg }
-      : { rawSvg: updatedSvg };
+      ? { structuredSvg: updatedSvg, structuredSvgDiscarded: false }
+      : { rawSvg: updatedSvg, rawSvgDiscarded: false };
 
     updateRowById(svgEditorState.rowId, update);
 
@@ -1359,7 +1400,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       }
     }
 
-    updateRowById(rowId, { rawSvg: result.svg });
+    // Vectorizer just produced a fresh trace — overwrite and re-validate.
+    updateRowById(rowId, { rawSvg: result.svg, rawSvgDiscarded: false });
     addLog('success', t('messages.vectorizationComplete', { traced: result.layersTraced, total: result.layersTotal, tier: result.tiersUsed }));
     if (result.warnings.length > 0) {
       result.warnings.forEach(w => addLog('info', w));
@@ -1394,7 +1436,49 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   }, [focusMode, rows]);
 
   const svgCount = svgs?.length ?? 0;
-  const pngCount = rows.filter(r => r.bitmap).length;
+  const pngCount = rows.filter(hasValidBitmap).length;
+  const pdfCount = rows.filter(hasAnyValidArtifact).length;
+  const pdfExportInFlight = pdfExportProgress !== null;
+
+  const handleExportPdf = useCallback(async () => {
+    if (pdfExportInFlight) return;
+    if (pdfCount === 0) return;
+    const controller = new AbortController();
+    pdfExportAbortRef.current = controller;
+    setPdfExportProgress({
+      phase: 'preparing',
+      totalCells: pdfCount,
+      renderedCells: 0,
+      totalPages: 0,
+      currentPage: 0,
+      currentUtterance: '',
+    });
+    try {
+      const result = await exportLibraryToPdf({
+        rows,
+        config,
+        t,
+        signal: controller.signal,
+        onProgress: setPdfExportProgress,
+      });
+      downloadPdf(result.blob, pdfExportFilename(config));
+      addLog('success', t('messages.pdfExported', { count: result.totalCells, pages: result.totalPages }));
+    } catch (e) {
+      if (e instanceof PdfExportCancelledError) {
+        addLog('info', t('messages.pdfExportCancelled'));
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        addLog('error', t('messages.pdfExportFailed', { error: msg }));
+      }
+    } finally {
+      pdfExportAbortRef.current = null;
+      setPdfExportProgress(null);
+    }
+  }, [rows, config, t, pdfCount, pdfExportInFlight, addLog]);
+
+  const handleCancelPdfExport = useCallback(() => {
+    pdfExportAbortRef.current?.abort();
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -1693,12 +1777,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 <label className="flex items-center gap-3 cursor-pointer p-2.5 border bg-slate-50 hover:bg-white transition-colors">
                   <input
                     type="checkbox"
-                    checked={config.recording?.enabled !== false}
+                    checked={config.recording?.enabled === true}
                     onChange={e => setConfig(prev => ({ ...prev, recording: { enabled: e.target.checked } }))}
                     className="w-4 h-4 accent-violet-600"
                   />
                   <span className="text-xs font-medium text-slate-700">
-                    {(config.recording?.enabled !== false) ? t('config.recordingEnabled') : t('config.recordingDisabled')}
+                    {config.recording?.enabled === true ? t('config.recordingEnabled') : t('config.recordingDisabled')}
                   </span>
                 </label>
               </div>
@@ -1936,11 +2020,23 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
                   onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
                   onDiscardSvg={(phase, previousSvg) => {
+                    // Set the discard flag on the row so the artifact is no
+                    // longer considered valid (PDF picker etc.). The binary
+                    // data itself is preserved on the row — telemetry,
+                    // research analysis, and potential undo all depend on
+                    // it staying around. Regenerating the same phase
+                    // clears the flag (see the bitmap/raw/structured write
+                    // points below).
                     const metrics = Recording.computeSvgMetrics(previousSvg);
-                    if (!metrics) return;
-                    setRows(prev => prev.map(r => r.id === row.id
-                      ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
-                      : r));
+                    const flagKey: keyof RowData =
+                      phase === 'svg_raw' ? 'rawSvgDiscarded' : 'structuredSvgDiscarded';
+                    setRows(prev => prev.map(r => {
+                      if (r.id !== row.id) return r;
+                      const flagged = { ...r, [flagKey]: true } as RowData;
+                      return metrics
+                        ? Recording.recordSvgDiscard(flagged, config, { phase, before: metrics })
+                        : flagged;
+                    }));
                   }}
                   onBuildRowClipboard={buildRowClipboardJson}
                 />
@@ -2030,12 +2126,27 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
           }}
           onDiscardSvg={(phase, previousSvg) => {
+            // See the matching handler on RowComponent above for rationale.
             const metrics = Recording.computeSvgMetrics(previousSvg);
-            if (!metrics) return;
-            setRows(prev => prev.map(r => r.id === focusMode!.rowId
-              ? Recording.recordSvgDiscard(r, config, { phase, before: metrics })
-              : r));
+            const flagKey: keyof RowData =
+              phase === 'svg_raw' ? 'rawSvgDiscarded' : 'structuredSvgDiscarded';
+            setRows(prev => prev.map(r => {
+              if (r.id !== focusMode!.rowId) return r;
+              const flagged = { ...r, [flagKey]: true } as RowData;
+              return metrics
+                ? Recording.recordSvgDiscard(flagged, config, { phase, before: metrics })
+                : flagged;
+            }));
           }}
+        />
+      )}
+
+      {/* PDF export progress modal */}
+      {pdfExportInFlight && (
+        <PDFExportModal
+          progress={pdfExportProgress}
+          t={t}
+          onCancel={handleCancelPdfExport}
         />
       )}
 
@@ -2196,15 +2307,24 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             >
               <Download size={14} className="text-slate-500" /> {t('actions.exportLibrary')}
             </button>
+            <button
+              onClick={() => { handleExportPdf(); setShowLibraryMenu(false); }}
+              disabled={pdfCount === 0 || pdfExportInFlight}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <FileText size={14} className="text-violet-700" /> {t('actions.exportPdf', { count: pdfCount })}
+            </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
               onClick={async () => {
-                const rowsWithBitmaps = rows.filter(r => r.bitmap);
+                const rowsWithBitmaps = rows
+                  .map(r => ({ row: r, bitmap: validBitmap(r) }))
+                  .filter((x): x is { row: RowData; bitmap: string } => !!x.bitmap);
                 if (rowsWithBitmaps.length === 0) return;
                 const zip = new JSZip();
                 const folder = zip.folder('pictogramas');
-                rowsWithBitmaps.forEach(row => {
-                  const base64Data = row.bitmap!.split(',')[1];
+                rowsWithBitmaps.forEach(({ row, bitmap }) => {
+                  const base64Data = bitmap.split(',')[1];
                   const filename = sanitizeFilename(row.UTTERANCE) || row.id;
                   folder!.file(`${filename}.png`, base64Data, { base64: true });
                 });
@@ -2348,16 +2468,20 @@ const RowComponent: React.FC<{
           className="w-24 bg-slate-50 flex items-center justify-center group-hover:scale-110 group-hover:rounded group-hover:shadow-[0_2px_12px_rgba(0,0,0,0.1)] transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
-          {(row.structuredSvg || row.rawSvg) ? (
-            <div
-              dangerouslySetInnerHTML={{ __html: injectSvgA11y(row.structuredSvg || row.rawSvg!, row.UTTERANCE, row.prompt) }}
-              className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
-            />
-          ) : row.bitmap ? (
-            <img src={row.bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain" />
-          ) : (
-            <div className="text-slate-200"><ImageIcon size={20} /></div>
-          )}
+          {(() => {
+            const svg = validDownstreamSvg(row);
+            const bitmap = validBitmap(row);
+            return svg ? (
+              <div
+                dangerouslySetInnerHTML={{ __html: injectSvgA11y(svg, row.UTTERANCE, row.prompt) }}
+                className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+              />
+            ) : bitmap ? (
+              <img src={bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain" />
+            ) : (
+              <div className="text-slate-200"><ImageIcon size={20} /></div>
+            );
+          })()}
         </div>
         <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 transition-transform duration-500 cursor-pointer self-center mx-6" />
       </div>
@@ -2488,24 +2612,27 @@ const RowComponent: React.FC<{
                   id="bitmap-preview"
                   className="relative border border-slate-200 flex items-start justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px]"
                 >
-                  {row.bitmap ? (
-                    <>
-                      <img src={row.bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
-                      <button
-                        onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
-                        className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                        title={t('actions.downloadPng')}
-                      >
-                        <FileDown size={14} />
-                      </button>
-                    </>
-                  ) : (
-                    <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
-                  )}
+                  {(() => {
+                    const bitmap = validBitmap(row);
+                    return bitmap ? (
+                      <>
+                        <img src={bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = bitmap; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
+                          className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                          title={t('actions.downloadPng')}
+                        >
+                          <FileDown size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
+                    );
+                  })()}
                 </div>
 
                 {/* SVG Generation - same height as bitmap */}
-                {row.bitmap && (
+                {hasValidBitmap(row) && (
                   <div className="border-t border-slate-200 min-h-[250px] flex flex-col">
                     <SVGGenerator
                       row={row}
@@ -3469,19 +3596,21 @@ const FocusViewModal: React.FC<{
           </div>
         </div>
       );
-      case 'bitmap':
+      case 'bitmap': {
+        const bitmap = validBitmap(row);
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
-            {row.bitmap ? (
-              <img src={row.bitmap} className="max-w-full max-h-full object-contain shadow-2xl bg-white" alt={row.UTTERANCE} />
+            {bitmap ? (
+              <img src={bitmap} className="max-w-full max-h-full object-contain shadow-2xl bg-white" alt={row.UTTERANCE} />
             ) : (
               <p className="text-slate-500 font-mono">No bitmap generated yet.</p>
             )}
           </div>
         );
+      }
       case 'format': {
-        const hasRaw = !!row.rawSvg;
-        const hasStructured = !!row.structuredSvg;
+        const hasRaw = !!validRawSvg(row);
+        const hasStructured = !!validStructuredSvg(row);
 
         // Nothing yet: two-column layout. Left = trace CTA, right = disabled
         // with a message pointing at the left. See specs/library-views.allium.
@@ -3577,24 +3706,33 @@ const FocusViewModal: React.FC<{
                 </button>
               );
             })()}
-            {(mode === 'bitmap' || mode === 'format') && row.bitmap && (
-              <button onClick={() => { const a = document.createElement('a'); a.href = row.bitmap!; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                <Download size={14} /> PNG
-              </button>
-            )}
+            {(() => {
+              const bitmap = validBitmap(row);
+              return (mode === 'bitmap' || mode === 'format') && bitmap && (
+                <button onClick={() => { const a = document.createElement('a'); a.href = bitmap; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                  <Download size={14} /> PNG
+                </button>
+              );
+            })()}
           </div>
           {/* Right actions */}
           <div className="flex gap-3">
-            {mode === 'format' && (row.structuredSvg || row.rawSvg) && onOpenEditor && (
-              <button onClick={onOpenEditor} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                <Edit size={14} /> Editar SVG
-              </button>
-            )}
-            {mode === 'format' && (row.structuredSvg || row.rawSvg) && (
-              <button onClick={() => { const svg = row.structuredSvg || row.rawSvg!; const blob = new Blob([svg], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                <Download size={14} /> SVG
-              </button>
-            )}
+            {(() => {
+              const svg = validDownstreamSvg(row);
+              return mode === 'format' && svg && onOpenEditor && (
+                <button onClick={onOpenEditor} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                  <Edit size={14} /> Editar SVG
+                </button>
+              );
+            })()}
+            {(() => {
+              const svg = validDownstreamSvg(row);
+              return mode === 'format' && svg && (
+                <button onClick={() => { const blob = new Blob([svg], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                  <Download size={14} /> SVG
+                </button>
+              );
+            })()}
             <button onClick={handleCopy} className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg">
               <Copy size={14} /> {copyStatus}
             </button>

@@ -15,7 +15,7 @@ import {
 } from '../types';
 
 const isRecordingEnabled = (config: GlobalConfig): boolean =>
-  config.recording?.enabled !== false;
+  config.recording?.enabled === true;
 
 const getLog = (row: RowData): RowInterventionLog =>
   row.interventionLog ?? { sessions: [] };
