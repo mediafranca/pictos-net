@@ -8,7 +8,7 @@ import {
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
   ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History,
-  List, LayoutGrid
+  List, LayoutGrid, Clock
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
 import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
+import { QuotaExceededError } from './services/aiClient';
 import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
@@ -300,6 +301,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     isOpen: boolean;
     rowId: string | null;
   }>({ isOpen: false, rowId: null });
+
+  const [quotaModal, setQuotaModal] = useState<{ units_used: number; limit: number } | null>(null);
 
   const closeConfirmDialog = useCallback(() => setConfirmDialog(prev => ({ ...prev, isOpen: false })), []);
   const { dialogProps: confirmDialogProps } = useDialogA11y({ isOpen: confirmDialog.isOpen, onClose: closeConfirmDialog, label: confirmDialog.title || 'Confirm' });
@@ -1178,6 +1181,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       }
       return true;
     } catch (err: any) {
+      if (err instanceof QuotaExceededError) {
+        setQuotaModal({ units_used: err.units_used, limit: err.limit });
+        updateRowById(rowId, { [statusKey]: 'idle' });
+        return false;
+      }
       updateRowById(rowId, { [statusKey]: 'error' });
       addLog('error', `${step.toUpperCase()} Error para "${row.UTTERANCE}": ${err.message}`);
       return false;
@@ -1274,6 +1282,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       });
 
     } catch (err: any) {
+      if (err instanceof QuotaExceededError) {
+        setQuotaModal({ units_used: err.units_used, limit: err.limit });
+        updateRowById(rowId, { status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle' });
+        return;
+      }
       let stepFailed: 'nlu' | 'visual' | 'bitmap' = 'nlu';
       if (finalUpdates.nluStatus === 'completed' && finalUpdates.visualStatus !== 'completed') stepFailed = 'visual';
       else if (finalUpdates.visualStatus === 'completed') stepFailed = 'bitmap';
@@ -2214,6 +2227,53 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           />
         ) : null;
       })()}
+
+      {/* Quota Exceeded Modal */}
+      {quotaModal && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] animate-in fade-in duration-200"
+          onClick={() => setQuotaModal(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 animate-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="quota-modal-title"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                <Clock size={20} className="text-orange-500" />
+              </div>
+              <h3 id="quota-modal-title" className="text-base font-semibold text-slate-900">
+                {t('quota.title')}
+              </h3>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-slate-700 text-sm leading-relaxed">
+                {t('quota.message', { count: quotaModal.units_used })}
+              </p>
+              <p className="text-slate-500 text-sm leading-relaxed">
+                {t('quota.contact')}{' '}
+                <a
+                  href={`mailto:${t('quota.contactLink')}`}
+                  className="text-violet-600 hover:underline font-medium"
+                >
+                  {t('quota.contactLink')}
+                </a>
+              </p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end">
+              <button
+                onClick={() => setQuotaModal(null)}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-violet-950 hover:bg-black transition-all rounded-md"
+              >
+                {t('quota.close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Dialog Modal */}
       {confirmDialog.isOpen && (

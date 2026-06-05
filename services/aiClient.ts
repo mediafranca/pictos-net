@@ -11,6 +11,17 @@
 
 import { getCurrentUser, requestLogin } from "../components/AuthGate";
 
+/**
+ * Thrown by callProxy when the server returns HTTP 429 (quota exhausted).
+ * Carries the user's current daily usage so the UI can display it.
+ */
+export class QuotaExceededError extends Error {
+  constructor(public readonly units_used: number, public readonly limit: number) {
+    super('Daily quota exceeded');
+    this.name = 'QuotaExceededError';
+  }
+}
+
 async function getAuthToken(): Promise<string> {
     let user = getCurrentUser();
     if (!user) {
@@ -38,6 +49,11 @@ async function callProxy(endpoint: string, params: object): Promise<any> {
         });
 
         if (res.ok) return res.json();
+
+        if (res.status === 429) {
+            const body = await res.json().catch(() => ({}));
+            throw new QuotaExceededError(body.units_used ?? 0, body.limit ?? 100);
+        }
 
         if ([502, 503, 504].includes(res.status) && attempt < MAX_RETRIES) {
             const delay = (attempt + 1) * 3000;

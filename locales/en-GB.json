@@ -550,6 +550,13 @@
     "preparing": "Preparing pictograms…",
     "cancel": "Cancel"
   },
+  "quota": {
+    "title": "Daily limit reached",
+    "message": "You have generated {count} pictograms today, which is the maximum allowed for project participants. The limit resets at midnight UTC.",
+    "contact": "If you need additional access, please contact the researcher:",
+    "contactLink": "herbert.spencer@gmail.com",
+    "close": "Got it"
+  },
   "footer": {
     "research": "Research",
     "researchDesc": "PICTOS.net is a design research project on generative pictograms for augmentative and alternative communication (AAC). Developed as part of doctoral research on cognitive accessibility.",

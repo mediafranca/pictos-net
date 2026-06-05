@@ -550,6 +550,13 @@
     "preparing": "Preparando pictogramas…",
     "cancel": "Cancelar"
   },
+  "quota": {
+    "title": "Límite diario alcanzado",
+    "message": "Has generado {count} pictogramas hoy, el máximo permitido para participantes del proyecto. El límite se restablece a medianoche (UTC).",
+    "contact": "Si necesitas más acceso, escríbele al investigador:",
+    "contactLink": "herbert.spencer@gmail.com",
+    "close": "Entendido"
+  },
   "footer": {
     "research": "Investigación",
     "researchDesc": "PICTOS.net es un proyecto de investigación en diseño generativo para la comunicación aumentativa y alternativa (CAA). Desarrollado como parte de una investigación doctoral en accesibilidad cognitiva.",
