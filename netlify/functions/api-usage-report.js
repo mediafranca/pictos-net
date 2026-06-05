@@ -41,14 +41,16 @@ export const handler = async (event, context) => {
 
   const { user } = context.clientContext || {};
   const isLocalDev = process.env.NETLIFY_DEV === 'true';
+  const authHeader = event.headers.authorization;
 
-  if (!isLocalDev && !user) {
-    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
+  // Permite acceso si envían una llave de API válida
+  const hasValidApiKey = authHeader && process.env.ADMIN_API_KEY && authHeader === `Bearer ${process.env.ADMIN_API_KEY}`;
+  
+  // Permite acceso si está autenticado como administrador vía Netlify Identity
+  const hasValidUser = user && user.email === ADMIN_EMAIL;
 
-  const email = user?.email ?? 'dev';
-  if (!isLocalDev && email !== ADMIN_EMAIL) {
-    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Forbidden' }) };
+  if (!isLocalDev && !hasValidApiKey && !hasValidUser) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized. Requires valid Netlify Identity token or Bearer ADMIN_API_KEY.' }) };
   }
 
   const date = event.queryStringParameters?.date || new Date().toISOString().slice(0, 10);
