@@ -67,6 +67,10 @@ export const handler = async (event, context) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing required field: prompt' }) };
   }
 
+  if (prompt.length > 2000) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Prompt too long (max 2000 characters)' }) };
+  }
+
   // Quota check — 1 unit per pictogram (Recraft call = the core generation unit)
   const quota = await checkAndCharge(email, 1);
   if (!quota.allowed) {

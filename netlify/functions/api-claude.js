@@ -110,7 +110,7 @@ export const handler = async (event, context) => {
 
     const params = {
       model,
-      max_tokens: max_tokens || 4096,
+      max_tokens: Math.min(max_tokens || 4096, 8192),
       messages,
     };
     if (system) params.system = system;
