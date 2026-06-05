@@ -1698,9 +1698,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   label={t('config.paletteColors')}
                   tooltip={t('config.paletteColorsTooltip')}
                 />
-                <div className="flex flex-col gap-1">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                   {(config.paletteColors ?? DEFAULT_PALETTE).map((color, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className="flex items-center gap-1">
                       <input
                         type="color"
                         value={color}
@@ -1711,7 +1711,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                         }}
                         className="w-7 h-7 rounded border border-slate-200 cursor-pointer p-0.5 bg-white shrink-0"
                       />
-                      <span className="text-xs font-mono text-slate-400 flex-1 select-all">{color}</span>
+                      <span className="text-[10px] font-mono text-slate-400 flex-1 select-all truncate">{color}</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -1732,7 +1732,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                         const next = [...(config.paletteColors ?? DEFAULT_PALETTE), '#888888'];
                         setConfig(prev => ({ ...prev, paletteColors: next }));
                       }}
-                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-violet-600 py-1 px-1 border border-dashed border-slate-200 hover:border-violet-300 rounded transition-colors mt-0.5"
+                      className="col-span-2 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-violet-600 py-1.5 px-1 border border-dashed border-slate-200 hover:border-violet-300 rounded transition-colors mt-0.5"
                     >
                       <Plus size={11} aria-hidden="true" /> {t('config.addColor')}
                     </button>
