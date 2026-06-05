@@ -1081,7 +1081,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
       addLog('error', `Error al regenerar prompt: ${msg}`);
-      updateRowById(rowId, { visualStatus: 'completed' });
+      updateRowById(rowId, { visualStatus: 'error' });
       return false;
     }
   };
@@ -1098,8 +1098,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (!row) return false;
 
     stopFlags.current[rowId] = false;
-    const statusKey = (step === 'structure' ? 'structuredSvgStatus' : `${step}Status`) as keyof RowData;
-    const durationKey = `${step}Duration` as keyof RowData;
+    const statusKey = (step === 'structure' ? 'structuredSvgStatus' : step === 'produce' ? 'bitmapStatus' : `${step}Status`) as keyof RowData;
+    const durationKey = (step === 'produce' ? 'bitmapDuration' : `${step}Duration`) as keyof RowData;
 
     // Settle pending manual edits as edit events before recording any discards.
     if (step !== 'produce') settleRowEdits(rowId);
@@ -1234,7 +1234,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       const visualResult = await Claude.generateVisualBlueprint(nluResult, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.visual }));
-        updateRowById(rowId, { visualStatus: 'idle' });
+        updateRowById(rowId, { visualStatus: 'idle', status: 'idle' });
         return;
       }
       finalUpdates.elements = visualResult.elements;
@@ -1250,7 +1250,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       const rawSvgResult = await Recraft.generateSVG(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.produce }));
-        updateRowById(rowId, { bitmapStatus: 'idle' });
+        updateRowById(rowId, { bitmapStatus: 'idle', status: 'idle' });
         return;
       }
       finalUpdates.rawSvg = rawSvgResult;
@@ -1286,7 +1286,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (finalUpdates.nluStatus === 'completed' && finalUpdates.visualStatus !== 'completed') stepFailed = 'visual';
       else if (finalUpdates.visualStatus === 'completed') stepFailed = 'produce';
 
-      updateRowById(rowId, { [`${stepFailed}Status`]: 'error', status: 'error' });
+      const failedStatusKey = stepFailed === 'produce' ? 'bitmapStatus' : `${stepFailed}Status`;
+      updateRowById(rowId, { [failedStatusKey]: 'error', status: 'error' });
       addLog('error', t('messages.cascadeFailed', { step: stepNames[stepFailed], error: err.message }));
     }
   };
