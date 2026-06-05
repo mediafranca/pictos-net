@@ -5,7 +5,7 @@
  *
  * Quota:
  *   claude-haiku   (phases 1+2): 0 units  — cheap, not counted
- *   claude-sonnet  (phase 5)   : 1 unit   — expensive vision call
+ *   claude-sonnet  (phase 5)   : 0 units  — structuring step, not counted
  *
  * Phases: 1 (COMPRENDER), 2 (COMPONER), 5 (ESTRUCTURAR / vision)
  */
@@ -24,10 +24,10 @@ const ALLOWED_MODELS = [
   'claude-sonnet-4-6',
 ];
 
-// Only Sonnet (phase 5) is expensive enough to count toward the daily quota.
+// All Claude calls are free-tier in the quota — only Recraft (phase 3) counts.
 const UNITS_BY_MODEL = {
   'claude-haiku-4-5-20251001': 0,
-  'claude-sonnet-4-6': 1,
+  'claude-sonnet-4-6': 0,
 };
 
 function corsHeaders(origin) {

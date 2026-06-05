@@ -47,7 +47,7 @@ value QuotaCheckResult {
 ------------------------------------------------------------
 
 config {
-  daily_limit: Number = 100         -- overridable via DAILY_LIMIT_PER_USER env var
+  daily_limit: Number = 50          -- overridable via DAILY_LIMIT_PER_USER env var
   blob_store: String = "pictonet-usage"
   admin_email: String = "herbert.spencer@gmail.com"
 }
@@ -57,9 +57,9 @@ config {
 ------------------------------------------------------------
 
 -- The "unit" is the pictogram-level cost atom.
--- One api-recraft call = one completed pictogram = 1 unit.
--- One claude-sonnet call = one ESTRUCTURAR pass = 1 unit (expensive vision).
--- Claude Haiku calls (phases 1+2) = 0 units (cheap; not the bottleneck).
+-- One api-recraft call = one completed pictogram attempt = 1 unit.
+-- All api-claude calls = 0 units (phases 1, 2, and 5 are not counted).
+-- Quota tracks pictogram generation attempts, not AI token consumption.
 
 rule QuotaUnitsPerCall {
   for each incoming request to a proxied function:
@@ -67,18 +67,19 @@ rule QuotaUnitsPerCall {
   if function = api-recraft:
     units_to_charge = 1
 
-  if function = api-claude AND model = "claude-sonnet-4-6":
-    units_to_charge = 1
-
-  if function = api-claude AND model = "claude-haiku-4-5-20251001":
-    units_to_charge = 0
+  if function = api-claude:
+    units_to_charge = 0      -- haiku (phases 1+2) and sonnet (phase 5) both free
 
   if email = "dev" (local dev bypass) OR units_to_charge = 0:
     quota check skipped entirely — request always allowed
 
-  @invariant "haiku never blocked by quota"
-    -- Claude Haiku calls (phases 1+2) must never be blocked by quota exhaustion.
-    -- Only Recraft and Sonnet calls consume quota units.
+  @invariant "claude never blocked by quota"
+    -- No api-claude call (any model, any phase) is ever blocked by quota.
+    -- Only Recraft calls consume quota units.
+
+  @invariant "dev bypass applies to local only"
+    -- NETLIFY_DEV is not set in deployed Netlify environments.
+    -- The 'dev' email path is unreachable in production or preview deployments.
 }
 
 ------------------------------------------------------------

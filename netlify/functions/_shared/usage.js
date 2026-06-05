@@ -5,9 +5,8 @@
  *
  * Quota model:
  *   - Each api-recraft call          = 1 unit  (one generated pictogram)
- *   - Each api-claude Sonnet call    = 1 unit  (phase 5, expensive vision)
- *   - Each api-claude Haiku call     = 0 units (phases 1+2, cheap)
- *   - Default daily limit: DAILY_LIMIT_PER_USER env var (default: 100)
+ *   - All api-claude calls           = 0 units (phases 1+2+5, not counted)
+ *   - Default daily limit: DAILY_LIMIT_PER_USER env var (default: 50)
  *
  * Blob schema:
  *   Store: "pictonet-usage"
@@ -18,7 +17,7 @@
 
 import { getStore } from '@netlify/blobs';
 
-const DAILY_LIMIT = parseInt(process.env.DAILY_LIMIT_PER_USER ?? '100', 10);
+const DAILY_LIMIT = parseInt(process.env.DAILY_LIMIT_PER_USER ?? '50', 10);
 const STORE_NAME = 'pictonet-usage';
 
 function today() {
