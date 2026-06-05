@@ -1433,8 +1433,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     return rows.find(r => r.id === focusMode.rowId);
   }, [focusMode, rows]);
 
-  const svgCount = svgs?.length ?? 0;
-  const pngCount = rows.filter(hasValidBitmap).length;
   const pdfCount = rows.filter(hasAnyValidArtifact).length;
   const pdfExportInFlight = pdfExportProgress !== null;
 
@@ -2319,62 +2317,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               disabled={pdfCount === 0 || pdfExportInFlight}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <FileText size={14} className="text-violet-700" /> {t('actions.exportPdf', { count: pdfCount })}
-            </button>
-            <div className="border-t border-slate-100 my-1"></div>
-            <button
-              onClick={async () => {
-                const rowsWithBitmaps = rows
-                  .map(r => ({ row: r, bitmap: validBitmap(r) }))
-                  .filter((x): x is { row: RowData; bitmap: string } => !!x.bitmap);
-                if (rowsWithBitmaps.length === 0) return;
-                const zip = new JSZip();
-                const folder = zip.folder('pictogramas');
-                rowsWithBitmaps.forEach(({ row, bitmap }) => {
-                  const base64Data = bitmap.split(',')[1];
-                  const filename = sanitizeFilename(row.UTTERANCE) || row.id;
-                  folder!.file(`${filename}.png`, base64Data, { base64: true });
-                });
-                const blob = await zip.generateAsync({ type: 'blob' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const safeName = sanitizeFilename(config.name) || 'pictonet';
-                a.download = `${safeName}_pngs_${new Date().toISOString().split('T')[0]}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
-                setShowLibraryMenu(false);
-                addLog('success', t('messages.pngsExported', { count: rowsWithBitmaps.length }));
-              }}
-              disabled={pngCount === 0}
-              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <ImageIcon size={14} className="text-orange-500" /> {t('actions.downloadPngs', { count: pngCount })}
-            </button>
-            <button
-              onClick={async () => {
-                if (svgs.length === 0) return;
-                const zip = new JSZip();
-                const folder = zip.folder('svgs');
-                svgs.forEach(picto => {
-                  const filename = sanitizeFilename(picto.utterance) || picto.id;
-                  folder!.file(`${filename}.svg`, picto.svg);
-                });
-                const blob = await zip.generateAsync({ type: 'blob' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const safeName = sanitizeFilename(config.name) || 'pictonet';
-                a.download = `${safeName}_svgs_${new Date().toISOString().split('T')[0]}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
-                setShowLibraryMenu(false);
-                addLog('success', t('messages.svgsExported', { count: svgs.length }));
-              }}
-              disabled={svgCount === 0}
-              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <FileDown size={14} className="text-blue-600" /> {t('actions.exportSvgs', { count: svgCount })}
+              <FileText size={14} className="text-violet-700" /> {t('actions.exportPictograms', { count: pdfCount })}
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
