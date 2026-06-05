@@ -1,7 +1,7 @@
 {
   "name": "pictos.net",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.9.9",
   "type": "module",
   "scripts": {
     "dev": "npm run copy-schemas && npm run optimize-thumbs && vite",
