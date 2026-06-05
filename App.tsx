@@ -34,6 +34,7 @@ import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
 import OnboardingModal from './components/OnboardingModal';
 import { PDFExportModal } from './components/PDFExportModal';
+import ParticipateModal from './components/ParticipateModal';
 import { exportLibraryToPdf, pdfExportFilename, downloadPdf, PdfExportCancelledError, type PdfProgress } from './services/pdfExportService';
 import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
@@ -198,6 +199,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [showConsole, setShowConsole] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showLibraryMenu, setShowLibraryMenu] = useState(false);
+  const [showParticipateModal, setShowParticipateModal] = useState(false);
   const [libraryMenuPos, setLibraryMenuPos] = useState({ top: 0, left: 0 });
   const libraryBtnRef = useRef<HTMLDivElement>(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -2078,14 +2080,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           <div>
             <h4 className="text-slate-900 font-semibold text-sm mb-2">{t('footer.collaborate')}</h4>
             <p className="leading-relaxed mb-3">{t('footer.collaborateDesc')}</p>
-            <a
-              href={lang === 'es-419' ? 'https://forms.gle/DaFLWAjfj7sGCD3s7' : 'https://forms.gle/CCZHejJ71F3REE2P6'}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => setShowParticipateModal(true)}
               className="inline-flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-medium transition-colors"
             >
               <ExternalLink size={12} /> {t('footer.collaborate')}
-            </a>
+            </button>
           </div>
           <div>
             <h4 className="text-slate-900 font-semibold text-sm mb-2">
@@ -2109,6 +2109,10 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           </div>
         </div>
       </footer>
+
+      {showParticipateModal && (
+        <ParticipateModal t={t} onClose={() => setShowParticipateModal(false)} />
+      )}
 
       {showConsole && (
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-500 mono text-xs p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">

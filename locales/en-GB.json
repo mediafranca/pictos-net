@@ -555,5 +555,12 @@
     "affiliation1": "Doctoral Researcher, Auckland University of Technology",
     "affiliation2": "e[ad] School of Architecture and Design, PUCV",
     "license": "MIT License"
+  },
+  "participate": {
+    "title": "Participate in the Research",
+    "intro": "Thank you very much for your interest in PICTOS.net! This is a research project focused on improving cognitive accessibility and exploring new ways to create generative tools for AAC.",
+    "shareLibrary": "Share your library",
+    "shareInstructions": "If you have created a pictogram library and want to share it as an example of how the tool can be used, export the .json file and send it by email.",
+    "research": "You can also write to me at the same address if you are interested in participating in the study, giving feedback, or if you have ideas on how to improve these technologies."
   }
 }
