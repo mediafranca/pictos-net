@@ -9,6 +9,28 @@
 import { GlobalConfig, VisualElement } from "../types";
 import { callRecraft } from "./aiClient";
 
+/**
+ * Normalize SVG dimensions so it scales to its container.
+ * Recraft returns SVGs with explicit pixel width/height; we strip those
+ * and ensure a viewBox is present so the SVG is resolution-independent.
+ */
+function normalizeSvgDimensions(svg: string): string {
+    return svg.replace(/(<svg\b)([\s\S]*?)>/, (_match, tagStart, attrs) => {
+        const hasViewBox = /viewBox\s*=/.test(attrs);
+        const wm = attrs.match(/\bwidth\s*=\s*["']([0-9.]+)/);
+        const hm = attrs.match(/\bheight\s*=\s*["']([0-9.]+)/);
+        let out = attrs;
+        // Construct viewBox from width/height if absent
+        if (!hasViewBox && wm && hm) {
+            out = ` viewBox="0 0 ${wm[1]} ${hm[1]}"` + out;
+        }
+        // Remove explicit width and height so SVG scales to its container
+        out = out.replace(/\s+width\s*=\s*["'][^"']*["']/g, '');
+        out = out.replace(/\s+height\s*=\s*["'][^"']*["']/g, '');
+        return `${tagStart}${out}>`;
+    });
+}
+
 type LogFn = (type: 'info' | 'error' | 'success', msg: string) => void;
 
 const formatElements = (els: VisualElement[], depth = 0): string => {
@@ -60,12 +82,14 @@ export const generateSVG = async (
     ].filter(s => s !== undefined).join('\n');
 
     onLog?.('info', '[PRODUCIR] Enviando prompt a Recraft…');
-    const response = await callRecraft({ prompt: fullPrompt });
+    const colors = config.paletteColors?.filter(c => /^#[0-9a-fA-F]{6}$/.test(c));
+    const response = await callRecraft({ prompt: fullPrompt, ...(colors?.length ? { colors } : {}) });
 
     if (!response.svg || !response.svg.includes('<svg')) {
         throw new Error('Recraft no devolvió un SVG válido');
     }
 
-    onLog?.('success', `[PRODUCIR] SVG recibido (${(response.svg.length / 1024).toFixed(1)} KB)`);
-    return response.svg;
+    const normalized = normalizeSvgDimensions(response.svg);
+    onLog?.('success', `[PRODUCIR] SVG recibido (${(normalized.length / 1024).toFixed(1)} KB)`);
+    return normalized;
 };

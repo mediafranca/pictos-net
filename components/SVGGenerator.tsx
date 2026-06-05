@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, RefreshCw, AlertCircle, FileCode, Edit, Settings2, Layers, Eraser, Trash2 } from 'lucide-react';
+import { Download, AlertCircle, FileCode, Edit, Layers, Eraser, Trash2 } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
-import { structureSVG, canVectorize, canStructureSVG } from '../services/svgStructureService';
+import { structureSVG, canStructureSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
 
@@ -32,7 +32,6 @@ interface SVGGeneratorProps {
     onLog: (type: 'info' | 'error' | 'success', message: string) => void;
     onUpdate: (updates: Partial<RowData>) => void;
     onOpenEditor?: (source?: 'raw' | 'structured') => void;
-    onOpenVectorizer?: () => void;
     /**
      * Layout direction for the dual-preview "completed" state.
      *  'stacked' (default) — raw above structured, used inside narrow row columns.
@@ -50,10 +49,10 @@ interface SVGGeneratorProps {
     onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, onOpenVectorizer, layout = 'stacked', onDiscardSvg }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, layout = 'stacked', onDiscardSvg }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
-    const [status, setStatus] = useState<'idle' | 'vectorizing' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
+    const [status, setStatus] = useState<'idle' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
     const [error, setError] = useState<string | undefined>();
     const [progress, setProgress] = useState(0);
     const [processStartTime, setProcessStartTime] = useState<number | null>(null);
@@ -95,9 +94,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         return undefined;
     }, [row.id, row.structuredSvg, row.structuredSvgDiscarded, row.UTTERANCE, getSVGByRowId]);
 
-    // Vectorization only needs a bitmap (VTracer is independent of NLU/elements).
-    // A discarded bitmap is not eligible — the user opted out of it.
-    const vectorizeEligibility = canVectorize({ bitmap: row.bitmapDiscarded ? undefined : row.bitmap });
     // Structuring requires rawSvg + NLU + non-empty elements (no bitmap needed).
     // A discarded rawSvg is not eligible.
     const structureEligibility = canStructureSVG({
@@ -202,7 +198,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     // Timer Effect
     useEffect(() => {
         let interval: NodeJS.Timeout;
-        if ((status === 'vectorizing' || status === 'structuring') && processStartTime) {
+        if (status === 'structuring' && processStartTime) {
             interval = setInterval(() => {
                 setElapsedTime((Date.now() - processStartTime) / 1000);
             }, 100);
@@ -219,14 +215,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         };
     }, []);
 
-    // Debugging: Monitor row eligibility changes
-    useEffect(() => {
-        console.log('[SVGGenerator] Eligibility Updated:', {
-            id: row.id,
-            vectorize: vectorizeEligibility,
-            structure: structureEligibility,
-        });
-    }, [vectorizeEligibility, structureEligibility]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Determine status based on what SVG data is available for this row.
     // Priority: structuredSvg > active structuring > rawSvg > idle
@@ -410,13 +398,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                                 </button>
                             )}
                             <button
-                                onClick={() => onOpenVectorizer?.()}
-                                className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                                title={t('vectorizer.adjustTrace')}
-                            >
-                                <Settings2 size={12} />
-                            </button>
-                            <button
                                 onClick={downloadRawSvg}
                                 className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
                                 title="Download raw SVG"
@@ -553,26 +534,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         </button>
                     )}
 
-                    {/* Re-trace: clear structured SVG and open vectorizer for a fresh trace.
-                        The structured discard fires here (it won't be regenerated automatically).
-                        The raw discard fires later, when the vectorizer applies — by design,
-                        because cancelling the vectorizer should not lose the existing rawSvg. */}
-                    <button
-                        onClick={() => {
-                            // Re-trace: discard current structuredSvg
-                            // (telemetry + flag). The new vectorize will
-                            // overwrite rawSvg and clear its flag in App's
-                            // handleVectorizerApply.
-                            if (row.structuredSvg) onDiscardSvg?.('svg_structured', row.structuredSvg);
-                            removeSVGByRowId(row.id);
-                            setRawSvg(null);
-                            onOpenVectorizer?.();
-                        }}
-                        title={t('svg.retrace')}
-                        className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
-                    >
-                        <RefreshCw size={14} aria-hidden="true" /> {t('svg.retrace')}
-                    </button>
                 </div>
 
             </div>
@@ -659,13 +620,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <Eraser size={13} />
                     </button>
 
-                    <button
-                        onClick={() => onOpenVectorizer?.()}
-                        title={t('vectorizer.adjustTrace')}
-                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs"
-                    >
-                        <Settings2 size={13} />
-                    </button>
                 </div>
 
                 <div className="mt-1 text-center text-xs text-slate-500">
@@ -709,13 +663,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                                     <Edit size={12} />
                                 </button>
                             )}
-                            <button
-                                onClick={() => onOpenVectorizer?.()}
-                                className="p-1.5 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors"
-                                title={t('vectorizer.adjustTrace')}
-                            >
-                                <Settings2 size={12} />
-                            </button>
                             <span className="text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
                                 {elapsedTime.toFixed(1)}s
                             </span>
@@ -737,21 +684,21 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
     return (
         <div className="flex flex-col items-center justify-center h-full p-6 border border-dashed border-slate-300 rounded-lg bg-slate-50 hover:bg-white transition-colors group">
-            {(status === 'vectorizing' || status === 'structuring') ? (
+            {status === 'structuring' ? (
                 <div className="text-center w-full">
                     <div className="mb-3 mx-auto w-8 h-8 rounded-full border-2 border-slate-200 border-t-violet-600 animate-spin"></div>
                     <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-1">
-                        {status === 'vectorizing' ? t('svg.generating') : t('svg.structuring')}
+                        {t('svg.structuring')}
                     </p>
                     <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
                         <div
                             className="bg-violet-600 h-full transition-all duration-300 ease-out"
-                            style={{ width: status === 'vectorizing' ? `${progress}%` : `${structureProgress}%` }}
+                            style={{ width: `${structureProgress}%` }}
                         ></div>
                     </div>
                     <div className="flex justify-between items-center mt-2">
                         <p className="text-xs text-slate-500">
-                            {subStatus || (status === 'structuring' ? 'Applying semantic schema with Gemini...' : 'Tracing bitmap paths...')}
+                            {subStatus || t('svg.structuring')}
                         </p>
                         <span className="text-xs font-mono text-violet-600 font-bold bg-violet-50 px-1.5 py-0.5 rounded">
                             {elapsedTime.toFixed(1)}s
@@ -760,24 +707,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 </div>
             ) : (
                 <>
-                    <FileCode size={32} className="text-slate-500 group-hover:text-violet-500 mb-3 transition-colors" />
-                    <div className="flex flex-col gap-2 items-center">
-                        <button
-                            onClick={() => onOpenVectorizer?.()}
-                            className="bg-white border-2 border-violet-100 group-hover:border-violet-600 text-violet-900 group-hover:text-violet-700 px-6 py-2 font-bold uppercase text-xs tracking-widest transition-all shadow-sm group-hover:shadow-md rounded-full"
-                        >
-                            {t('svg.traceSvg')}
-                        </button>
-                        <button
-                            disabled
-                            className="bg-slate-100 border-2 border-slate-200 text-slate-400 px-6 py-2 font-bold uppercase text-xs tracking-widest rounded-full cursor-not-allowed"
-                            title={t('svg.structureTooltip')}
-                        >
-                            <Layers size={14} className="inline mr-1.5" aria-hidden="true" />{t('svg.formatGemini')}
-                        </button>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2 text-center max-w-[200px]">
-                        {t('svg.traceConverts')}
+                    <FileCode size={32} className="text-slate-400 mb-3" />
+                    <p className="text-xs text-slate-500 text-center max-w-[200px]">
+                        {t('editor.noSvgRender')}
                     </p>
                     {error && (
                         <div className="mt-3 text-xs text-red-500 flex items-center gap-1 bg-red-50 px-2 py-1 rounded">

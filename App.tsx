@@ -175,6 +175,8 @@ const FieldLabel: React.FC<{ label: string; tooltip: string }> = ({ label, toolt
   </label>
 );
 
+const DEFAULT_PALETTE = ['#ffffff', '#000000', '#cc2222', '#226622', '#2255cc', '#ddcc00'];
+
 const DEFAULT_STYLE_PROMPTS: Record<string, string> = {
   'es-419': 'Un pictograma universal y limpio de estilo vectorial, diseñado para una alta accesibilidad cognitiva, inspirado en la señalética AIGA/DOT pero con detalles contextuales concretos añadidos. Diseño gráfico plano 2D, icono minimalista. Siluetas negras sólidas y contornos gruesos y uniformes sobre un fondo blanco puro. Usar un único color de acento tenue (como un gris neutro o un azul suave) estrictamente para resaltar el objeto principal de interacción o el contexto específico. Las figuras humanas deben ser figuras simplificadas y robustas con extremidades y articulaciones claras, sin rasgos faciales. Es crucial incluir utilería ambiental básica y literal (por ejemplo, un mueble específico, una puerta, un objeto distintivo) para definir inequívocamente el escenario. Sin sombreado, sin degradados, sin efectos 3D, sin iluminación realista. Alto contraste, centrado enteramente en acciones literales y claras. Sin texto.',
   'en-GB': 'A clean, universal vector-style pictogram designed for high cognitive accessibility, inspired by AIGA/DOT symbol signs but with added concrete contextual details. Flat 2D graphic design, minimalist icon. Solid black silhouettes and thick, uniform outlines on a pure white background. Use a single muted accent colour (like a calm grey or soft blue) strictly to highlight the primary object of interaction or specific context. Human figures must be simplified, robust stick-figures with clear limbs and joints, lacking facial features. Crucially, include basic, literal environmental props (e.g., a specific piece of furniture, a door, a distinct object) to unambiguously define the scenario. No shading, no gradients, no 3D effects, no realistic lighting. High contrast, focusing entirely on literal, clear actions. No text.',
@@ -220,6 +222,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svgStyleDefs: INITIAL_STYLES,
     svgKeyframes: INITIAL_KEYFRAMES,
     recording: { enabled: false },
+    paletteColors: DEFAULT_PALETTE,
   });
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'produce' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
@@ -1688,17 +1691,61 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 />
               </div>
 
+              {/* field-palette */}
+              <div id="field-palette">
+                <FieldLabel
+                  label={t('config.paletteColors')}
+                  tooltip={t('config.paletteColorsTooltip')}
+                />
+                <div className="flex flex-col gap-1">
+                  {(config.paletteColors ?? DEFAULT_PALETTE).map((color, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={color}
+                        onChange={e => {
+                          const next = [...(config.paletteColors ?? DEFAULT_PALETTE)];
+                          next[i] = e.target.value;
+                          setConfig(prev => ({ ...prev, paletteColors: next }));
+                        }}
+                        className="w-7 h-7 rounded border border-slate-200 cursor-pointer p-0.5 bg-white shrink-0"
+                      />
+                      <span className="text-xs font-mono text-slate-400 flex-1 select-all">{color}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = (config.paletteColors ?? DEFAULT_PALETTE).filter((_, idx) => idx !== i);
+                          setConfig(prev => ({ ...prev, paletteColors: next }));
+                        }}
+                        className="p-1 text-slate-300 hover:text-rose-500 rounded transition-colors"
+                        aria-label="Eliminar color"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  {(config.paletteColors ?? DEFAULT_PALETTE).length < 10 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [...(config.paletteColors ?? DEFAULT_PALETTE), '#888888'];
+                        setConfig(prev => ({ ...prev, paletteColors: next }));
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-violet-600 py-1 px-1 border border-dashed border-slate-200 hover:border-violet-300 rounded transition-colors mt-0.5"
+                    >
+                      <Plus size={11} aria-hidden="true" /> {t('config.addColor')}
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* field-style-editor */}
               <div id="field-style-editor">
-                <FieldLabel
-                  label={t('config.styles')}
-                  tooltip={t('config.stylesTooltip')}
-                />
                 <button
                   onClick={() => setShowStyleEditor(true)}
-                  className="w-full text-sm font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-3.5 rounded transition-colors flex items-center justify-center gap-2"
+                  className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-2.5 rounded transition-colors flex items-center justify-center gap-2"
                 >
-                  <Palette size={16} aria-hidden="true" /> {t('config.openEditor')}
+                  <Palette size={14} aria-hidden="true" /> {t('config.openEditor')}
                 </button>
               </div>
             </div>

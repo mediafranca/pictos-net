@@ -219,6 +219,8 @@ export interface GlobalConfig {
   recording?: RecordingSetting;
   /** Library presentation mode (see specs/library-views.allium) */
   libraryViewMode?: 'list' | 'grid';
+  /** Preferred colors sent to Recraft as controls.colors (hex strings, max 10) */
+  paletteColors?: string[];
 }
 
 export type LibraryViewMode = 'list' | 'grid';

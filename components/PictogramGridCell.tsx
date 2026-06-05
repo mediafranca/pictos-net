@@ -17,14 +17,14 @@
  */
 
 import React, { useState } from 'react';
-import { Play, Square, FileDown, RefreshCw, Edit } from 'lucide-react';
+import { Play, Square, FileDown, Edit } from 'lucide-react';
 import type { RowData, StepStatus } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { injectSvgA11y } from '../utils/svgAccessibility';
-import { validBitmap, validRawSvg, validStructuredSvg } from '../utils/rowArtifacts';
+import { validRawSvg, validStructuredSvg } from '../utils/rowArtifacts';
 
-type FocusStep = 'nlu' | 'visual' | 'bitmap' | 'format';
-type DisplayStage = 'none' | 'bitmap' | 'trazado' | 'estructurado';
+type FocusStep = 'nlu' | 'visual' | 'produce' | 'format';
+type DisplayStage = 'none' | 'trazado' | 'estructurado';
 
 interface Props {
   row: RowData;
@@ -33,14 +33,12 @@ interface Props {
   onStop: () => void;
   onFocus: (step: FocusStep) => void;
   onOpenEditor: (source?: 'raw' | 'structured') => void;
-  onOpenVectorizer: () => void;
   onSettleField?: () => void;
 }
 
 const stageOf = (row: RowData): DisplayStage => {
   if (validStructuredSvg(row)) return 'estructurado';
   if (validRawSvg(row)) return 'trazado';
-  if (validBitmap(row)) return 'bitmap';
   return 'none';
 };
 
@@ -67,7 +65,7 @@ const StatusBadge: React.FC<{ step: number; status: StepStatus; label: string; o
 
 export const PictogramGridCell: React.FC<Props> = ({
   row, onUpdate, onCascade, onStop, onFocus,
-  onOpenEditor, onOpenVectorizer, onSettleField,
+  onOpenEditor, onSettleField,
 }) => {
   const { t } = useTranslation();
   const stage = stageOf(row);
@@ -76,7 +74,6 @@ export const PictogramGridCell: React.FC<Props> = ({
 
   const stageLabel: Record<DisplayStage, string> = {
     none: '',
-    bitmap: t('pipeline.produce'),
     trazado: t('library.stageRaw'),
     estructurado: t('library.stageStructured'),
   };
@@ -85,7 +82,6 @@ export const PictogramGridCell: React.FC<Props> = ({
     const slug = row.UTTERANCE.replace(/\s+/g, '_').toLowerCase() || 'pictogram';
     const structured = validStructuredSvg(row);
     const raw = validRawSvg(row);
-    const bitmap = validBitmap(row);
     if (stage === 'estructurado' && structured) {
       const blob = new Blob([structured], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
@@ -98,16 +94,12 @@ export const PictogramGridCell: React.FC<Props> = ({
       const a = document.createElement('a');
       a.href = url; a.download = `${slug}.svg`; a.click();
       URL.revokeObjectURL(url);
-    } else if (stage === 'bitmap' && bitmap) {
-      const a = document.createElement('a');
-      a.href = bitmap; a.download = `${slug}.png`; a.click();
     }
   };
 
   const renderPictogram = () => {
     const structured = validStructuredSvg(row);
     const raw = validRawSvg(row);
-    const bitmap = validBitmap(row);
     if (stage === 'estructurado' && structured) {
       return (
         <div
@@ -121,15 +113,6 @@ export const PictogramGridCell: React.FC<Props> = ({
         <div
           className="w-full h-full flex items-center justify-center p-4"
           dangerouslySetInnerHTML={{ __html: injectSvgA11y(raw, row.UTTERANCE, row.prompt) }}
-        />
-      );
-    }
-    if (stage === 'bitmap' && bitmap) {
-      return (
-        <img
-          src={bitmap}
-          alt={row.UTTERANCE}
-          className="max-w-full max-h-full object-contain"
         />
       );
     }
@@ -187,17 +170,6 @@ export const PictogramGridCell: React.FC<Props> = ({
                   aria-label={t('svgEditor.editor')}
                 >
                   <Edit size={14} />
-                </button>
-              )}
-              {validBitmap(row) && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onOpenVectorizer(); }}
-                  className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                  title={t('vectorizer.retrace')}
-                  aria-label={t('vectorizer.retrace')}
-                >
-                  <RefreshCw size={14} />
                 </button>
               )}
               <button

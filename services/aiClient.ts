@@ -106,6 +106,8 @@ export function extractToolUse(response: ClaudeResponse, toolName: string): any 
 
 export interface RecraftParams {
     prompt: string;
+    /** Preferred colors in hex format (max 10). Sent as controls.colors to Recraft. */
+    colors?: string[];
 }
 
 export interface RecraftResponse {

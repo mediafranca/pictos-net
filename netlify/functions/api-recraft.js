@@ -56,9 +56,9 @@ export const handler = async (event, context) => {
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
 
-  let prompt;
+  let prompt, colors;
   try {
-    ({ prompt } = JSON.parse(event.body));
+    ({ prompt, colors } = JSON.parse(event.body));
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
@@ -95,6 +95,18 @@ export const handler = async (event, context) => {
       model: 'recraftv4_1_vector',
       prompt,
       n: 1,
+      size: '1:1',
+      ...(Array.isArray(colors) && colors.length > 0 ? {
+        controls: {
+          colors: colors.slice(0, 10).map(hex => ({
+            rgb: [
+              parseInt(hex.slice(1, 3), 16),
+              parseInt(hex.slice(3, 5), 16),
+              parseInt(hex.slice(5, 7), 16),
+            ],
+          })),
+        },
+      } : {}),
     };
 
     const recraftRes = await fetch(RECRAFT_API_URL, {
