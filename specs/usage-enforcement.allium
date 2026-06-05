@@ -1,0 +1,243 @@
+-- allium: 3
+-- usage-enforcement.allium
+
+-- Scope: Per-user daily quota enforcement and audit logging for all AI API calls.
+-- Covers: quota model, Netlify Blobs schema, enforcement flow per function,
+--   admin report endpoint, dev bypass, 429 contract.
+-- Excludes:
+--   - Pipeline phase logic (see visual-reasoning.allium)
+--   - Netlify Identity JWT validation (enforced by each function independently)
+--   - UI feedback for quota exhaustion (separate spec)
+-- Dependencies: Netlify Identity (user.email), Netlify Blobs (pictonet-usage store)
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value QuotaRecord {
+  -- Stored in Blobs at quota/{email}/{date}.
+  units: Number           -- cumulative units charged today
+  first_call: Timestamp?
+  last_call: Timestamp
+}
+
+value AuditRecord {
+  -- One blob per call at audit/{date}/{timestamp-safeEmail}.
+  -- Keyed by timestamp to avoid write contention.
+  ts: Timestamp
+  email: String
+  phase: String           -- "claude" | "recraft"
+  model: String           -- e.g. "claude-haiku-4-5-20251001", "recraftv4_1_vector"
+  units_charged: Number   -- 0 or 1
+  ms: Number              -- wall-clock milliseconds for the upstream call
+  tokens_in: Number       -- 0 for Recraft (no token concept)
+  tokens_out: Number
+  ok: Boolean
+  error_msg: String?      -- present only when ok = false
+}
+
+value QuotaCheckResult {
+  allowed: Boolean
+  units_used: Number      -- updated total after charging (if allowed)
+  limit: Number
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+  daily_limit: Number = 100         -- overridable via DAILY_LIMIT_PER_USER env var
+  blob_store: String = "pictonet-usage"
+  admin_email: String = "herbert.spencer@gmail.com"
+}
+
+------------------------------------------------------------
+-- Quota Model
+------------------------------------------------------------
+
+-- The "unit" is the pictogram-level cost atom.
+-- One api-recraft call = one completed pictogram = 1 unit.
+-- One claude-sonnet call = one ESTRUCTURAR pass = 1 unit (expensive vision).
+-- Claude Haiku calls (phases 1+2) = 0 units (cheap; not the bottleneck).
+
+rule QuotaUnitsPerCall {
+  for each incoming request to a proxied function:
+
+  if function = api-recraft:
+    units_to_charge = 1
+
+  if function = api-claude AND model = "claude-sonnet-4-6":
+    units_to_charge = 1
+
+  if function = api-claude AND model = "claude-haiku-4-5-20251001":
+    units_to_charge = 0
+
+  if email = "dev" (local dev bypass) OR units_to_charge = 0:
+    quota check skipped entirely — request always allowed
+
+  @invariant "haiku never blocked by quota"
+    -- Claude Haiku calls (phases 1+2) must never be blocked by quota exhaustion.
+    -- Only Recraft and Sonnet calls consume quota units.
+}
+
+------------------------------------------------------------
+-- Blob Schema
+------------------------------------------------------------
+
+-- Store: "pictonet-usage"
+--
+-- quota/{email}/{YYYY-MM-DD}
+--   type: QuotaRecord (JSON)
+--   semantics: mutable; read-modify-write on each charged call
+--   race condition: possible under concurrent requests; acceptable at current scale
+--
+-- audit/{YYYY-MM-DD}/{HH-MM-SS-mmm}-{safeEmail}
+--   type: AuditRecord (JSON)
+--   semantics: write-once; timestamp key guarantees uniqueness per call
+--   race condition: none (unique key per invocation)
+
+rule BlobKeyFormat {
+  ensures: quota key = "quota/" + email + "/" + YYYY-MM-DD
+  ensures: audit key = "audit/" + YYYY-MM-DD + "/" + HH-MM-SS-mmm + "-" + safeEmail
+    where safeEmail = email with non-[a-zA-Z0-9@._-] replaced by "_", max 80 chars
+  ensures: audit blob written after every API call, regardless of outcome
+    -- ok=false entries are still written; they are the primary abuse signal
+}
+
+------------------------------------------------------------
+-- Enforcement Rules
+------------------------------------------------------------
+
+rule EnforceQuotaBefore {
+  when: an api-claude or api-recraft function receives a POST request
+
+  requires: user authenticated (Netlify Identity JWT valid OR isLocalDev = true)
+
+  ensures:
+    1. email extracted from context.clientContext.user?.email ?? "dev"
+    2. if units_to_charge > 0:
+         QuotaRecord read from Blobs (missing = { units: 0 })
+         if QuotaRecord.units >= config.daily_limit:
+           return HTTP 429 { error, units_used, limit }
+         else:
+           QuotaRecord.units incremented and written back
+    3. upstream API call proceeds only after quota check passes
+
+  @invariant "check before call"
+    -- The upstream API (Anthropic / Recraft) is never called if quota is exhausted.
+    -- HTTP 429 is returned before any external cost is incurred.
+}
+
+rule LogAfterCall {
+  when: the upstream API call completes (success or failure)
+
+  ensures: AuditRecord written to Blobs with ok=true or ok=false
+  ensures: AuditRecord write is non-blocking
+    -- a Blobs write failure must not cause the function to return an error
+    -- the failure is logged to console and silently discarded
+  ensures: AuditRecord written even if the upstream call errored
+
+  @invariant "audit never blocks response"
+    -- logCall() runs after the response body is prepared.
+    -- Its failure path does not alter the HTTP response code or body.
+}
+
+rule DevBypass {
+  when: process.env.NETLIFY_DEV = "true" AND no user in clientContext
+
+  ensures: JWT validation skipped
+  ensures: email = "dev"
+  ensures: quota check skipped (dev is always allowed)
+  ensures: audit logging skipped (dev calls produce no Blob entries)
+}
+
+------------------------------------------------------------
+-- Admin Report
+------------------------------------------------------------
+
+entity UsageReport {
+  -- Returned by api-usage-report on a successful GET.
+  date: String          -- YYYY-MM-DD
+  total_calls: Number   -- sum of all AuditRecord entries for the date
+  total_units: Number   -- sum of units_charged across all entries
+  users: Map<String, UserSummary>
+}
+
+value UserSummary {
+  calls: Number
+  units: Number
+  phases: Map<String, Number>   -- phase → call count
+  errors: Number                -- count of ok=false entries
+}
+
+rule AdminReportEndpoint {
+  -- GET /.netlify/functions/api-usage-report?date=YYYY-MM-DD
+
+  when: GET request received
+
+  requires: user authenticated
+  requires: user.email = config.admin_email
+    -- HTTP 403 returned for any other authenticated user
+
+  ensures: all audit/{date}/ blobs read and aggregated into UsageReport
+  ensures: HTTP 200 with UsageReport JSON body
+  ensures: date defaults to today if query param absent
+  ensures: HTTP 400 if date does not match /^\d{4}-\d{2}-\d{2}$/
+
+  @invariant "admin-only"
+    -- No non-admin user, even authenticated, can access usage data via this endpoint.
+    -- Owner email is hardcoded in config.admin_email; not derived from env or JWT claims.
+}
+
+------------------------------------------------------------
+-- HTTP Contract
+------------------------------------------------------------
+
+rule HTTP429Contract {
+  when: quota exhausted for a user
+
+  ensures: HTTP 429 response
+  ensures: body = { error: "Daily quota exceeded", units_used: Number, limit: Number }
+  ensures: upstream API not called
+  ensures: no AuditRecord written for the blocked request
+    -- a blocked request is not a call; it is not billable and not auditable
+
+  @invariant "429 is the only quota response code"
+    -- Quota exhaustion never returns 200, 400, or 500.
+    -- Callers can distinguish quota exhaustion from other errors by status code alone.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant AuditCompleteness {
+  -- Every request that reaches the upstream API has a corresponding AuditRecord.
+  for each upstream API call:
+    exists AuditRecord where AuditRecord.ts is within 5s of call completion
+}
+
+invariant QuotaMonotonicity {
+  -- A user's daily unit count never decreases within a calendar day.
+  -- (Absent manual admin intervention on Blobs.)
+  for each QuotaRecord:
+    QuotaRecord.units is non-decreasing across successive reads on the same date
+}
+
+invariant AdminAccessControl {
+  -- api-usage-report returns 200 only for config.admin_email.
+  -- All other callers receive 401 (unauthenticated) or 403 (authenticated, not admin).
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should audit blobs have an explicit TTL or cleanup policy? Currently they accumulate indefinitely."
+
+open question "When concurrent requests from the same user race on the quota counter, should the overflow be corrected retroactively or is best-effort sufficient?"
+
+open question "Should the 429 response include a Retry-After header indicating when the quota resets (midnight UTC)?"
+
+open question "Should quota limits be per-site (prod vs. preview) or shared across both deployments for the same user?"

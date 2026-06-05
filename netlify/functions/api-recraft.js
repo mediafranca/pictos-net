@@ -107,7 +107,7 @@ export const handler = async (event, context) => {
       console.error(`[api-recraft] Recraft error ${recraftRes.status}: ${errText}`);
 
       await logCall({
-        email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: `Recraft ${recraftRes.status}: ${errText}`,
       });
@@ -121,7 +121,7 @@ export const handler = async (event, context) => {
     if (!imageUrl) {
       console.error('[api-recraft] No image URL in response:', JSON.stringify(data));
       await logCall({
-        email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'No image URL in Recraft response',
       });
@@ -132,7 +132,7 @@ export const handler = async (event, context) => {
     const svgRes = await fetch(imageUrl);
     if (!svgRes.ok) {
       await logCall({
-        email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: `CDN fetch failed: ${svgRes.status}`,
       });
@@ -144,7 +144,7 @@ export const handler = async (event, context) => {
     if (!svgContent.trim().startsWith('<') && !svgContent.includes('<svg')) {
       console.error('[api-recraft] Response does not look like SVG:', svgContent.slice(0, 200));
       await logCall({
-        email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'Response not valid SVG',
       });
@@ -153,7 +153,7 @@ export const handler = async (event, context) => {
 
     const ms = Date.now() - startMs;
     await logCall({
-      email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
       ms, tokens_in: 0, tokens_out: Math.round(svgContent.length / 4), ok: true,
     });
 
@@ -166,7 +166,7 @@ export const handler = async (event, context) => {
   } catch (error) {
     console.error(`[api-recraft] Error: ${error.message}`);
     await logCall({
-      email, phase: 'recraft', model: 'recraftv3_svg', units_charged: 1,
+      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
       ms: Date.now() - startMs,
       tokens_in: 0, tokens_out: 0, ok: false, error_msg: error.message,
     });
