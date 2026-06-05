@@ -1,0 +1,364 @@
+-- allium: 3
+-- visual-reasoning.allium
+
+-- Scope: Generative pipeline from communicative intention to structured pictogram.
+-- Includes: Phase 1 (COMPRENDER), Phase 2 (COMPONER), Phase 3 (PRODUCIR),
+--   Phase 5 (ESTRUCTURAR), artifact lifecycle, invalidation cascade,
+--   per-phase re-execution, and phase error handling.
+-- Excludes:
+--   - Phase 4 (VECTORIZAR / VTracer) — eliminated; Recraft delivers native SVG
+--   - Library backward-compatibility and migration (separate spec)
+--   - Netlify function infrastructure and security layer (separate spec)
+--   - SVG editor interactions (separate spec)
+-- Dependencies: nlu-schema, mf-svg-schema, GlobalConfig
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value PhaseStatus {
+  idle | running | completed | failed | outdated
+}
+
+value NLUData {
+  -- Semantic analysis of the communicative intention.
+  -- Schema enforced by nlu-schema via Claude tool use.
+  utterance: String
+  lang: String
+  domain: String?
+  frames: [Frame]
+  visual_guidelines: VisualGuidelines
+  nsm_explications: Map<String, String>
+  pragmatics: Pragmatics
+}
+
+value VisualDOMNode {
+  -- One semantic node in the pictogram's DOM.
+  -- id must be unique and mf-svg-schema compliant.
+  id: String
+  concept: String
+  label: String
+  required: Boolean
+  children: [VisualDOMNode]?
+}
+
+value VisualDOM {
+  -- The target semantic structure proposed by Phase 2.
+  -- This is the contract that Phase 5 maps against.
+  nodes: [VisualDOMNode]
+}
+
+value ElementMark {
+  -- One indexed element extracted from rawSvg for set-of-marks.
+  index: Number
+  boundingBox: BBox
+  centroid: Point
+}
+
+value ElementMapping {
+  -- Claude's assignment of one marked element to a DOM node.
+  elementIndex: Number
+  nodeId: String | "none"    -- must be a valid VisualDOMNode id or "none"
+  confidence: Number         -- 0.0 to 1.0
+  justification: String
+}
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external GlobalConfig {
+  -- User-level configuration forwarded to every pipeline phase.
+  lang: String
+  geoContext: String?
+  annotatedContext: String?
+  visualStylePrompt: String
+  aspectRatio: String
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity VisualReasoning {
+  -- A single pictogram generation in progress.
+  -- One VisualReasoning instance per utterance being worked on.
+
+  utterance: String
+
+  -- Phase 1
+  nluData: NLUData?
+  phase1Status: PhaseStatus = idle
+
+  -- Phase 2
+  visualDom: VisualDOM?
+  visualPrompt: String?       -- prompt text delivered to Recraft in Phase 3
+  phase2Status: PhaseStatus = idle
+
+  -- Phase 3
+  rawSvg: String?             -- flat native SVG from Recraft, no semantics
+  phase3Status: PhaseStatus = idle
+
+  -- Phase 5
+  pictograma: String?         -- mf-svg-schema structured SVG, single source of truth
+  phase5Status: PhaseStatus = idle
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+  phase5_max_attempts: Number = 3
+  phase5_confidence_threshold: Number = 0.7
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Invalidation cascade ===
+
+rule InvalidateDownstream {
+  when: a phase of a VisualReasoning transitions to completed
+
+  ensures: every phase downstream of the completed phase
+    transitions to outdated if it was previously completed or failed
+
+  -- Downstream order: phase1 → phase2 → phase3 → phase5
+  -- Example: completing phase1 marks phase2, phase3, phase5 as outdated.
+  -- Completing phase3 marks only phase5 as outdated.
+  -- Completing phase5 marks nothing (terminal phase).
+}
+
+-- === Phase 1: COMPRENDER ===
+
+rule Phase1_Comprender {
+  when: phase 1 is triggered for a VisualReasoning
+
+  requires: VisualReasoning.utterance is non-empty
+
+  ensures: Claude Haiku called with tool use
+    -- tool name: "analyze_utterance"
+    -- tool input_schema: nlu-schema JSON Schema
+    -- tool_choice: forced to "analyze_utterance"
+    -- inputs forwarded: utterance, GlobalConfig (lang, geoContext, annotatedContext)
+  ensures: on success:
+    VisualReasoning.nluData = parsed NLUData from tool call arguments
+    VisualReasoning.phase1Status = completed
+  ensures: on tool-use failure (Claude does not invoke tool, or parse error):
+    VisualReasoning.phase1Status = failed
+}
+
+rule Phase1_Failure {
+  when: VisualReasoning.phase1Status transitions to failed
+
+  ensures: full error detail logged to console (provider error, raw response)
+  ensures: phase 1 indicator shown as failed in UI
+  -- User manually re-triggers phase 1 to retry.
+}
+
+-- === Phase 2: COMPONER ===
+
+rule Phase2_Componer {
+  when: phase 2 is triggered for a VisualReasoning
+
+  requires: VisualReasoning.phase1Status = completed
+  requires: VisualReasoning.nluData is present
+
+  ensures: Claude Haiku called with tool use
+    -- tool name: "compose_pictogram"
+    -- tool input_schema: { visualDom: VisualDOM, visualPrompt: String }
+        where VisualDOM conforms to mf-svg-schema node structure
+    -- tool_choice: forced to "compose_pictogram"
+  ensures: on success:
+    VisualReasoning.visualDom = parsed VisualDOM from tool arguments
+    VisualReasoning.visualPrompt = visualPrompt string from tool arguments
+    VisualReasoning.phase2Status = completed
+  ensures: on tool-use failure:
+    VisualReasoning.phase2Status = failed
+
+  @invariant "single response delivers both artifacts"
+    -- VisualDOM and visualPrompt are produced in one tool call response.
+    -- They are not generated by separate Claude calls.
+
+  @invariant "DOM validated before continuing"
+    -- VisualDOM is validated against mf-svg-schema before phase2Status
+    -- transitions to completed. Validation failure is treated as tool-use failure.
+}
+
+rule Phase2_Failure {
+  when: VisualReasoning.phase2Status transitions to failed
+
+  ensures: full error detail logged to console
+  ensures: phase 2 indicator shown as failed in UI
+}
+
+-- === Phase 3: PRODUCIR ===
+
+rule Phase3_Producir {
+  when: phase 3 is triggered for a VisualReasoning
+
+  requires: VisualReasoning.phase2Status = completed
+  requires: VisualReasoning.visualPrompt is present
+
+  ensures: Recraft V3 called in SVG mode
+    -- endpoint: text-to-image, style: recraft-v3-svg, flat pictogram
+    -- prompt: VisualReasoning.visualPrompt
+  ensures: on success:
+    VisualReasoning.rawSvg = native SVG content from Recraft
+    VisualReasoning.phase3Status = completed
+  ensures: on any Recraft error (timeout, malformed response, empty body):
+    VisualReasoning.phase3Status = failed
+
+  @invariant "native SVG only"
+    -- rawSvg contains real path geometry (anchor points, curves).
+    -- A raster image embedded in an SVG wrapper is not accepted.
+}
+
+rule Phase3_Failure {
+  when: VisualReasoning.phase3Status transitions to failed
+
+  ensures: full error detail logged to console
+  ensures: phase 3 indicator shown as failed in UI
+}
+
+-- === Phase 5: ESTRUCTURAR ===
+
+rule Phase5_Estructurar {
+  when: phase 5 is triggered for a VisualReasoning
+
+  requires: VisualReasoning.phase3Status = completed
+  requires: VisualReasoning.rawSvg is present
+  requires: VisualReasoning.visualDom is present
+
+  ensures: Phase5_SetOfMarks attempted, producing an [ElementMapping]
+  ensures: Phase5_Validate runs on the mapping, triggering focused retries as needed
+  ensures: Phase5_Assemble runs on the final mapping
+  ensures: on successful assembly:
+    VisualReasoning.pictograma = assembled SVG content
+    VisualReasoning.phase5Status = completed
+  ensures: on tool-use failure in all attempts:
+    VisualReasoning.phase5Status = failed
+
+  @invariant "always delivers on coverage or confidence issues"
+    -- Low confidence and unmapped nodes are not failure conditions.
+    -- Phase 5 only fails if Claude does not invoke the tool at all.
+    -- After config.phase5_max_attempts, the best available mapping is used.
+}
+
+rule Phase5_SetOfMarks {
+  when: phase 5 begins an attempt
+
+  ensures: rawSvg parsed into indexed elements (paths and closed shapes)
+    -- each element assigned a stable numeric index (0, 1, 2, ...)
+    -- bounding box and centroid computed per element
+  ensures: rawSvg rasterized to image
+  ensures: numeric label overlaid at centroid of each element
+    -- labels must be visually distinct and legible at the rendered resolution
+  ensures: Claude Sonnet called with vision:
+    -- image: marked rasterization
+    -- context: VisualDOM from phase 2
+    -- tool name: "map_elements"
+    -- tool input_schema: [ElementMapping]
+        where ElementMapping.nodeId is constrained to valid VisualDOMNode ids or "none"
+    -- tool_choice: forced to "map_elements"
+  ensures: on success: mapping returned as [ElementMapping] with confidence per assignment
+}
+
+rule Phase5_Validate {
+  when: a mapping is produced by Phase5_SetOfMarks
+
+  ensures: mapping inspected for:
+    -- total coverage: every indexed element has exactly one assignment
+    -- required node coverage: every required VisualDOMNode has at least
+        one element assigned to it (nodeId = node.id)
+
+  ensures: for each assignment with confidence below config.phase5_confidence_threshold:
+    if current attempt < config.phase5_max_attempts:
+      Phase5_FocusedRetry triggered for that element
+    else:
+      assignment retained as-is regardless of confidence
+}
+
+rule Phase5_FocusedRetry {
+  when: an element assignment has low confidence AND attempts remain
+
+  ensures: element rendered in isolation (tightly cropped rasterization)
+  ensures: Claude Sonnet called again with isolated image and same VisualDOM
+    -- only the ambiguous element is re-evaluated
+  ensures: result replaces the original assignment for that element only
+  ensures: attempt counter incremented
+}
+
+rule Phase5_Assemble {
+  when: mapping is final (validated or max attempts reached)
+
+  ensures: local code assembles the Pictograma SVG:
+    -- elements grouped under their assigned VisualDOMNode ids as <g> elements
+    -- elements assigned "none" placed in a fallback group
+    -- path geometry (d attributes) sourced exclusively from rawSvg
+    -- result conforms to mf-svg-schema document structure
+
+  @invariant "geometry stays local"
+    -- Claude provides only the mapping (index → nodeId).
+    -- No path d attribute is read from or modified by Claude's response.
+
+  @invariant "one element, one group"
+    -- Each element appears in exactly one <g> in the assembled Pictograma,
+    -- whether it is a named semantic group or the fallback group.
+}
+
+rule Phase5_Failure {
+  when: VisualReasoning.phase5Status transitions to failed
+
+  ensures: full error detail logged to console (attempt count, last raw response)
+  ensures: phase 5 indicator shown as failed in UI
+  -- User can re-trigger phase 5 to start a fresh set of attempts.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant DownstreamConsistency {
+  -- A phase's outdated status propagates forward without gaps.
+  for r: VisualReasoning:
+    r.phase1Status = outdated →
+      r.phase2Status in {outdated, idle}
+      r.phase3Status in {outdated, idle}
+      r.phase5Status in {outdated, idle}
+    r.phase2Status = outdated →
+      r.phase3Status in {outdated, idle}
+      r.phase5Status in {outdated, idle}
+    r.phase3Status = outdated →
+      r.phase5Status in {outdated, idle}
+}
+
+invariant GeometryIntegrity {
+  -- Path geometry in the Pictograma is identical to rawSvg.
+  -- Phase 5 only rearranges paths into groups; it does not alter geometry.
+  for r: VisualReasoning where r.phase5Status = completed:
+    for path in paths(r.pictograma):
+      path.d = getPath(r.rawSvg, path.id).d
+}
+
+invariant NativeSVGOnly {
+  -- rawSvg always contains real vector paths, never an embedded raster.
+  for r: VisualReasoning where r.phase3Status = completed:
+    r.rawSvg does not contain <image> elements
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Does processCascade run phases 1–3 automatically after utterance confirmation, with phase 5 remaining user-initiated? Or does the user trigger each phase manually?"
+
+open question "When a required VisualDOMNode has zero elements assigned after max attempts, does the Pictograma contain an empty <g id=node.id> or is the node omitted entirely?"
+
+open question "What render resolution is used for the set-of-marks image? It must be high enough to distinguish small elements without exceeding API image size limits."
+
+open question "Is config.phase5_confidence_threshold the right abstraction, or does the model's justification string need human review to determine retry worthiness?"
+
+open question "Should VisualDOM validation against mf-svg-schema happen in phase 2 (before phase3Status can proceed) or lazily at the start of phase 5?"

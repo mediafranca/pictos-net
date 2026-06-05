@@ -14,7 +14,9 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
-import * as Gemini from './services/geminiService';
+import * as Claude from './services/claudeService';
+import * as Recraft from './services/recraftService';
+import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
 import { useTranslation } from './hooks/useTranslation';
@@ -35,7 +37,7 @@ import { PDFExportModal } from './components/PDFExportModal';
 import { exportLibraryToPdf, pdfExportFilename, downloadPdf, PdfExportCancelledError, type PdfProgress } from './services/pdfExportService';
 import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
-import type { VectorizerResult } from './services/vtracerService';
+import type { VectorizerResult } from './services/vtracerService'; // kept for legacy type usage
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
 
@@ -1060,7 +1062,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       }
 
       addLog('info', `[PROMPT] Regenerando prompt espacial a partir de elementos modificados...`);
-      const newPrompt = await Gemini.generateSpatialPrompt(nluObj as NLUData, ensureElementsArray(row.elements), config, addLog);
+      const newPrompt = await Claude.generateSpatialPrompt(nluObj as NLUData, ensureElementsArray(row.elements), config, addLog);
 
       if (stopFlags.current[rowId]) {
         addLog('info', t('messages.promptRegenerationStopped'));
@@ -1086,7 +1088,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   };
 
-  const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'bitmap'): Promise<boolean> => {
+  const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'bitmap' | 'structure'): Promise<boolean> => {
     // Pre-flight: garantizar sesión antes de tocar estado de UI.
     try {
       await ensureAuth();
@@ -1098,7 +1100,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (!row) return false;
 
     stopFlags.current[rowId] = false;
-    const statusKey = `${step}Status` as keyof RowData;
+    const statusKey = (step === 'structure' ? 'structuredSvgStatus' : `${step}Status`) as keyof RowData;
     const durationKey = `${step}Duration` as keyof RowData;
 
     // Settle pending manual edits as edit events before recording any discards.
@@ -1113,7 +1115,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     try {
       let result: any;
       if (step === 'nlu') {
-        result = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
+        result = await Claude.generateNLU(row.UTTERANCE, addLog, config);
       } else if (step === 'visual') {
         if (!row.NLU) throw new Error('No NLU data — run COMPRENDER first');
         let nluObj;
@@ -1122,9 +1124,26 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         } catch (parseError) {
           throw new Error(`Failed to parse NLU data: ${parseError}`);
         }
-        result = await Gemini.generateVisualBlueprint(nluObj as NLUData, config, addLog);
+        result = await Claude.generateVisualBlueprint(nluObj as NLUData, config, addLog);
       } else if (step === 'bitmap') {
-        result = await Gemini.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
+        // Phase 3: PRODUCIR — Recraft V3 → rawSvg (native SVG, no bitmap)
+        result = await Recraft.generateSVG(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
+      } else if (step === 'structure') {
+        // Phase 5: ESTRUCTURAR — Claude Sonnet vision → structuredSvg
+        if (!row.rawSvg) throw new Error('Se requiere SVG de Recraft (ejecutar PRODUCIR primero)');
+        if (!row.NLU) throw new Error('Se requiere NLU (ejecutar COMPRENDER primero)');
+        const nluObj = typeof row.NLU === 'string' ? JSON.parse(row.NLU) : row.NLU;
+        result = await structureSVG({
+          rawSvg: row.rawSvg,
+          nlu: nluObj as NLUData,
+          elements: ensureElementsArray(row.elements),
+          utterance: row.UTTERANCE,
+          config,
+          onProgress: (msg) => addLog('info', msg),
+          onStatus: (s) => addLog('info', `[ESTRUCTURAR] ${s}`),
+        });
+        if (!result.success) throw new Error(result.error || 'ESTRUCTURAR falló');
+        result = result.svg; // structuredSvg string
       }
 
       if (stopFlags.current[rowId]) {
@@ -1137,9 +1156,10 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       updateRowById(rowId, {
         [statusKey]: 'completed',
         [durationKey]: duration,
-        ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated' } : {}),
-        ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated' } : {}),
-        ...(step === 'bitmap' ? { bitmap: result, bitmapDiscarded: false, status: 'completed' } : {})
+        ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
+        ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
+        ...(step === 'bitmap' ? { rawSvg: result, rawSvgDiscarded: false, structuredSvgStatus: 'outdated', status: 'completed' } : {}),
+        ...(step === 'structure' ? { structuredSvg: result, structuredSvgDiscarded: false, status: 'completed' } : {}),
       });
       if (step === 'nlu') {
         recordPhaseRegen(rowId, 'nlu', beforeNLU, result);
@@ -1189,11 +1209,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     let finalUpdates: Partial<RowData> = { status: 'processing' };
 
     try {
-      // --- NLU Step ---
+      // --- NLU Step (Phase 1: COMPRENDER — Claude Haiku) ---
       addLog('info', t('messages.cascadeStep', { current: 1, total: 3, step: stepNames.nlu }));
-      updateRowById(rowId, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle' });
+      updateRowById(rowId, { nluStatus: 'processing', visualStatus: 'idle', bitmapStatus: 'idle', structuredSvgStatus: 'idle' });
       const nluStartTime = Date.now();
-      const nluResult = await Gemini.generateNLU(row.UTTERANCE, addLog, config);
+      const nluResult = await Claude.generateNLU(row.UTTERANCE, addLog, config);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.nlu }));
         updateRowById(rowId, { nluStatus: 'idle', status: 'idle' });
@@ -1204,11 +1224,11 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       finalUpdates.nluDuration = (Date.now() - nluStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 1, total: 3, duration: finalUpdates.nluDuration.toFixed(1) }));
 
-      // --- Visual Step ---
+      // --- Visual Step (Phase 2: COMPONER — Claude Haiku) ---
       addLog('info', t('messages.cascadeStep', { current: 2, total: 3, step: stepNames.visual }));
       updateRowById(rowId, { nluStatus: 'completed', nluDuration: finalUpdates.nluDuration, NLU: nluResult, visualStatus: 'processing' });
       const visualStartTime = Date.now();
-      const visualResult = await Gemini.generateVisualBlueprint(nluResult, config, addLog);
+      const visualResult = await Claude.generateVisualBlueprint(nluResult, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.visual }));
         updateRowById(rowId, { visualStatus: 'idle' });
@@ -1220,17 +1240,19 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       finalUpdates.visualDuration = (Date.now() - visualStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 2, total: 3, duration: finalUpdates.visualDuration.toFixed(1) }));
 
-      // --- Bitmap Step (NanoBanana) ---
+      // --- Produce Step (Phase 3: PRODUCIR — Recraft V3 → rawSvg) ---
       addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.bitmap }));
       updateRowById(rowId, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
       const bitmapStartTime = Date.now();
-      const bitmapResult = await Gemini.generateImage(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
+      const rawSvgResult = await Recraft.generateSVG(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.bitmap }));
         updateRowById(rowId, { bitmapStatus: 'idle' });
         return;
       }
-      finalUpdates.bitmap = bitmapResult;
+      finalUpdates.rawSvg = rawSvgResult;
+      finalUpdates.rawSvgDiscarded = false;
+      finalUpdates.structuredSvgStatus = 'outdated';
       finalUpdates.bitmapStatus = 'completed';
       finalUpdates.bitmapDuration = (Date.now() - bitmapStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 3, total: 3, duration: finalUpdates.bitmapDuration.toFixed(1) }));
@@ -1238,7 +1260,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       finalUpdates.status = 'completed';
       updateRowById(rowId, finalUpdates);
 
-      // Record discards for each downstream phase that had a previous value.
       recordPhaseRegen(rowId, 'nlu', beforeNLU, nluResult);
       recordPhaseRegen(rowId, 'elements', beforeElements, visualResult.elements);
       recordPhaseRegen(rowId, 'prompt', beforePrompt, visualResult.prompt);
@@ -1267,7 +1288,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     let count = 0;
     if (row.NLU && row.nluStatus === 'completed') count++;
     if (row.elements && row.prompt && row.visualStatus === 'completed') count++;
-    if (hasValidBitmap(row) && row.bitmapStatus === 'completed') count++;
+    if (validRawSvg(row) && row.bitmapStatus === 'completed') count++;
+    if (validStructuredSvg(row) && row.structuredSvgStatus === 'completed') count++;
     return count;
   };
 

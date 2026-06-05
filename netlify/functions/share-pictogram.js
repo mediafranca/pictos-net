@@ -21,7 +21,7 @@ function corsHeaders(origin) {
 
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   const origin = event.headers?.origin || '';
   const headers = corsHeaders(origin);
 

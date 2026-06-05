@@ -316,9 +316,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 onProgress: (msg) => onLog('info', msg),
                 onStatus: (s) => {
                     switch (s) {
-                        case 'sending': setSubStatus('Enviando inventario a Gemini Flash...'); break;
-                        case 'receiving': setSubStatus('Recibiendo asignación JSON...'); break;
-                        case 'sanitizing': setSubStatus('Ensamblando SVG + IDs semánticos...'); break;
+                        case 'sending': setSubStatus('Enviando imagen marcada a Claude Sonnet…'); break;
+                        case 'receiving': setSubStatus('Recibiendo mapeo semántico…'); break;
+                        case 'sanitizing': setSubStatus('Ensamblando SVG + IDs semánticos…'); break;
                         default: setSubStatus(s);
                     }
                 }
@@ -362,13 +362,15 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     };
 
 
-    if (!vectorizeEligibility.eligible) {
+    // In the Claude+Recraft pipeline, rawSvg comes from Recraft (phase 3) — not from VTracer.
+    // Show the component when structuredSvg already exists OR when rawSvg is available to structure.
+    if (!structuredSvgEntry && !structureEligibility.eligible) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-6 bg-slate-50 border border-slate-100 rounded text-center opacity-75">
                 <AlertCircle size={24} className="text-slate-500 mb-2" />
                 <p className="text-xs text-slate-500 font-medium mb-1">SVG Generation Unavailable</p>
                 <p className="text-xs text-slate-500 font-mono">
-                    {vectorizeEligibility.reason || "Requirements not met"}
+                    {structureEligibility.reason || "Requirements not met"}
                 </p>
             </div>
         );

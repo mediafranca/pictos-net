@@ -14,11 +14,9 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
     ],
-    // In development, the API key is injected for direct Gemini calls.
-    // In production, calls go through Netlify Functions (key stays server-side).
-    define: mode === 'development' ? {
-      'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    } : {},
+    // All AI calls go through Netlify Functions in both dev and prod.
+    // Use `netlify dev` locally — no API key ever reaches the browser.
+    define: {},
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

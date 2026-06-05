@@ -3,14 +3,22 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[dev]
+  command = "vite"
+  targetPort = 3000
+  port = 9001
+  autoLaunch = false
+
 [functions]
-  # Image generation with Gemini can take 30-60s
-  external_node_modules = ["@google/genai"]
+  external_node_modules = ["@anthropic-ai/sdk"]
   node_bundler = "esbuild"
 
-[functions."api-gemini"]
-  # Extend timeout for slow image generation (default is 10s)
-  # Requires Netlify Pro plan for >10s; max 26s on Pro
+[functions."api-claude"]
+  # Claude Sonnet vision (phase 5) can take 20-40s
+  timeout = 26
+
+[functions."api-recraft"]
+  # Recraft SVG generation + fetch
   timeout = 26
 
 [[redirects]]

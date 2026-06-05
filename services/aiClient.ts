@@ -1,64 +1,47 @@
 /**
- * AI Client — Dual-mode abstraction for Gemini API calls.
+ * AI Client — always-proxy abstraction.
  *
- * - Development: calls Gemini directly (API key from .env via Vite define)
- * - Production: proxies through Netlify Function with JWT auth.
- *   If the user is not logged in, the Identity widget opens automatically
- *   and the call proceeds after successful authentication.
+ * All AI calls go through Netlify Functions (both in dev with `netlify dev`
+ * and in production). No API key ever reaches the browser.
+ *
+ * Provides:
+ *   callClaude(params)   → api-claude function (phases 1, 2, 5)
+ *   callRecraft(params)  → api-recraft function (phase 3)
  */
 
-import { GoogleGenAI } from "@google/genai";
 import { getCurrentUser, requestLogin } from "../components/AuthGate";
 
-const isDev = (import.meta as any).env?.DEV;
-
-interface GenerateContentParams {
-    model: string;
-    contents: any;
-    config?: any;
-}
-
-interface GenerateContentResponse {
-    text: string;
-    candidates?: any[];
-}
-
-/**
- * Get a fresh JWT. If the user is not logged in, opens the login widget
- * and waits for them to authenticate before returning the token.
- */
 async function getAuthToken(): Promise<string> {
     let user = getCurrentUser();
     if (!user) {
         user = await requestLogin();
     }
-    const token = await user.jwt();
-    return token;
+    return user.jwt();
 }
 
-/**
- * Call the Netlify Function proxy with JWT authentication.
- */
-async function proxyCall(params: GenerateContentParams): Promise<GenerateContentResponse> {
-    const token = await getAuthToken();
+async function callProxy(endpoint: string, params: object): Promise<any> {
     const MAX_RETRIES = 2;
 
+    // In Vite dev mode (`netlify dev`), skip auth — the function has a NETLIFY_DEV bypass.
+    const isLocalDev = import.meta.env.DEV;
+    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isLocalDev) {
+        const token = await getAuthToken();
+        reqHeaders['Authorization'] = `Bearer ${token}`;
+    }
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const res = await fetch("/.netlify/functions/api-gemini", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`,
-            },
+        const res = await fetch(`/.netlify/functions/${endpoint}`, {
+            method: 'POST',
+            headers: reqHeaders,
             body: JSON.stringify(params),
         });
 
         if (res.ok) return res.json();
 
-        // Retry on 502/503/504 (transient proxy/timeout errors)
         if ([502, 503, 504].includes(res.status) && attempt < MAX_RETRIES) {
             const delay = (attempt + 1) * 3000;
-            console.warn(`[aiClient] ${res.status} on attempt ${attempt + 1}, retrying in ${delay}ms...`);
+            console.warn(`[aiClient] ${res.status} on attempt ${attempt + 1}, retrying in ${delay}ms…`);
             await new Promise(r => setTimeout(r, delay));
             continue;
         }
@@ -70,35 +53,55 @@ async function proxyCall(params: GenerateContentParams): Promise<GenerateContent
     throw new Error('Max retries exceeded');
 }
 
-/**
- * Generate content via Gemini (direct in dev, proxied in prod).
- */
-export async function generateContent(params: GenerateContentParams): Promise<GenerateContentResponse> {
-    if (isDev) {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent(params);
-        return { text: response.text || '', candidates: response.candidates };
-    }
-    return proxyCall(params);
+export interface ClaudeParams {
+    model: string;
+    max_tokens?: number;
+    system?: string;
+    tools?: object[];
+    tool_choice?: object;
+    messages: object[];
+}
+
+export interface ClaudeResponse {
+    content: Array<{ type: string; name?: string; input?: any; text?: string }>;
+    stop_reason: string;
+    usage: { input_tokens: number; output_tokens: number };
 }
 
 /**
- * Stream content via Gemini.
- * - Dev: real streaming via SDK
- * - Prod: non-streaming proxy, yielded as a single chunk
+ * Call Claude via the api-claude Netlify function.
+ * Returns the raw Anthropic messages response.
  */
-export async function* generateContentStream(
-    params: GenerateContentParams
-): AsyncGenerator<{ text: string }> {
-    if (isDev) {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const stream = await ai.models.generateContentStream(params);
-        for await (const chunk of stream) {
-            yield { text: chunk.text || '' };
-        }
-        return;
-    }
+export async function callClaude(params: ClaudeParams): Promise<ClaudeResponse> {
+    return callProxy('api-claude', params);
+}
 
-    const result = await proxyCall(params);
-    yield { text: result.text };
+/**
+ * Extract the tool_use block from a Claude response.
+ * Throws if the model did not invoke the tool (hard failure per spec).
+ */
+export function extractToolUse(response: ClaudeResponse, toolName: string): any {
+    const block = response.content?.find(b => b.type === 'tool_use' && b.name === toolName);
+    if (!block) {
+        throw new Error(`Claude did not invoke tool '${toolName}' (stop_reason: ${response.stop_reason})`);
+    }
+    return block.input;
+}
+
+export interface RecraftParams {
+    prompt: string;
+    style?: string;
+    substyle?: string;
+}
+
+export interface RecraftResponse {
+    svg: string;
+}
+
+/**
+ * Call Recraft via the api-recraft Netlify function.
+ * Returns { svg: string } — the raw SVG content from Recraft.
+ */
+export async function callRecraft(params: RecraftParams): Promise<RecraftResponse> {
+    return callProxy('api-recraft', params);
 }

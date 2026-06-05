@@ -156,10 +156,11 @@ export interface RowData {
   // Global Pipeline Status
   status: 'idle' | 'processing' | 'completed' | 'error';
 
-  // Step Statuses (3 phases)
-  nluStatus: StepStatus;       // Phase 1: Comprender
-  visualStatus: StepStatus;    // Phase 2: Componer
-  bitmapStatus: StepStatus;    // Phase 3: Producir
+  // Step Statuses
+  nluStatus: StepStatus;            // Phase 1: Comprender (Claude Haiku → NLU)
+  visualStatus: StepStatus;         // Phase 2: Componer  (Claude Haiku → VisualDOM + prompt)
+  bitmapStatus: StepStatus;         // Phase 3: Producir  (Recraft V3 → rawSvg)
+  structuredSvgStatus?: StepStatus; // Phase 5: Estructurar (Claude Sonnet vision → structuredSvg)
 
   // Metrics
   nluDuration?: number;

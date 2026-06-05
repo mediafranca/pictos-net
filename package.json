@@ -4,7 +4,7 @@
   "version": "1.9.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run copy-schemas && npm run optimize-thumbs && vite",
+    "dev": "npm run copy-schemas && npm run optimize-thumbs && netlify dev",
     "build": "npm run copy-schemas && npm run optimize-thumbs && vite build",
     "preview": "npm run copy-schemas && vite preview",
     "generate-index": "node scripts/generate-libraries-index.cjs",
@@ -14,10 +14,11 @@
     "postinstall": "npm run copy-schemas"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@google/genai": "^1.38.0",
+    "@netlify/blobs": "^10.7.9",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-scroll-area": "^1.2.10",
