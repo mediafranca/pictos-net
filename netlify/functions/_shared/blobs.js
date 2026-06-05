@@ -1,6 +1,17 @@
-import { getStore } from '@netlify/blobs';
+import { getStore, connectLambda } from '@netlify/blobs';
 import fs from 'fs';
 import path from 'path';
+
+export function connectBlobs(event) {
+  const isLocalMock = process.env.NETLIFY_DEV === 'true' && !process.env.NETLIFY_BLOBS_CONTEXT;
+  if (!isLocalMock && event) {
+    try {
+      connectLambda(event);
+    } catch (err) {
+      console.warn('[blobs] connectLambda failed:', err.message);
+    }
+  }
+}
 
 export function getBlobStore(name) {
   // If we are locally running and blobs context is missing, use a local FS mock

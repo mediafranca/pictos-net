@@ -1,4 +1,4 @@
-import { getBlobStore as getStore } from './_shared/blobs.js';
+import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
 
 const ALLOWED_ORIGINS = [
   'https://pictos.net',
@@ -17,6 +17,7 @@ function corsHeaders(origin) {
 }
 
 export const handler = async (event, context) => {
+  connectBlobs(event);
   const origin = event.headers?.origin || '';
   const headers = corsHeaders(origin);
 

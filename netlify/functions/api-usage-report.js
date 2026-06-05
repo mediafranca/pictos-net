@@ -8,6 +8,7 @@
  */
 
 import { getDailySummary } from './_shared/usage.js';
+import { connectBlobs } from './_shared/blobs.js';
 
 const ADMIN_EMAIL = 'herbert.spencer@gmail.com';
 
@@ -28,6 +29,7 @@ function corsHeaders(origin) {
 }
 
 export const handler = async (event, context) => {
+  connectBlobs(event);
   const origin = event.headers?.origin || '';
   const headers = corsHeaders(origin);
 

@@ -12,6 +12,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { checkAndCharge, logCall } from './_shared/usage.js';
+import { connectBlobs } from './_shared/blobs.js';
 
 const ALLOWED_ORIGINS = [
   'https://pictos.net',
@@ -41,6 +42,7 @@ function corsHeaders(origin) {
 }
 
 export const handler = async (event, context) => {
+  connectBlobs(event);
   const origin = event.headers?.origin || '';
   const headers = corsHeaders(origin);
 

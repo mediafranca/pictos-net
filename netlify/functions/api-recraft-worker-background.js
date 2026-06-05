@@ -6,11 +6,12 @@
  */
 
 import { checkAndCharge, logCall } from './_shared/usage.js';
-import { getBlobStore as getStore } from './_shared/blobs.js';
+import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
 
 const RECRAFT_API_URL = 'https://external.api.recraft.ai/v1/images/generations';
 
 export const handler = async (event, context) => {
+  connectBlobs(event);
   let bodyPayload;
   try {
     bodyPayload = JSON.parse(event.body);
@@ -30,8 +31,31 @@ export const handler = async (event, context) => {
   // Set initial status to pending so poller knows it started
   await store.setJSON(jobId, { pending: true });
 
-  const { user } = context.clientContext || {};
+  let user = context.clientContext?.user;
   const isLocalDev = process.env.NETLIFY_DEV === 'true';
+
+  // In Netlify Background Functions in production, context.clientContext is missing.
+  // We reconstruct the user context from the Authorization header JWT.
+  if (!user && !isLocalDev) {
+    const authHeader = event.headers?.authorization || event.headers?.Authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+          user = {
+            email: payload.email,
+            sub: payload.sub,
+            user_metadata: payload.user_metadata,
+          };
+        }
+      } catch (err) {
+        console.error('[api-recraft-worker] Failed to decode JWT from Authorization header:', err.message);
+      }
+    }
+  }
+
   const email = user?.email ?? 'dev';
 
   if (!isLocalDev && !user) {
