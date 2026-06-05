@@ -32,13 +32,11 @@ import { INITIAL_STYLES } from './lib/style-editor/lib/constants';
 import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
 import packageJson from './package.json';
 import { SVGEditorModal } from './components/SVGEditor/SVGEditorModal';
-import { VectorizerModal } from './components/VectorizerModal';
 import OnboardingModal from './components/OnboardingModal';
 import { PDFExportModal } from './components/PDFExportModal';
 import { exportLibraryToPdf, pdfExportFilename, downloadPdf, PdfExportCancelledError, type PdfProgress } from './services/pdfExportService';
 import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
-import type { VectorizerResult } from './services/vtracerService'; // kept for legacy type usage
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
 
@@ -223,7 +221,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svgKeyframes: INITIAL_KEYFRAMES,
     recording: { enabled: false },
   });
-  const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'bitmap' | 'format', rowId: string } | null>(null);
+  const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'produce' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfProgress | null>(null);
   const pdfExportAbortRef = useRef<AbortController | null>(null);
@@ -296,11 +294,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svg: null,
     svgSource: null,
   });
-
-  const [vectorizerState, setVectorizerState] = useState<{
-    isOpen: boolean;
-    rowId: string | null;
-  }>({ isOpen: false, rowId: null });
 
   const [quotaModal, setQuotaModal] = useState<{ units_used: number; limit: number } | null>(null);
 
@@ -966,7 +959,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     if (openRowId) engaged.add(openRowId);
     if (focusMode?.rowId) engaged.add(focusMode.rowId);
     if (svgEditorState.isOpen && svgEditorState.rowId) engaged.add(svgEditorState.rowId);
-    if (vectorizerState.isOpen && vectorizerState.rowId) engaged.add(vectorizerState.rowId);
     const prev = previousEngagedRef.current;
     // Rows that newly became engaged: start session
     for (const id of engaged) {
@@ -977,7 +969,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (!engaged.has(id)) endRecordingSession(id);
     }
     previousEngagedRef.current = engaged;
-  }, [openRowId, focusMode, svgEditorState, vectorizerState, startRecordingSession, endRecordingSession]);
+  }, [openRowId, focusMode, svgEditorState, startRecordingSession, endRecordingSession]);
 
   const handleOpenRowChange = useCallback((nextOpenId: string | null) => {
     setOpenRowId(nextOpenId);
@@ -1091,7 +1083,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   };
 
-  const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'bitmap' | 'structure'): Promise<boolean> => {
+  const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'produce' | 'structure'): Promise<boolean> => {
     // Pre-flight: garantizar sesión antes de tocar estado de UI.
     try {
       await ensureAuth();
@@ -1107,7 +1099,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     const durationKey = `${step}Duration` as keyof RowData;
 
     // Settle pending manual edits as edit events before recording any discards.
-    if (step !== 'bitmap') settleRowEdits(rowId);
+    if (step !== 'produce') settleRowEdits(rowId);
     const beforeNLU = row.NLU;
     const beforeElements = row.elements;
     const beforePrompt = row.prompt;
@@ -1128,7 +1120,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           throw new Error(`Failed to parse NLU data: ${parseError}`);
         }
         result = await Claude.generateVisualBlueprint(nluObj as NLUData, config, addLog);
-      } else if (step === 'bitmap') {
+      } else if (step === 'produce') {
         // Phase 3: PRODUCIR — Recraft V3 → rawSvg (native SVG, no bitmap)
         result = await Recraft.generateSVG(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
       } else if (step === 'structure') {
@@ -1161,7 +1153,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         [durationKey]: duration,
         ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
         ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
-        ...(step === 'bitmap' ? { rawSvg: result, rawSvgDiscarded: false, structuredSvgStatus: 'outdated', status: 'completed' } : {}),
+        ...(step === 'produce' ? { rawSvg: result, rawSvgDiscarded: false, structuredSvgStatus: 'outdated', status: 'completed' } : {}),
         ...(step === 'structure' ? { structuredSvg: result, structuredSvgDiscarded: false, status: 'completed' } : {}),
       });
       if (step === 'nlu') {
@@ -1172,7 +1164,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       }
       addLog('success', `${step.toUpperCase()} completo: ${duration.toFixed(1)}s para "${row.UTTERANCE}"`);
 
-      if (step === 'bitmap') {
+      if (step === 'produce') {
         requestAnimationFrame(() => {
           const rowEl = document.getElementById(`picto-row-${rowId}`);
           const bitmapEl = rowEl?.querySelector('#svg-preview');
@@ -1213,7 +1205,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     const beforeElements = row.elements;
     const beforePrompt = row.prompt;
 
-    const stepNames = { nlu: t('pipeline.understand'), visual: t('pipeline.compose'), bitmap: t('pipeline.produce') };
+    const stepNames = { nlu: t('pipeline.understand'), visual: t('pipeline.compose'), produce: t('pipeline.produce') };
     let finalUpdates: Partial<RowData> = { status: 'processing' };
 
     try {
@@ -1249,12 +1241,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       addLog('success', t('messages.cascadeStepComplete', { current: 2, total: 3, duration: finalUpdates.visualDuration.toFixed(1) }));
 
       // --- Produce Step (Phase 3: PRODUCIR — Recraft V3 → rawSvg) ---
-      addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.bitmap }));
+      addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.produce }));
       updateRowById(rowId, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
       const bitmapStartTime = Date.now();
       const rawSvgResult = await Recraft.generateSVG(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
-        addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.bitmap }));
+        addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.produce }));
         updateRowById(rowId, { bitmapStatus: 'idle' });
         return;
       }
@@ -1287,9 +1279,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         updateRowById(rowId, { status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle' });
         return;
       }
-      let stepFailed: 'nlu' | 'visual' | 'bitmap' = 'nlu';
+      let stepFailed: 'nlu' | 'visual' | 'produce' = 'nlu';
       if (finalUpdates.nluStatus === 'completed' && finalUpdates.visualStatus !== 'completed') stepFailed = 'visual';
-      else if (finalUpdates.visualStatus === 'completed') stepFailed = 'bitmap';
+      else if (finalUpdates.visualStatus === 'completed') stepFailed = 'produce';
 
       updateRowById(rowId, { [`${stepFailed}Status`]: 'error', status: 'error' });
       addLog('error', t('messages.cascadeFailed', { step: stepNames[stepFailed], error: err.message }));
@@ -1413,35 +1405,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svgEditorBeforeMetricsRef.current = null;
 
     setSvgEditorState({ isOpen: false, rowId: null, svg: null, svgSource: null });
-  };
-
-  const handleVectorizerApply = (result: VectorizerResult) => {
-    if (!vectorizerState.rowId) return;
-    const rowId = vectorizerState.rowId;
-
-    // If a rawSvg already existed for this row, the apply replaces it —
-    // record the previous one as a discarded svg_raw candidate before
-    // overwriting. See specs/intervention-recording.allium § VectorizerApplyDiscardsRaw.
-    const existingRow = rows.find(r => r.id === rowId);
-    const previousRaw = existingRow?.rawSvg;
-    if (previousRaw) {
-      const previousMetrics = Recording.computeSvgMetrics(previousRaw);
-      if (previousMetrics) {
-        setRows(prev => prev.map(r =>
-          r.id === rowId
-            ? Recording.recordSvgDiscard(r, config, { phase: 'svg_raw', before: previousMetrics })
-            : r
-        ));
-      }
-    }
-
-    // Vectorizer just produced a fresh trace — overwrite and re-validate.
-    updateRowById(rowId, { rawSvg: result.svg, rawSvgDiscarded: false });
-    addLog('success', t('messages.vectorizationComplete', { traced: result.layersTraced, total: result.layersTotal, tier: result.tiersUsed }));
-    if (result.warnings.length > 0) {
-      result.warnings.forEach(w => addLog('info', w));
-    }
-    setVectorizerState({ isOpen: false, rowId: null });
   };
 
   const filteredRows = useMemo(() => {
@@ -1989,7 +1952,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 }}
                 onFocus={step => setFocusMode({ step, rowId: row.id })}
                 onOpenEditor={source => openSVGEditor(row.id, source)}
-                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                 onSettleField={() => settleRowEdits(row.id)}
               />
             ))}
@@ -2030,7 +1992,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   config={config}
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
                   onOpenEditor={(source) => openSVGEditor(row.id, source)}
-                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                   onSettleField={() => settleRowEdits(row.id)}
                   onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
                   onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
@@ -2097,9 +2058,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 <Code size={12} /> {t('footer.openSource')}
               </a>
               <span className="text-slate-300">|</span>
-              <span>{t('footer.license')}</span>
+              <span>PICTOS v{APP_VERSION} — {t('footer.license')}</span>
             </div>
-            <p className="mt-3 text-slate-400">v{APP_VERSION}</p>
           </div>
         </div>
       </footer>
@@ -2131,7 +2091,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
           onLog={addLog}
           onOpenEditor={(source) => openSVGEditor(focusMode!.rowId, source)}
-          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onModeChange={(step) => setFocusMode({ step, rowId: focusMode.rowId })}
           onRecordElementOp={(op, before, after) => recordElementOp(focusMode!.rowId, op, before, after)}
           onSettleField={() => settleRowEdits(focusMode!.rowId)}
@@ -2213,20 +2172,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onUpdateConfig={setConfig}
         />
       )}
-
-      {/* Vectorizer Modal */}
-      {vectorizerState.isOpen && vectorizerState.rowId && (() => {
-        const vRow = rows.find(r => r.id === vectorizerState.rowId);
-        return vRow ? (
-          <VectorizerModal
-            isOpen={vectorizerState.isOpen}
-            bitmap={vRow.bitmap || ''}
-            utterance={vRow.UTTERANCE || ''}
-            onClose={() => setVectorizerState({ isOpen: false, rowId: null })}
-            onApply={handleVectorizerApply}
-          />
-        ) : null;
-      })()}
 
       {/* Quota Exceeded Modal */}
       {quotaModal && (
@@ -2470,12 +2415,11 @@ const RowComponent: React.FC<{
   onUpdate: (u: any) => void; onProcess: (s: any) => Promise<boolean>;
   onRegeneratePrompt: () => void;
   onStop: () => void; onCascade: () => void; onDelete: () => void;
-  onFocus: (step: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
+  onFocus: (step: 'nlu' | 'visual' | 'produce' | 'format') => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: (source?: 'raw' | 'structured') => void;
-  onOpenVectorizer: () => void;
   onSettleField?: () => void;
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
@@ -2484,7 +2428,7 @@ const RowComponent: React.FC<{
    *  schema header and the RowClipboardContext so it stays self-describing
    *  when pasted outside of a library. */
   onBuildRowClipboard?: (row: RowData) => string;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2642,7 +2586,7 @@ const RowComponent: React.FC<{
                         onMouseDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          onProcess('bitmap');
+                          onProcess('produce');
                           setPromptManuallyEdited(false);
                         }}
                         className="mt-3 w-full py-2 px-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-500 hover:text-violet-950 transition-all flex items-center justify-center gap-2 text-xs font-medium uppercase tracking-widest shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
@@ -2656,7 +2600,7 @@ const RowComponent: React.FC<{
                 </div>
               </div>
             </StepBox>
-            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
+            <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('produce')} onStop={onStop} onFocus={() => onFocus('produce')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
 
@@ -2668,13 +2612,12 @@ const RowComponent: React.FC<{
                       onLog={onLog}
                       onUpdate={onUpdate}
                       onOpenEditor={onOpenEditor}
-                      onOpenVectorizer={onOpenVectorizer}
                       onDiscardSvg={onDiscardSvg}
                     />
                   </div>
                 ) : (
                   <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">
-                    <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
+                    <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noSvgRender')}</div>
                   </div>
                 )}
 
@@ -3494,10 +3437,10 @@ const Badge: React.FC<{ step: number; label: string; status: StepStatus }> = ({ 
   );
 };
 
-const FOCUS_STEPS = ['nlu', 'visual', 'bitmap', 'format'] as const;
+const FOCUS_STEPS = ['nlu', 'visual', 'produce', 'format'] as const;
 
 const FocusViewModal: React.FC<{
-  mode: 'nlu' | 'visual' | 'bitmap' | 'format';
+  mode: 'nlu' | 'visual' | 'produce' | 'format';
   row: RowData;
   onClose: () => void;
   onUpdate: (updates: Partial<RowData>) => void;
@@ -3506,14 +3449,13 @@ const FocusViewModal: React.FC<{
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onLog: (type: 'info' | 'error' | 'success', message: string) => void;
   onOpenEditor?: (source?: 'raw' | 'structured') => void;
-  onOpenVectorizer?: () => void;
-  onModeChange: (mode: 'nlu' | 'visual' | 'bitmap' | 'format') => void;
+  onModeChange: (mode: 'nlu' | 'visual' | 'produce' | 'format') => void;
   onRecordElementOp?: (op: ElementOpKind, before: VisualElement[], after: VisualElement[]) => void;
   onSettleField?: () => void;
   onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
   onStop?: () => void;
   onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onOpenVectorizer, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg }) => {
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -3544,7 +3486,7 @@ const FocusViewModal: React.FC<{
       contentToCopy = JSON.stringify(row.NLU, null, 2);
     } else if (mode === 'visual') {
       contentToCopy = JSON.stringify({ "elements": row.elements, "prompt": row.prompt }, null, 2);
-    } else if (mode === 'bitmap') {
+    } else if (mode === 'produce') {
       contentToCopy = row.prompt || '';
     }
 
@@ -3559,7 +3501,7 @@ const FocusViewModal: React.FC<{
   const titleMap: Record<string, string> = {
     nlu: t('pipeline.understand'),
     visual: t('pipeline.compose'),
-    bitmap: t('pipeline.produce'),
+    produce: t('pipeline.produce'),
     format: t('pipeline.format')
   };
 
@@ -3627,7 +3569,7 @@ const FocusViewModal: React.FC<{
           </div>
         </div>
       );
-      case 'bitmap': {
+      case 'produce': {
         const rawSvgContent = validRawSvg(row);
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
@@ -3637,7 +3579,7 @@ const FocusViewModal: React.FC<{
                 className="w-full h-full max-w-full max-h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full shadow-2xl bg-white"
               />
             ) : (
-              <p className="text-slate-500 font-mono">{t('editor.noBitmapRender')}</p>
+              <p className="text-slate-500 font-mono">{t('editor.noSvgRender')}</p>
             )}
           </div>
         );
@@ -3666,7 +3608,7 @@ const FocusViewModal: React.FC<{
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} layout="columns" onDiscardSvg={onDiscardSvg} />
             </div>
           </div>
         );
@@ -3710,7 +3652,7 @@ const FocusViewModal: React.FC<{
             {/* Regenerate this step (mirrors the per-step Play button in the row's StepBox).
                 For format step there is no single regenerate — vectorize and structure
                 live in the column-specific actions. */}
-            {(mode === 'nlu' || mode === 'visual' || mode === 'bitmap') && onProcess && (() => {
+            {(mode === 'nlu' || mode === 'visual' || mode === 'produce') && onProcess && (() => {
               const status = mode === 'nlu' ? row.nluStatus : mode === 'visual' ? row.visualStatus : row.bitmapStatus;
               const isProc = status === 'processing';
               return isProc && onStop ? (
@@ -3725,7 +3667,7 @@ const FocusViewModal: React.FC<{
             })()}
             {(() => {
               const rawSvgContent = validRawSvg(row);
-              return mode === 'bitmap' && rawSvgContent && (
+              return mode === 'produce' && rawSvgContent && (
                 <button onClick={() => { const blob = new Blob([rawSvgContent], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}_raw.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                   <Download size={14} /> SVG
                 </button>
