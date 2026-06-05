@@ -53,8 +53,8 @@
     "viewListTooltip": "Ver librería como lista",
     "viewGrid": "Vista de pictogramas",
     "viewGridTooltip": "Ver librería como cuadrícula",
-    "stageRaw": "SVG trazado",
-    "stageStructured": "SVG estructurado",
+    "stageRaw": "trazado",
+    "stageStructured": "estruc.",
     "openInFocus": "Abrir \"{utterance}\" en vista enfocada",
     "untitled": "Sin título",
     "structureRequiresRaw": "El estructurado se genera a partir del trazado. Vectoriza primero."
@@ -102,7 +102,7 @@
     "nsmExplications": "Explicaciones NSM",
     "logicalForm": "Forma Lógica",
     "humanReasoning": "Razonamiento Humano",
-    "noBitmapRender": "Sin Renderizado de Bitmap",
+    "noSvgRender": "Sin SVG generado",
     "noBitmapGenerated": "Aún no se ha generado bitmap.",
     "noBitmapReference": "Sin Referencia de Bitmap",
     "fullSizeRender": "Renderizado tamaño completo",
@@ -564,8 +564,8 @@
     "collaborate": "Colaborar",
     "collaborateDesc": "Participa en la investigación evaluando pictogramas generados por el sistema.",
     "author": "Herbert Spencer González",
-    "affiliation1": "MediaFranca — e[ad] Escuela de Arquitectura y Diseño, PUCV",
-    "affiliation2": "AUT University, Auckland",
+    "affiliation1": "Investigador Doctoral, Auckland University of Technology",
+    "affiliation2": "e[ad] Escuela de Arquitectura y Diseño, PUCV",
     "license": "MIT License"
   }
 }
