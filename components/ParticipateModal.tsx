@@ -31,10 +31,10 @@ const ParticipateModal: React.FC<ParticipateModalProps> = ({ t, onClose }) => {
             <p className="font-medium mb-1">{t('participate.shareLibrary')}</p>
             <p className="text-violet-600 mb-3">{t('participate.shareInstructions')}</p>
             <a 
-              href="mailto:herbert.spencer@aut.ac.nz?subject=PICTOS.net%20Library%20Share"
+              href="mailto:contact@pictos.net?subject=PICTOS.net%20Library%20Share"
               className="inline-flex items-center gap-2 bg-white text-violet-700 font-medium px-4 py-2 rounded shadow-sm hover:shadow hover:bg-violet-50 transition-all text-xs"
             >
-              <Mail size={14} /> herbert.spencer@aut.ac.nz
+              <Mail size={14} /> contact@pictos.net
             </a>
           </div>
           <p>{t('participate.research')}</p>

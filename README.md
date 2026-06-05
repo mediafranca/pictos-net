@@ -264,7 +264,7 @@ PICTOS.NET es parte de [MediaFranca](https://github.com/mediafranca), un conjunt
 
 Los pictogramas y datos se almacenan **localmente en el navegador** (IndexedDB + localStorage). Para respaldar tu trabajo usa **Exportar Librería** — genera un JSON con todas las imágenes y metadatos del pipeline.
 
-Puedes compartir tu grafo exportado con comentarios a [hspencer@ead.cl](mailto:hspencer@ead.cl).
+Puedes compartir tu grafo exportado con comentarios a [contact@pictos.net](mailto:contact@pictos.net).
 
 ---
 

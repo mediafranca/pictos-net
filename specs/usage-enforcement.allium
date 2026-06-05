@@ -49,7 +49,7 @@ value QuotaCheckResult {
 config {
   daily_limit: Number = 50          -- overridable via DAILY_LIMIT_PER_USER env var
   blob_store: String = "pictonet-usage"
-  admin_email: String = "herbert.spencer@gmail.com"
+  admin_email: String = "contact@pictos.net"
 }
 
 ------------------------------------------------------------

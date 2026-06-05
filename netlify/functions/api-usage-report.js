@@ -2,7 +2,7 @@
  * Netlify Function: Usage Report (admin only)
  *
  * Returns daily usage summary from Netlify Blobs.
- * Restricted to the site owner (herbert.spencer@gmail.com).
+ * Restricted to the site owner.
  *
  * GET /.netlify/functions/api-usage-report?date=YYYY-MM-DD
  */
@@ -10,7 +10,7 @@
 import { getDailySummary } from './_shared/usage.js';
 import { connectBlobs } from './_shared/blobs.js';
 
-const ADMIN_EMAIL = 'herbert.spencer@gmail.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 const ALLOWED_ORIGINS = [
   'https://pictos.net',
