@@ -103,10 +103,10 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
       {/* Overlay */}
       <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-300">
         {/* Modal */}
-        <div className="bg-white border border-slate-200 rounded-2xl w-[92vw] max-w-[960px] max-h-[88vh] overflow-y-auto shadow-2xl relative">
+        <div className="bg-white border border-slate-200 rounded-2xl w-[92vw] max-w-[960px] max-h-[88vh] overflow-y-auto shadow-2xl relative flex flex-col">
 
           {/* Header */}
-          <div className="px-7 pt-6 flex justify-between items-start">
+          <div className="px-7 pt-6 flex justify-between items-start shrink-0">
             <div className="flex gap-2 items-center">
               {Array.from({ length: totalSteps }, (_, i) => (
                 <button
@@ -114,7 +114,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
                   onClick={() => setStep(i + 1)}
                   className={`w-2.5 h-2.5 rounded-full transition-all ${
                     i + 1 === step ? 'bg-violet-500 scale-125' :
-                    i + 1 < step ? 'bg-orange-400' : 'bg-slate-300'
+                    i + 1 < step ? 'bg-violet-200' : 'bg-slate-200'
                   }`}
                 />
               ))}
@@ -125,10 +125,11 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
           </div>
 
           {/* Body */}
-          <div className="px-7 pt-5 pb-6">
+          <div className="px-7 pt-5 pb-6 flex-1 overflow-y-auto">
             {step === 1 && <Step1 t={t} />}
-            {step === 2 && (
-              <Step2
+            {step === 2 && <Step2 t={t} />}
+            {step === 3 && (
+              <Step3
                 t={t}
                 lk={lk}
                 currentPhrase={currentPhrase}
@@ -136,19 +137,11 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
                 onLightbox={setLightboxSrc}
               />
             )}
-            {step === 3 && (
-              <Step3
-                t={t}
-                lk={lk}
-                selectedPreset={selectedPreset}
-                onSelectPreset={setSelectedPreset}
-              />
-            )}
             {step === 4 && <Step4 t={t} onAction={handleFinish} />}
           </div>
 
           {/* Footer */}
-          <div className="px-7 pb-6 flex justify-between items-center">
+          <div className="px-7 pb-6 flex justify-between items-center shrink-0">
             {step > 1 ? (
               <button
                 onClick={() => setStep(s => s - 1)}
@@ -163,17 +156,14 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
                 onClick={() => setStep(s => s + 1)}
                 className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500 text-sm font-medium"
               >
-                {step === 1 && t('onboarding.seeHow')}
-                {step === 2 && t('onboarding.makeItYours')}
-                {step === 3 && (selectedPreset ? t('onboarding.saveStyle') : t('onboarding.useDefault'))}
-                <ArrowRight size={14} />
+                {t('onboarding.next')} <ArrowRight size={14} />
               </button>
             ) : (
               <button
-                onClick={() => handleFinish()}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200 text-sm"
+                onClick={() => handleFinish('create')}
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500 text-sm font-medium"
               >
-                {t('onboarding.startWithout')}
+                {t('onboarding.finish')} <ArrowRight size={14} />
               </button>
             )}
           </div>
@@ -195,18 +185,25 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ t, lang, onClose, onS
 
 /* ── Step 1: Bienvenida ── */
 const Step1: React.FC<{ t: TFunc }> = ({ t }) => (
-  <div>
-    <h1 className="text-2xl font-semibold text-slate-900 mb-4 leading-tight">
-      {t('onboarding.step1.title')}<span className="text-violet-600">{t('onboarding.step1.highlight')}</span>
+  <div className="flex flex-col items-center text-center py-4">
+    <img src="/pictos-iso.svg" alt="PICTOS.net Logo" className="w-24 h-24 mb-6" />
+    <h1 className="text-3xl font-semibold text-slate-900 mb-2 leading-tight">
+      {t('onboarding.step1.title')}
     </h1>
-    <p className="text-slate-500 text-sm leading-relaxed mb-5">
-      {t('onboarding.step1.intro')}
+    <p className="text-slate-500 text-lg leading-relaxed mb-8 max-w-lg">
+      {t('onboarding.step1.subtitle')}
     </p>
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <FeatureCard icon={<Sparkles size={20} />} title={t('onboarding.step1.generative')} desc={t('onboarding.step1.generativeDesc')} />
-      <FeatureCard icon={<Settings size={20} />} title={t('onboarding.step1.customizable')} desc={t('onboarding.step1.customizableDesc')} />
-      <FeatureCard icon={<Globe size={20} />} title={t('onboarding.step1.open')} desc={t('onboarding.step1.openDesc')} />
-      <FeatureCard icon={<Users size={20} />} title={t('onboarding.step1.codesign')} desc={t('onboarding.step1.codesignDesc')} />
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full text-left">
+      <FeatureCard 
+        icon={<Settings size={20} />} 
+        title={t('onboarding.step1.privacy')} 
+        desc={t('onboarding.step1.privacyDesc')} 
+      />
+      <FeatureCard 
+        icon={<Users size={20} />} 
+        title={t('onboarding.step1.professional')} 
+        desc={t('onboarding.step1.professionalDesc')} 
+      />
     </div>
   </div>
 );
@@ -219,8 +216,32 @@ const FeatureCard: React.FC<{ icon: React.ReactNode; title: string; desc: string
   </div>
 );
 
-/* ── Step 2: Galería ── */
-const Step2: React.FC<{
+/* ── Step 2: La Librería ── */
+const Step2: React.FC<{ t: TFunc }> = ({ t }) => (
+  <div>
+    <h2 className="text-xl font-semibold text-slate-900 mb-2">{t('onboarding.step2.title')}</h2>
+    <p className="text-slate-500 text-sm leading-relaxed mb-6">
+      {t('onboarding.step2.subtitle')}
+    </p>
+
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-6">
+      <div className="flex items-start gap-4 mb-4">
+        <div className="bg-violet-100 text-violet-600 p-3 rounded-lg shrink-0">
+          <Settings size={24} />
+        </div>
+        <div>
+          <h3 className="text-slate-900 font-medium mb-1">{t('onboarding.step2.library')}</h3>
+          <p className="text-slate-500 text-sm leading-relaxed">
+            {t('onboarding.step2.libraryDesc')}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+/* ── Step 3: Galería (antiguo Step 2) ── */
+const Step3: React.FC<{
   t: TFunc;
   lk: 'es' | 'en';
   currentPhrase: number;
@@ -228,9 +249,9 @@ const Step2: React.FC<{
   onLightbox: (src: string) => void;
 }> = ({ t, lk, currentPhrase, onChangePhrase, onLightbox }) => (
   <div>
-    <h2 className="text-xl font-semibold text-slate-900 mb-1">{t('onboarding.step2.title')}</h2>
+    <h2 className="text-xl font-semibold text-slate-900 mb-1">{t('onboarding.step3.title')}</h2>
     <p className="text-slate-500 text-sm leading-relaxed mb-5">
-      {t('onboarding.step2.intro')}<strong className="text-slate-900">{t('onboarding.step2.introHighlight')}</strong>.
+      {t('onboarding.step3.intro')}
     </p>
 
     {/* Phrase nav */}
@@ -269,70 +290,10 @@ const Step2: React.FC<{
         </button>
       ))}
     </div>
-
-    <div className="bg-slate-50 border-l-[3px] border-violet-400 mt-5 px-4 py-3 rounded-r-lg">
-      <p className="text-slate-500 text-xs leading-relaxed">
-        <strong className="text-slate-700">{t('onboarding.step2.note')}</strong> {t('onboarding.step2.noteText')}
-      </p>
-    </div>
   </div>
 );
 
-/* ── Step 3: Elegir preset ── */
-const Step3: React.FC<{
-  t: TFunc;
-  lk: 'es' | 'en';
-  selectedPreset: string | null;
-  onSelectPreset: (id: string) => void;
-}> = ({ t, lk, selectedPreset, onSelectPreset }) => (
-  <div>
-    <h2 className="text-xl font-semibold text-slate-900 mb-1">{t('onboarding.step3.title')}</h2>
-    <p className="text-slate-500 text-xs mb-5">
-      {t('onboarding.step3.subtitle')}
-    </p>
-
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {STYLES.map(s => (
-        <button
-          key={s.id}
-          onClick={() => onSelectPreset(s.id)}
-          className={`text-left bg-white rounded-xl border-2 p-5 transition-all relative ${
-            selectedPreset === s.id
-              ? 'border-violet-500 bg-violet-50'
-              : 'border-slate-200 hover:border-violet-400'
-          }`}
-        >
-          {selectedPreset === s.id && (
-            <span className="absolute top-3 right-3 w-6 h-6 bg-violet-500 text-white rounded-full flex items-center justify-center text-xs">
-              &#10003;
-            </span>
-          )}
-          <h3 className="text-slate-900 text-sm font-medium mb-1">{s.label}</h3>
-          <p className="text-slate-500 text-xs leading-relaxed mb-3">{STYLE_DESCS[s.id][lk]}</p>
-          <div className="flex gap-1.5">
-            {PHRASES.slice(0, 3).map(p => (
-              <img
-                key={p.id}
-                src={imgSrc(s.id, p.id)}
-                alt=""
-                className="w-14 h-14 rounded-lg object-cover bg-slate-50"
-              />
-            ))}
-          </div>
-        </button>
-      ))}
-    </div>
-
-    <div className="bg-slate-50 border-l-[3px] border-violet-400 mt-5 px-4 py-3 rounded-r-lg">
-      <p className="text-slate-500 text-xs leading-relaxed">
-        <strong className="text-slate-700">{t('onboarding.step3.noteLabel')}</strong>{' '}
-        {t('onboarding.step3.noteText')}
-      </p>
-    </div>
-  </div>
-);
-
-/* ── Step 4: Caminos para empezar ── */
+/* ── Step 4: Caminos para empezar (antiguo Step 4) ── */
 const Step4: React.FC<{ t: TFunc; onAction: (action: 'import' | 'explore' | 'create') => void }> = ({ t, onAction }) => (
   <div>
     <h2 className="text-xl font-semibold text-slate-900 mb-1">{t('onboarding.step4.title')}</h2>
@@ -354,13 +315,6 @@ const Step4: React.FC<{ t: TFunc; onAction: (action: 'import' | 'explore' | 'cre
         <h3 className="text-slate-900 text-base font-medium mb-2">{t('onboarding.step4.create')}</h3>
         <p className="text-slate-500 text-xs leading-relaxed">{t('onboarding.step4.createDesc')}</p>
       </button>
-    </div>
-
-    <div className="bg-slate-50 border-l-[3px] border-violet-400 mt-5 px-4 py-3 rounded-r-lg">
-      <p className="text-slate-500 text-xs leading-relaxed">
-        <strong className="text-slate-700">{t('onboarding.step4.note')}</strong>{' '}
-        {t('onboarding.step4.noteText')}
-      </p>
     </div>
   </div>
 );

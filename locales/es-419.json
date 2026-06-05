@@ -485,50 +485,37 @@
     "childFills": "Rellenos de los hijos"
   },
   "onboarding": {
-    "skipAll": "Saltar todo",
+    "skipAll": "Saltar",
     "back": "Atrás",
-    "seeHow": "Ver cómo funciona",
-    "makeItYours": "Ahora hazlo tuyo",
-    "saveStyle": "Guardar estilo y empezar",
-    "useDefault": "Usar default",
-    "startWithout": "Empezar sin guía",
+    "next": "Siguiente",
+    "finish": "Empezar",
     "step1": {
-      "title": "Hola, esto es ",
-      "highlight": "PICTOS.net",
-      "intro": "Un sistema generativo de pictogramas para la comunicación aumentativa y alternativa (CAA). No es una biblioteca fija: crea pictogramas a partir de lo que escribes.",
-      "generative": "Generativo",
-      "generativeDesc": "Cada pictograma se crea desde tu frase, no se busca en un catálogo.",
-      "customizable": "Personalizable",
-      "customizableDesc": "Cambia el estilo visual con un prompt de texto. Tú defines la estética.",
-      "open": "Abierto",
-      "openDesc": "Tu vocabulario, tu idioma, tu contexto cultural. Sin restricciones.",
-      "codesign": "En construcción contigo",
-      "codesignDesc": "Esto es un prototipo activo. Tu trabajo alimenta la investigación."
+      "title": "PICTOS.net",
+      "subtitle": "convierte una frase escrita en un pictograma para la comunicación",
+      "privacy": "Los datos viven en tu navegador.",
+      "privacyDesc": "Todo lo que escribes se guarda en tu propio dispositivo.",
+      "professional": "El criterio profesional decide siempre.",
+      "professionalDesc": "La inteligencia artificial sugiere; tú conoces el contexto y decides."
     },
     "step2": {
-      "title": "Mira lo que puede hacer",
-      "intro": "La misma frase, cuatro estilos distintos. Solo cambia el ",
-      "introHighlight": "prompt de estilo",
-      "note": "Nota:",
-      "noteText": "Estos son ejemplos pre-generados. En tu espacio, cada frase se procesa en tiempo real con el modelo que elijas."
+      "title": "El Espacio de Trabajo",
+      "subtitle": "Antes de generar pictogramas, conviene preparar el espacio.",
+      "library": "La Librería",
+      "libraryDesc": "Se configura una sola vez por proyecto en el menú 'Librería'. Allí se define un Prompt de Estilo que asegura que todos los pictogramas generados conserven una misma identidad visual."
     },
     "step3": {
-      "title": "Define tu espacio",
-      "subtitle": "Elige un estilo base para tu biblioteca. Podrás cambiarlo o personalizarlo después.",
-      "noteLabel": "Esto se guarda como tu visualStylePrompt.",
-      "noteText": "Es un texto libre que describe cómo deben verse tus pictogramas. Puedes editarlo manualmente después en los ajustes."
+      "title": "Explora los estilos",
+      "intro": "Las bibliotecas de ejemplo sirven para explorar cómo se presenta la misma idea en distintos estilos visuales."
     },
     "step4": {
-      "title": "Tres caminos para empezar",
+      "title": "Cómo empezar",
       "subtitle": "Elige cómo quieres comenzar. No hay orden correcto.",
       "import": "Importar",
-      "importDesc": "Sube un archivo .txt con frases (una por línea) y genera pictogramas en lote.",
+      "importDesc": "Cargar una lista de frases (.txt) o librería exportada (.json).",
       "explore": "Explorar",
-      "exploreDesc": "Carga una de las bibliotecas de ejemplo y observa cómo funciona el sistema.",
+      "exploreDesc": "Abrir bibliotecas de ejemplo para ver resultados.",
       "create": "Crear",
-      "createDesc": "Escribe tu primera frase en el buscador y observa el pipeline paso a paso.",
-      "note": "Esto lo estamos construyendo contigo.",
-      "noteText": "Tu trabajo puede convertirse en ejemplo para otros."
+      "createDesc": "Escribir una frase en el buscador y generar un pictograma."
     }
   },
   "share": {

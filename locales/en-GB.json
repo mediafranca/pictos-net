@@ -485,50 +485,37 @@
     "childFills": "Child fills"
   },
   "onboarding": {
-    "skipAll": "Skip all",
+    "skipAll": "Skip",
     "back": "Back",
-    "seeHow": "See how it works",
-    "makeItYours": "Now make it yours",
-    "saveStyle": "Save style and start",
-    "useDefault": "Use default",
-    "startWithout": "Start without guide",
+    "next": "Next",
+    "finish": "Start",
     "step1": {
-      "title": "Welcome to ",
-      "highlight": "PICTOS.net",
-      "intro": "A generative pictogram system for augmentative and alternative communication (AAC). It is not a fixed library: it creates pictograms from what you write.",
-      "generative": "Generative",
-      "generativeDesc": "Each pictogram is created from your phrase, not fetched from a catalogue.",
-      "customizable": "Customisable",
-      "customizableDesc": "Change the visual style with a text prompt. You define the aesthetics.",
-      "open": "Open",
-      "openDesc": "Your vocabulary, your language, your cultural context. No restrictions.",
-      "codesign": "Built with you",
-      "codesignDesc": "This is an active prototype. Your work feeds the research."
+      "title": "PICTOS.net",
+      "subtitle": "converts a written phrase into a pictogram for communication",
+      "privacy": "Data lives in your browser.",
+      "privacyDesc": "Everything you type is saved on your own device.",
+      "professional": "Professional judgment always decides.",
+      "professionalDesc": "Artificial intelligence suggests; you know the context and decide."
     },
     "step2": {
-      "title": "See what it can do",
-      "intro": "The same phrase, four different styles. Only the ",
-      "introHighlight": "style prompt",
-      "note": "Note:",
-      "noteText": "These are pre-generated examples. In your space, each phrase is processed in real time with the model you choose."
+      "title": "The Workspace",
+      "subtitle": "Before generating pictograms, it is advisable to prepare the space.",
+      "library": "The Library",
+      "libraryDesc": "Configured once per project in the 'Library' menu. There you define a Style Prompt that ensures all generated pictograms keep the same visual identity."
     },
     "step3": {
-      "title": "Define your space",
-      "subtitle": "Choose a base style for your library. You can change or customise it later.",
-      "noteLabel": "This is saved as your visualStylePrompt.",
-      "noteText": "It is a free-form text describing how your pictograms should look. You can edit it manually later in settings."
+      "title": "Explore the styles",
+      "intro": "The example libraries serve to explore how the same idea is presented in different visual styles."
     },
     "step4": {
-      "title": "Three ways to start",
+      "title": "How to start",
       "subtitle": "Choose how you want to begin. There is no right order.",
       "import": "Import",
-      "importDesc": "Upload a .txt file with phrases (one per line) and generate pictograms in batch.",
+      "importDesc": "Load a list of phrases (.txt) or exported library (.json).",
       "explore": "Explore",
-      "exploreDesc": "Load one of the example libraries and see how the system works.",
+      "exploreDesc": "Open example libraries to see results.",
       "create": "Create",
-      "createDesc": "Type your first phrase in the search bar and watch the pipeline step by step.",
-      "note": "We are building this with you.",
-      "noteText": "Your work can become an example for others."
+      "createDesc": "Type a phrase in the search bar and generate a pictogram."
     }
   },
   "share": {
