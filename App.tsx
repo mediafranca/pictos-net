@@ -895,6 +895,23 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     setRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   };
 
+  const handleStopProcess = (rowId: string) => {
+    stopFlags.current[rowId] = true;
+    setRows(prev => {
+      const row = prev.find(r => r.id === rowId);
+      if (!row) return prev;
+      addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
+      return prev.map(r => r.id === rowId ? {
+        ...r,
+        status: 'idle',
+        nluStatus: r.nluStatus === 'processing' ? 'idle' : r.nluStatus,
+        visualStatus: r.visualStatus === 'processing' ? 'idle' : r.visualStatus,
+        bitmapStatus: r.bitmapStatus === 'processing' ? 'idle' : r.bitmapStatus,
+        structuredSvgStatus: r.structuredSvgStatus === 'processing' ? 'idle' : r.structuredSvgStatus,
+      } : r);
+    });
+  };
+
   // === Intervention recording (see specs/intervention-recording.allium) ===
 
   // Snapshot of phase artifacts at session start / last commit, used to detect
@@ -1178,6 +1195,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       }
       return true;
     } catch (err: any) {
+      if (stopFlags.current[rowId]) return false;
       if (err instanceof QuotaExceededError) {
         setQuotaModal({ units_used: err.units_used, limit: err.limit });
         updateRowById(rowId, { [statusKey]: 'idle' });
@@ -1279,6 +1297,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       });
 
     } catch (err: any) {
+      if (stopFlags.current[rowId]) return;
       if (err instanceof QuotaExceededError) {
         setQuotaModal({ units_used: err.units_used, limit: err.limit });
         updateRowById(rowId, { status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle' });
@@ -1994,10 +2013,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 row={row}
                 onUpdate={u => updateRowById(row.id, u)}
                 onCascade={() => processCascade(row.id)}
-                onStop={() => {
-                  stopFlags.current[row.id] = true;
-                  addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
-                }}
+                onStop={() => handleStopProcess(row.id)}
                 onFocus={step => setFocusMode({ step, rowId: row.id })}
                 onOpenEditor={source => openSVGEditor(row.id, source)}
                 onSettleField={() => settleRowEdits(row.id)}
@@ -2012,10 +2028,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => { handleOpenRowChange(v ? row.id : null); if (v) setShowConfig(false); }}
                   onUpdate={u => updateRowById(row.id, u)} onProcess={s => processStep(row.id, s)}
                   onRegeneratePrompt={() => regeneratePrompt(row.id)}
-                  onStop={() => {
-                    stopFlags.current[row.id] = true;
-                    addLog('info', t('messages.stopRequested', { utterance: row.UTTERANCE }));
-                  }}
+                  onStop={() => handleStopProcess(row.id)}
                   onCascade={() => processCascade(row.id)}
                   onDelete={() => {
                     // Delete bitmap and SVG from IndexedDB
@@ -2145,10 +2158,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onRecordElementOp={(op, before, after) => recordElementOp(focusMode!.rowId, op, before, after)}
           onSettleField={() => settleRowEdits(focusMode!.rowId)}
           onProcess={(step) => processStep(focusMode!.rowId, step)}
-          onStop={() => {
-            stopFlags.current[focusMode!.rowId] = true;
-            addLog('info', t('messages.stopRequested', { utterance: focusedRowData.UTTERANCE }));
-          }}
+          onStop={() => handleStopProcess(focusMode!.rowId)}
           onDiscardSvg={(phase, previousSvg) => {
             // See the matching handler on RowComponent above for rationale.
             const metrics = Recording.computeSvgMetrics(previousSvg);

@@ -66,7 +66,7 @@ export const generateSVG = async (
         ? `\nContexto semántico: ${row.NLU.visual_guidelines?.focus_actor || ''} — ${row.NLU.visual_guidelines?.action_core || ''} — ${row.NLU.visual_guidelines?.object_core || ''}`
         : '';
 
-    const fullPrompt = [
+    let fullPrompt = [
         `Pictograma AAC: "${row.UTTERANCE}"`,
         nluContext,
         '',
@@ -80,6 +80,14 @@ export const generateSVG = async (
         '',
         'Sin texto. Sin etiquetas. Sin marcas de agua. Fondo blanco. Diseño plano.',
     ].filter(s => s !== undefined).join('\n');
+
+    if (fullPrompt.length > 2000) {
+        const style = config.visualStylePrompt || 'Estilo pictograma plano, sin texto, diseño vectorial simple, fondo blanco.';
+        const suffix = `\n\n${style}\nSin texto. Sin etiquetas. Sin marcas de agua. Fondo blanco. Diseño plano.`;
+        const prefix = `Pictograma AAC: "${row.UTTERANCE}"\n${nluContext}\n\nElementos:\n${formatElements(elements)}\n\nComposición espacial:\n${prompt}`;
+        const maxPrefixLen = 1995 - suffix.length; // Leave a few characters margin
+        fullPrompt = prefix.slice(0, maxPrefixLen) + suffix;
+    }
 
     onLog?.('info', '[PRODUCIR] Enviando prompt a Recraft…');
     const colors = config.paletteColors?.filter(c => /^#[0-9a-fA-F]{6}$/.test(c));
