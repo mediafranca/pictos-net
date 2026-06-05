@@ -56,9 +56,9 @@ export const handler = async (event, context) => {
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
 
-  let prompt, style, substyle;
+  let prompt;
   try {
-    ({ prompt, style, substyle } = JSON.parse(event.body));
+    ({ prompt } = JSON.parse(event.body));
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
@@ -82,18 +82,16 @@ export const handler = async (event, context) => {
     };
   }
 
-  console.log(`[api-recraft] user=${email} style=${style || 'vector_illustration'} today=${quota.units_used}/${quota.limit}`);
+  console.log(`[api-recraft] user=${email} model=recraftv4_1_vector today=${quota.units_used}/${quota.limit}`);
 
   const startMs = Date.now();
 
   try {
     const body = {
-      model: 'recraftv3_svg',
+      model: 'recraftv4_1_vector',
       prompt,
       n: 1,
     };
-    if (style) body.style = style;
-    if (substyle) body.substyle = substyle;
 
     const recraftRes = await fetch(RECRAFT_API_URL, {
       method: 'POST',

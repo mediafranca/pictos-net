@@ -90,8 +90,6 @@ export function extractToolUse(response: ClaudeResponse, toolName: string): any 
 
 export interface RecraftParams {
     prompt: string;
-    style?: string;
-    substyle?: string;
 }
 
 export interface RecraftResponse {

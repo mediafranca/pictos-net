@@ -198,10 +198,11 @@ export interface GlobalConfig {
     lng: string;
     region: string;
   };
-  /** @deprecated Moved to COMPRENDER pipeline step. Do not use in UI. */
   annotatedContext?: string;
-  aspectRatio: string; // '1:1', '3:4', '4:3', '9:16', '16:9'
-  imageModel: string; // 'flash' | 'pro'
+  /** @deprecated v2.0 — was Gemini Image aspect ratio; Recraft V4.1 uses fixed size. Kept for persistence compatibility. */
+  aspectRatio: string;
+  /** @deprecated v2.0 — was Gemini flash/pro model selector. No effect in current pipeline. Kept for persistence compatibility. */
+  imageModel: string;
   name: string;
   credits?: string; // Autores/institución para atribución de la librería
   license: string;

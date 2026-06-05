@@ -60,11 +60,7 @@ export const generateSVG = async (
     ].filter(s => s !== undefined).join('\n');
 
     onLog?.('info', '[PRODUCIR] Enviando prompt a Recraft…');
-    const response = await callRecraft({
-        prompt: fullPrompt,
-        style: 'vector_illustration',
-        substyle: 'flat_design_cutout',
-    });
+    const response = await callRecraft({ prompt: fullPrompt });
 
     if (!response.svg || !response.svg.includes('<svg')) {
         throw new Error('Recraft no devolvió un SVG válido');

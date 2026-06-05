@@ -1172,7 +1172,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (step === 'bitmap') {
         requestAnimationFrame(() => {
           const rowEl = document.getElementById(`picto-row-${rowId}`);
-          const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+          const bitmapEl = rowEl?.querySelector('#svg-preview');
           if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
       }
@@ -1269,7 +1269,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       requestAnimationFrame(() => {
         const rowEl = document.getElementById(`picto-row-${row.id}`);
-        const bitmapEl = rowEl?.querySelector('#bitmap-preview');
+        const bitmapEl = rowEl?.querySelector('#svg-preview');
         if (bitmapEl) bitmapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
 
@@ -1731,26 +1731,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
             {/* ── Col 3: Generación y preferencias ── */}
             <div className="flex flex-col gap-4">
-
-              {/* field-aspect-ratio */}
-              <div id="field-aspect-ratio">
-                <FieldLabel
-                  label={t('config.proportion')}
-                  tooltip={t('config.aspectRatioTooltip')}
-                />
-                <select
-                  value={config.aspectRatio}
-                  onChange={e => setConfig({ ...config, aspectRatio: e.target.value })}
-                  className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
-                >
-                  <option value="1:1">{t('config.aspectRatios.square')}</option>
-                  <option value="4:3">{t('config.aspectRatios.standard')}</option>
-                  <option value="3:4">{t('config.aspectRatios.portrait')}</option>
-                  <option value="16:9">{t('config.aspectRatios.widescreen')}</option>
-                  <option value="9:16">{t('config.aspectRatios.mobile')}</option>
-                </select>
-              </div>
-
 
               {/* field-reduce-motion */}
               <div id="field-reduce-motion">
@@ -2619,43 +2599,9 @@ const RowComponent: React.FC<{
             <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('bitmap')} onStop={onStop} onFocus={() => onFocus('bitmap')} duration={row.bitmapDuration}
             >
               <div className="flex flex-col h-full gap-4">
-                <div className="flex items-center gap-2 px-1">
-                  <select
-                    value={config.imageModel || 'flash'}
-                    onChange={e => onConfigChange({ ...config, imageModel: e.target.value })}
-                    className="text-xs border border-slate-200 rounded px-2 py-1 bg-slate-50 hover:bg-white focus:bg-white transition-colors"
-                    title={t('config.imageModelTooltip')}
-                  >
-                    <option value="flash">{t('config.imageModels.flash')}</option>
-                    <option value="pro">{t('config.imageModels.pro')}</option>
-                  </select>
-                </div>
-                <div
-                  id="bitmap-preview"
-                  className="relative border border-slate-200 flex items-start justify-center p-4 shadow-inner overflow-hidden group/preview min-h-[250px]"
-                >
-                  {(() => {
-                    const bitmap = validBitmap(row);
-                    return bitmap ? (
-                      <>
-                        <img src={bitmap} alt={row.UTTERANCE} className="max-w-full max-h-full object-contain transition-transform duration-500 group-hover/preview:scale-110" />
-                        <button
-                          onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = bitmap; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }}
-                          className="absolute bottom-2 right-2 opacity-0 group-hover/preview:opacity-100 transition-opacity p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
-                          title={t('actions.downloadPng')}
-                        >
-                          <FileDown size={14} />
-                        </button>
-                      </>
-                    ) : (
-                      <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
-                    );
-                  })()}
-                </div>
 
-                {/* SVG Generation - same height as bitmap */}
-                {hasValidBitmap(row) && (
-                  <div className="border-t border-slate-200 min-h-[250px] flex flex-col">
+                {hasAnyValidSvg(row) ? (
+                  <div id="svg-preview" className="min-h-[250px] flex flex-col">
                     <SVGGenerator
                       row={row}
                       config={config}
@@ -2666,8 +2612,11 @@ const RowComponent: React.FC<{
                       onDiscardSvg={onDiscardSvg}
                     />
                   </div>
+                ) : (
+                  <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">
+                    <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noBitmapRender')}</div>
+                  </div>
                 )}
-
 
               </div>
             </StepBox>
@@ -3619,13 +3568,16 @@ const FocusViewModal: React.FC<{
         </div>
       );
       case 'bitmap': {
-        const bitmap = validBitmap(row);
+        const rawSvgContent = validRawSvg(row);
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
-            {bitmap ? (
-              <img src={bitmap} className="max-w-full max-h-full object-contain shadow-2xl bg-white" alt={row.UTTERANCE} />
+            {rawSvgContent ? (
+              <div
+                dangerouslySetInnerHTML={{ __html: injectSvgA11y(rawSvgContent, row.UTTERANCE) }}
+                className="w-full h-full max-w-full max-h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full shadow-2xl bg-white"
+              />
             ) : (
-              <p className="text-slate-500 font-mono">No bitmap generated yet.</p>
+              <p className="text-slate-500 font-mono">{t('editor.noBitmapRender')}</p>
             )}
           </div>
         );
@@ -3634,30 +3586,13 @@ const FocusViewModal: React.FC<{
         const hasRaw = !!validRawSvg(row);
         const hasStructured = !!validStructuredSvg(row);
 
-        // Nothing yet: two-column layout. Left = trace CTA, right = disabled
-        // with a message pointing at the left. See specs/library-views.allium.
+        // Nothing yet: rawSvg comes from phase 3 (Recraft) — run PRODUCIR first.
         if (!hasRaw && !hasStructured) {
           return (
-            <div className="flex flex-row gap-3 h-full bg-slate-50 p-6">
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-6">
-                <FileCode size={40} className="text-slate-400" />
-                <p className="text-sm text-slate-500 text-center">{t('svg.traceConverts')}</p>
-                <button
-                  onClick={() => onOpenVectorizer?.()}
-                  className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-black transition-all shadow-lg"
-                >
-                  {t('svg.traceSvg')}
-                </button>
-              </div>
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-slate-100/50 border border-dashed border-slate-300 p-6 opacity-70">
-                <Layers size={40} className="text-slate-300" />
-                <p className="text-xs text-slate-500 text-center max-w-xs">{t('library.structureRequiresRaw')}</p>
-                <button
-                  disabled
-                  className="flex items-center gap-2 bg-slate-200 text-slate-400 px-6 py-3 font-bold uppercase text-xs tracking-widest cursor-not-allowed"
-                >
-                  <Layers size={14} /> {t('svg.formatGemini')}
-                </button>
+            <div className="flex items-center justify-center h-full bg-slate-50 p-6">
+              <div className="flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-8 max-w-xs text-center">
+                <FileCode size={40} className="text-slate-300" />
+                <p className="text-sm text-slate-500">{t('library.structureRequiresRaw')}</p>
               </div>
             </div>
           );
@@ -3729,10 +3664,10 @@ const FocusViewModal: React.FC<{
               );
             })()}
             {(() => {
-              const bitmap = validBitmap(row);
-              return (mode === 'bitmap' || mode === 'format') && bitmap && (
-                <button onClick={() => { const a = document.createElement('a'); a.href = bitmap; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`; a.click(); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                  <Download size={14} /> PNG
+              const rawSvgContent = validRawSvg(row);
+              return mode === 'bitmap' && rawSvgContent && (
+                <button onClick={() => { const blob = new Blob([rawSvgContent], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}_raw.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                  <Download size={14} /> SVG
                 </button>
               );
             })()}
