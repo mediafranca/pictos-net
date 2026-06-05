@@ -15,7 +15,7 @@
  *                                          ms, tokens_in, tokens_out, ok, error_msg }
  */
 
-import { getStore } from '@netlify/blobs';
+import { getBlobStore as getStore } from './blobs.js';
 
 const DAILY_LIMIT = parseInt(process.env.DAILY_LIMIT_PER_USER ?? '50', 10);
 const STORE_NAME = 'pictonet-usage';

@@ -1,0 +1,165 @@
+/**
+ * Netlify Background Function: Recraft V3 SVG Proxy
+ * This runs in the background (up to 15 mins) to bypass the 10-second limit
+ * on synchronous Netlify functions.
+ * It stores the result in Netlify Blobs for the client to poll.
+ */
+
+import { checkAndCharge, logCall } from './_shared/usage.js';
+import { getBlobStore as getStore } from './_shared/blobs.js';
+
+const RECRAFT_API_URL = 'https://external.api.recraft.ai/v1/images/generations';
+
+export const handler = async (event, context) => {
+  let bodyPayload;
+  try {
+    bodyPayload = JSON.parse(event.body);
+  } catch (err) {
+    console.error('[api-recraft-worker] Invalid JSON body');
+    return;
+  }
+
+  const { prompt, colors, jobId } = bodyPayload;
+  if (!jobId || !prompt) {
+    console.error('[api-recraft-worker] Missing jobId or prompt');
+    return;
+  }
+
+  const store = getStore('recraft-jobs');
+  
+  // Set initial status to pending so poller knows it started
+  await store.setJSON(jobId, { pending: true });
+
+  const { user } = context.clientContext || {};
+  const isLocalDev = process.env.NETLIFY_DEV === 'true';
+  const email = user?.email ?? 'dev';
+
+  if (!isLocalDev && !user) {
+    await store.setJSON(jobId, { error: 'Unauthorized' });
+    return;
+  }
+
+  const apiKey = process.env.RECRAFT_API_KEY;
+  if (!apiKey) {
+    await store.setJSON(jobId, { error: 'Server configuration error' });
+    return;
+  }
+
+  if (prompt.length > 10000) {
+    await store.setJSON(jobId, { error: 'Prompt too long (max 10000 characters)' });
+    return;
+  }
+
+  // Quota check
+  const quota = await checkAndCharge(email, 1);
+  if (!quota.allowed) {
+    console.warn(`[api-recraft-worker] quota exceeded for ${email} (${quota.units_used}/${quota.limit})`);
+    await store.setJSON(jobId, {
+      error: 'Daily quota exceeded',
+      quotaExceeded: true,
+      units_used: quota.units_used,
+      limit: quota.limit,
+    });
+    return;
+  }
+
+  console.log(`[api-recraft-worker] user=${email} model=recraftv4_1_vector today=${quota.units_used}/${quota.limit} jobId=${jobId}`);
+
+  const startMs = Date.now();
+
+  try {
+    const body = {
+      model: 'recraftv4_1_vector',
+      prompt,
+      n: 1,
+      size: '1:1',
+      ...(Array.isArray(colors) && colors.length > 0 ? {
+        controls: {
+          colors: colors.slice(0, 10).map(hex => ({
+            rgb: [
+              parseInt(hex.slice(1, 3), 16),
+              parseInt(hex.slice(3, 5), 16),
+              parseInt(hex.slice(5, 7), 16),
+            ],
+          })),
+        },
+      } : {}),
+    };
+
+    const recraftRes = await fetch(RECRAFT_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!recraftRes.ok) {
+      const errText = await recraftRes.text().catch(() => recraftRes.statusText);
+      console.error(`[api-recraft-worker] Recraft error ${recraftRes.status}: ${errText}`);
+      await logCall({
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        ms: Date.now() - startMs,
+        tokens_in: 0, tokens_out: 0, ok: false, error_msg: `Recraft ${recraftRes.status}: ${errText}`,
+      });
+      await store.setJSON(jobId, { error: `Recraft error: ${errText}` });
+      return;
+    }
+
+    const data = await recraftRes.json();
+    const imageUrl = data?.data?.[0]?.url;
+
+    if (!imageUrl) {
+      console.error('[api-recraft-worker] No image URL in response');
+      await logCall({
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        ms: Date.now() - startMs,
+        tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'No image URL in Recraft response',
+      });
+      await store.setJSON(jobId, { error: 'Recraft returned no image URL' });
+      return;
+    }
+
+    const svgRes = await fetch(imageUrl);
+    if (!svgRes.ok) {
+      await logCall({
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        ms: Date.now() - startMs,
+        tokens_in: 0, tokens_out: 0, ok: false, error_msg: `CDN fetch failed: ${svgRes.status}`,
+      });
+      await store.setJSON(jobId, { error: `Failed to fetch SVG from Recraft CDN: ${svgRes.status}` });
+      return;
+    }
+
+    const svgContent = await svgRes.text();
+
+    if (!svgContent.trim().startsWith('<') && !svgContent.includes('<svg')) {
+      await logCall({
+        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        ms: Date.now() - startMs,
+        tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'Response not valid SVG',
+      });
+      await store.setJSON(jobId, { error: 'Recraft response is not valid SVG' });
+      return;
+    }
+
+    const ms = Date.now() - startMs;
+    await logCall({
+      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+      ms, tokens_in: 0, tokens_out: Math.round(svgContent.length / 4), ok: true,
+    });
+
+    // Save final SVG success
+    await store.setJSON(jobId, { svg: svgContent });
+
+  } catch (error) {
+    console.error(`[api-recraft-worker] Error: ${error.message}`);
+    await logCall({
+      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+      ms: Date.now() - startMs,
+      tokens_in: 0, tokens_out: 0, ok: false, error_msg: error.message,
+    });
+    await store.setJSON(jobId, { error: error.message || 'Recraft service error' });
+  }
+};

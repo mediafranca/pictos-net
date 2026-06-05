@@ -115,9 +115,54 @@ export interface RecraftResponse {
 }
 
 /**
- * Call Recraft via the api-recraft Netlify function.
+ * Call Recraft via the Background Worker and polling.
  * Returns { svg: string } — the raw SVG content from Recraft.
  */
 export async function callRecraft(params: RecraftParams): Promise<RecraftResponse> {
-    return callProxy('api-recraft', params);
+    const jobId = 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    const isLocalDev = import.meta.env.DEV;
+    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isLocalDev) {
+        const token = await getAuthToken();
+        reqHeaders['Authorization'] = `Bearer ${token}`;
+    }
+
+    // 1. Iniciar el worker en segundo plano
+    const startRes = await fetch('/.netlify/functions/api-recraft-worker-background', {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify({ ...params, jobId }),
+    });
+
+    // Netlify Background Functions devuelven 202 Accepted.
+    if (!startRes.ok && startRes.status !== 202) {
+        throw new Error(`Fallo al iniciar el trabajo de Recraft: ${startRes.statusText}`);
+    }
+
+    // 2. Hacer polling hasta por 60 segundos
+    for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        
+        const pollRes = await fetch(`/.netlify/functions/api-recraft-poll?jobId=${jobId}`, {
+            headers: reqHeaders
+        });
+        
+        if (!pollRes.ok) {
+            // Ignorar errores temporales 5xx de red y seguir intentando
+            if ([502, 503, 504].includes(pollRes.status)) continue;
+            const err = await pollRes.json().catch(() => ({}));
+            throw new Error(err.error || `Proxy error ${pollRes.status}`);
+        }
+
+        const data = await pollRes.json();
+        
+        if (data.svg) return { svg: data.svg };
+        if (data.quotaExceeded) {
+            throw new QuotaExceededError(data.units_used ?? 0, data.limit ?? 100);
+        }
+        if (data.error) throw new Error(data.error);
+        if (data.pending) continue;
+    }
+
+    throw new Error('Tiempo de espera agotado tras 60s generando el pictograma');
 }
