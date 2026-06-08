@@ -53,6 +53,7 @@
     "viewListTooltip": "View library as list",
     "viewGrid": "Pictogram view",
     "viewGridTooltip": "View library as pictogram grid",
+    "stageBitmap": "bitmap",
     "stageRaw": "traced",
     "stageStructured": "struct.",
     "openInFocus": "Open \"{utterance}\" in focus view",

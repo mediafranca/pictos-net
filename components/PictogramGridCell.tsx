@@ -21,10 +21,10 @@ import { Play, Square, FileDown, Edit } from 'lucide-react';
 import type { RowData, StepStatus } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { injectSvgA11y } from '../utils/svgAccessibility';
-import { validRawSvg, validStructuredSvg } from '../utils/rowArtifacts';
+import { validRawSvg, validStructuredSvg, validBitmap } from '../utils/rowArtifacts';
 
 type FocusStep = 'nlu' | 'visual' | 'produce' | 'format';
-type DisplayStage = 'none' | 'trazado' | 'estructurado';
+type DisplayStage = 'none' | 'bitmap' | 'trazado' | 'estructurado';
 
 interface Props {
   row: RowData;
@@ -39,6 +39,7 @@ interface Props {
 const stageOf = (row: RowData): DisplayStage => {
   if (validStructuredSvg(row)) return 'estructurado';
   if (validRawSvg(row)) return 'trazado';
+  if (validBitmap(row)) return 'bitmap';
   return 'none';
 };
 
@@ -74,6 +75,7 @@ export const PictogramGridCell: React.FC<Props> = ({
 
   const stageLabel: Record<DisplayStage, string> = {
     none: '',
+    bitmap: t('library.stageBitmap'),
     trazado: t('library.stageRaw'),
     estructurado: t('library.stageStructured'),
   };
@@ -82,6 +84,7 @@ export const PictogramGridCell: React.FC<Props> = ({
     const slug = row.UTTERANCE.replace(/\s+/g, '_').toLowerCase() || 'pictogram';
     const structured = validStructuredSvg(row);
     const raw = validRawSvg(row);
+    const bmp = validBitmap(row);
     if (stage === 'estructurado' && structured) {
       const blob = new Blob([structured], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
@@ -94,12 +97,16 @@ export const PictogramGridCell: React.FC<Props> = ({
       const a = document.createElement('a');
       a.href = url; a.download = `${slug}.svg`; a.click();
       URL.revokeObjectURL(url);
+    } else if (stage === 'bitmap' && bmp) {
+      const a = document.createElement('a');
+      a.href = bmp; a.download = `${slug}.png`; a.click();
     }
   };
 
   const renderPictogram = () => {
     const structured = validStructuredSvg(row);
     const raw = validRawSvg(row);
+    const bmp = validBitmap(row);
     if (stage === 'estructurado' && structured) {
       return (
         <div
@@ -113,6 +120,15 @@ export const PictogramGridCell: React.FC<Props> = ({
         <div
           className="w-full h-full flex items-center justify-center p-4"
           dangerouslySetInnerHTML={{ __html: injectSvgA11y(raw, row.UTTERANCE, row.prompt) }}
+        />
+      );
+    }
+    if (stage === 'bitmap' && bmp) {
+      return (
+        <img
+          src={bmp}
+          alt={row.UTTERANCE}
+          className="w-full h-full object-contain p-4"
         />
       );
     }
@@ -144,22 +160,20 @@ export const PictogramGridCell: React.FC<Props> = ({
         className="relative aspect-square bg-slate-50 cursor-pointer overflow-hidden"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        onClick={() => { if (stage !== 'none') onFocus('nlu'); }}
+        onClick={() => { if (stage !== 'none') onFocus(stage === 'bitmap' ? 'produce' : 'nlu'); }}
         role={stage !== 'none' ? 'button' : undefined}
         aria-label={stage !== 'none' ? t('library.openInFocus', { utterance: row.UTTERANCE }) : undefined}
         tabIndex={stage !== 'none' ? 0 : -1}
-        onKeyDown={(e) => { if (stage !== 'none' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onFocus('nlu'); } }}
+        onKeyDown={(e) => { if (stage !== 'none' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onFocus(stage === 'bitmap' ? 'produce' : 'nlu'); } }}
       >
         {renderPictogram()}
 
-        {/* Hover overlay: stage pill (SVG stages only) + actions */}
+        {/* Hover overlay: stage pill + actions */}
         {stage !== 'none' && isHovered && (
           <>
-            {(stage === 'trazado' || stage === 'estructurado') && (
-              <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded">
-                {stageLabel[stage]}
-              </div>
-            )}
+            <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded">
+              {stageLabel[stage]}
+            </div>
             <div className="absolute bottom-2 right-2 flex gap-1">
               {(stage === 'trazado' || stage === 'estructurado') && (
                 <button

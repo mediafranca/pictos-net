@@ -53,6 +53,7 @@
     "viewListTooltip": "Ver librería como lista",
     "viewGrid": "Vista de pictogramas",
     "viewGridTooltip": "Ver librería como cuadrícula",
+    "stageBitmap": "bitmap",
     "stageRaw": "trazado",
     "stageStructured": "estruc.",
     "openInFocus": "Abrir \"{utterance}\" en vista enfocada",
