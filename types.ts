@@ -197,8 +197,8 @@ import type { StyleDefinition, KeyframeDefinition } from './lib/style-editor/lib
 /** The five Phase 3 generation models, by stable API identifier. */
 export type GenerationModel =
   | 'gemini-2.5-flash-image'
-  | 'gemini-3.1-flash-image-preview'
-  | 'gemini-3-pro-image-preview'
+  | 'gemini-3.1-flash-image'
+  | 'gemini-3-pro-image'
   | 'recraftv4_1'
   | 'recraftv4_1_vector';
 
@@ -213,9 +213,9 @@ export const DEFAULT_GENERATION_MODEL: GenerationModel = 'gemini-2.5-flash-image
 
 /** Human-readable labels for GenerationModel values (used by GenerationModelSelector). */
 export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
-  'gemini-2.5-flash-image': 'Gemini Flash',
-  'gemini-3.1-flash-image-preview': 'Gemini Flash 3.1',
-  'gemini-3-pro-image-preview': 'Gemini Pro',
+  'gemini-2.5-flash-image': 'Gemini 2.5 Flash',
+  'gemini-3.1-flash-image': 'Gemini 3.1 Flash',
+  'gemini-3-pro-image': 'Gemini 3 Pro',
   'recraftv4_1': 'Recraft (raster)',
   'recraftv4_1_vector': 'Recraft (vector)',
 };
@@ -224,8 +224,22 @@ export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
 export function migrateImageModel(imageModel: string | undefined): GenerationModel {
   if (!imageModel || imageModel === 'recraftv4_1_vector') return 'recraftv4_1_vector';
   if (imageModel === 'recraftv4_1') return 'recraftv4_1';
-  if (imageModel.includes('pro')) return 'gemini-3-pro-image-preview';
+  if (imageModel.includes('pro')) return 'gemini-3-pro-image';
   if (imageModel.includes('flash') || imageModel.startsWith('gemini')) return 'gemini-2.5-flash-image';
+  return DEFAULT_GENERATION_MODEL;
+}
+
+const VALID_GENERATION_MODELS: readonly GenerationModel[] = [
+  'gemini-2.5-flash-image', 'gemini-3.1-flash-image', 'gemini-3-pro-image',
+  'recraftv4_1', 'recraftv4_1_vector',
+];
+
+/** Migrates a stored generationModel string — maps removed -preview IDs to stable IDs. */
+export function migrateGenerationModel(model: string | undefined): GenerationModel {
+  if (!model) return DEFAULT_GENERATION_MODEL;
+  if (model === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-flash-image';
+  if (model === 'gemini-3-pro-image-preview') return 'gemini-3-pro-image';
+  if ((VALID_GENERATION_MODELS as readonly string[]).includes(model)) return model as GenerationModel;
   return DEFAULT_GENERATION_MODEL;
 }
 

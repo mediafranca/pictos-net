@@ -16,8 +16,8 @@ const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models
 
 const ALLOWED_MODELS = [
   'gemini-2.5-flash-image',
-  'gemini-3.1-flash-image-preview',
-  'gemini-3-pro-image-preview',
+  'gemini-3.1-flash-image',
+  'gemini-3-pro-image',
 ];
 
 export const handler = async (event, context) => {
@@ -110,6 +110,7 @@ export const handler = async (event, context) => {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           responseModalities: ['IMAGE'],
+          imageConfig: { aspectRatio: '1:1', imageSize: '1K' },
         },
       }),
     });

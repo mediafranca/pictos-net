@@ -142,11 +142,12 @@ Reglas:
     const response = await callClaude({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
-        system,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         tools: [{
             name: 'analyze_utterance',
             description: 'Return the NLU semantic analysis of the communicative intention.',
             input_schema: NLU_TOOL_SCHEMA,
+            cache_control: { type: 'ephemeral' },
         }],
         tool_choice: { type: 'tool', name: 'analyze_utterance' },
         messages: [{ role: 'user', content: `UTTERANCE: "${utterance}"` }],
@@ -230,11 +231,12 @@ You MUST invoke the compose_pictogram tool with both \`elements\` and \`prompt\`
     const response = await callClaude({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
-        system,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         tools: [{
             name: 'compose_pictogram',
             description: 'Return the visual DOM (elements hierarchy) and the spatial prompt for Recraft.',
             input_schema: COMPOSE_TOOL_SCHEMA,
+            cache_control: { type: 'ephemeral' },
         }],
         tool_choice: { type: 'tool', name: 'compose_pictogram' },
         messages: [{ role: 'user', content: `NLU Semantics: ${JSON.stringify(nlu)}` }],

@@ -69,10 +69,21 @@ async function callProxy(endpoint: string, params: object): Promise<any> {
     throw new Error('Max retries exceeded');
 }
 
+export interface CacheControl {
+    type: 'ephemeral';
+}
+
+export interface ClaudeTextBlock {
+    type: 'text';
+    text: string;
+    cache_control?: CacheControl;
+}
+
 export interface ClaudeParams {
     model: string;
     max_tokens?: number;
-    system?: string;
+    /** Accepts a plain string or a content-block array (required for cache_control). */
+    system?: string | ClaudeTextBlock[];
     tools?: object[];
     tool_choice?: object;
     messages: object[];

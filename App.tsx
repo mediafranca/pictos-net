@@ -18,7 +18,7 @@ import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
 import * as Gemini from './services/geminiService';
 import { QuotaExceededError } from './services/aiClient';
-import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, GENERATION_MODEL_LABELS, Phase3Result } from './types';
+import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, migrateGenerationModel, GENERATION_MODEL_LABELS, Phase3Result } from './types';
 import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
@@ -390,6 +390,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           } else if (!parsed.generationModel) {
             // DefaultGenerationModel rule: fresh config with no prior model → default
             parsed.generationModel = DEFAULT_GENERATION_MODEL;
+          } else {
+            // Migrate removed -preview IDs to stable IDs
+            parsed.generationModel = migrateGenerationModel(parsed.generationModel);
           }
           setConfig(parsed);
         } catch (e) { console.error('Failed to load config', e); }
