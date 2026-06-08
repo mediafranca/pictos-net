@@ -2829,15 +2829,12 @@ const RowComponent: React.FC<{
                     />
                   </div>
                 ) : validBitmap(row) ? (
-                  <div id="svg-preview" className="border border-slate-200 bg-white flex flex-col items-center justify-center min-h-[250px] gap-3 p-4">
+                  <div id="svg-preview" className="border border-slate-200 bg-white flex items-center justify-center min-h-[250px] p-4">
                     <img
                       src={validBitmap(row)}
                       alt={row.UTTERANCE}
                       className="max-h-[220px] w-auto object-contain"
                     />
-                    <p className="text-[10px] text-slate-400 uppercase tracking-wider text-center">
-                      {t('editor.bitmapRender')}
-                    </p>
                   </div>
                 ) : (
                   <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">
