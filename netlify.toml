@@ -39,7 +39,8 @@
     # style-src 'unsafe-inline' required — SVG editor injects <style> tags dynamically.
     # wasm-unsafe-eval required — VTracer WASM (phase 4, manual vectorizer).
     # nominatim.openstreetmap.org — geo-context autocomplete in settings.
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://nominatim.openstreetmap.org; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    # pictos.net + next.pictos.net — admin.html consulta api-usage-report en ambos deploys.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://nominatim.openstreetmap.org https://pictos.net https://next.pictos.net; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
 
 [[headers]]
   for = "/assets/*.js"
