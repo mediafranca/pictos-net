@@ -59,14 +59,6 @@ export const generateImage = async (
         'No text. No labels. No watermarks. White background. Flat design. Square format.',
     ].filter(s => s !== undefined).join('\n');
 
-    if (fullPrompt.length > 2000) {
-        const style = config.visualStylePrompt || 'Flat pictogram style, no text, simple vector design, white background.';
-        const suffix = `\n\n${style}\nNo text. No labels. White background. Flat design.`;
-        const prefix = `AAC pictogram: "${row.UTTERANCE}"\n${nluContext}\n\nElements:\n${formatElements(elements)}\n\nComposition:\n${prompt}`;
-        const maxPrefixLen = 1995 - suffix.length;
-        fullPrompt = prefix.slice(0, maxPrefixLen) + suffix;
-    }
-
     onLog?.('info', `[PRODUCIR] Enviando prompt a Gemini (${fullPrompt.length} chars)…`);
     const response = await callGemini({ prompt: fullPrompt, model });
 

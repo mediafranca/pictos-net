@@ -84,11 +84,6 @@ export const handler = async (event, context) => {
     return;
   }
 
-  if (prompt.length > 2000) {
-    await store.setJSON(jobId, { error: 'Prompt too long (max 2000 characters)' });
-    return;
-  }
-
   // Quota check — 1 unit per image generation call (usage-enforcement.allium)
   const quota = await checkAndCharge(email, 1);
   if (!quota.allowed) {
