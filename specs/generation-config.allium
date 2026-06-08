@@ -1,0 +1,293 @@
+-- allium: 3
+-- generation-config.allium
+
+-- Scope: Phase 3 generation model selection, the advanced configuration panel,
+--   library-level model change workflow (warning dialog + bulk regeneration),
+--   and per-row generation provenance.
+-- Includes:
+--   GenerationModel type and family classification
+--   GlobalConfig.generationModel (library-level setting, persisted)
+--   imageModel → generationModel migration (one-time, on load)
+--   "Configuración avanzada" panel — contents and collapse behaviour
+--   Model change warning dialog — trigger condition, copy, three actions
+--   Bulk regeneration — affected-row selection, quota cost transparency,
+--     Phase 3 dispatch and cascade
+--   Per-row generationModel provenance — set at Phase 3 completion, frozen
+-- Excludes:
+--   Phase 3 execution logic and background-function pattern (visual-reasoning.allium)
+--   Quota enforcement and audit logging (usage-enforcement.allium)
+--   Library view modes and grid/list switching (library-views.allium)
+--   aspectRatio — permanently hidden from UI; always square (1:1 for Gemini,
+--     1024×1024 for Recraft); no UI or spec coverage needed
+-- Dependencies: GlobalConfig, VisualReasoning (RowData), usage-enforcement.allium
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value GenerationModel {
+  -- The five Phase 3 models, by stable API identifier.
+  -- DEFAULT: gemini-2.5-flash-image
+  -- Note: model IDs must be verified against the live Gemini API and
+  --   https://external.api.recraft.ai/doc/ before implementation.
+  gemini-2.5-flash-image          -- "Gemini Flash" — default; bitmap output
+  gemini-3.1-flash-image-preview  -- "Gemini Flash 3.1" — bitmap output
+  gemini-3-pro-image-preview      -- "Gemini Pro" — bitmap output
+  recraftv4_1                     -- "Recraft (raster)" — bitmap output
+  recraftv4_1_vector              -- "Recraft (vector)" — native SVG output; no VTrace
+}
+
+value ModelFamily {
+  bitmap   -- Phase 3 produces a raster image; Phase 4 (VTrace) is available
+  vector   -- Phase 3 produces native SVG directly; Phase 4 never shown
+}
+
+-- Family classification (informative):
+--   gemini-2.5-flash-image          → bitmap
+--   gemini-3.1-flash-image-preview  → bitmap
+--   gemini-3-pro-image-preview      → bitmap
+--   recraftv4_1                     → bitmap
+--   recraftv4_1_vector              → vector
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external GlobalConfig {
+  -- Application-wide configuration (persisted in localStorage).
+  -- This spec adds generationModel; all other fields unchanged.
+  generationModel: GenerationModel    -- library-level Phase 3 model selection
+  -- imageModel: String (legacy, @deprecated) — migrated and removed on first load
+}
+
+external VisualReasoning {
+  -- Per-row pipeline state. This spec reads and sets generationModel (provenance).
+  -- The field is set by Phase 3 completion; see visual-reasoning.allium.
+  generationModel: GenerationModel?   -- model that produced this row's Phase 3 output
+  bitmap: String?                     -- present iff Phase 3 used a bitmap-producing model
+  visualPrompt: String?               -- preserved through BulkRegeneration
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+  default_generation_model: GenerationModel = gemini-2.5-flash-image
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- === Migration from imageModel ===
+
+rule MigrateImageModel {
+  when: application initialises AND GlobalConfig.imageModel is present (legacy field)
+
+  ensures: GlobalConfig.generationModel set according to the legacy value:
+    -- Gemini flash variants (e.g. "flash", "gemini-2.0-flash-exp") →
+    --   gemini-2.5-flash-image
+    -- Gemini pro variants (e.g. "pro") →
+    --   gemini-3-pro-image-preview
+    -- "recraftv4_1" →
+    --   recraftv4_1
+    -- "recraftv4_1_vector" or absent (v2.0.0 shipped with Recraft vector as default) →
+    --   recraftv4_1_vector
+    -- any unrecognised value →
+    --   config.default_generation_model
+  ensures: GlobalConfig.imageModel is removed from the persisted config
+    -- imageModel is retired; generationModel is the sole canonical field
+}
+
+-- === Default ===
+
+rule DefaultGenerationModel {
+  when: GlobalConfig is initialised fresh (no prior persisted config)
+
+  ensures: GlobalConfig.generationModel = config.default_generation_model
+}
+
+-- === Advanced configuration panel ===
+
+rule AdvancedConfigSection {
+  -- The "Configuración avanzada" collapsible section in the config panel.
+
+  ensures: the following controls appear grouped under "Configuración avanzada",
+    in this order:
+    1. generationModel selector (see GenerationModelSelector surface)
+    2. annotatedContext (free-text NLU context)
+    3. colorPalette (colour picker for generation guidance)
+    4. svgStyleDefs (CSS definitions for Phase 5)
+    5. svgKeyframes (animation keyframes for Phase 5)
+  ensures: visualStylePrompt is NOT in this section
+    -- it belongs in the main config panel
+  ensures: the section is collapsed on first load
+  ensures: collapsed/expanded state persists in GlobalConfig
+    -- the user does not need to re-open the section across sessions
+
+  @invariant "no controls outside the declared list"
+    -- aspectRatio and imageModel are never shown in any config section.
+}
+
+-- === Model change warning ===
+
+rule ModelChangeWarning {
+  when: user selects a new value for GlobalConfig.generationModel
+    AND at least one VisualReasoning in the library has
+      VisualReasoning.generationModel ≠ new value
+
+  ensures: a warning dialog is shown BEFORE the config change is committed
+  ensures: dialog content:
+    - names the current model and the newly selected model
+    - states the count N of rows where generationModel ≠ new value
+    - explains that existing pictograms will not be regenerated automatically
+  ensures: dialog offers exactly three actions:
+    1. "Solo cambiar"
+       -- commits the model change; no regeneration
+    2. "Cambiar y regenerar todo (N unidades)"
+       -- commits the model change AND triggers BulkRegeneration
+       -- the unit cost N is shown in the button label itself
+    3. "Cancelar"
+       -- dismisses the dialog; GlobalConfig.generationModel is unchanged
+
+  @invariant "change never committed without acknowledgement"
+    -- GlobalConfig.generationModel does not change until the user confirms
+    -- via "Solo cambiar" or "Cambiar y regenerar todo".
+}
+
+rule ModelChangeNoWarning {
+  when: user selects a new value for GlobalConfig.generationModel
+    AND (all existing rows already have generationModel = new value
+         OR the library has no rows)
+
+  ensures: config change committed immediately
+  ensures: no dialog is shown
+}
+
+-- === Bulk regeneration ===
+
+rule BulkRegeneration {
+  when: user confirms "Cambiar y regenerar todo"
+
+  ensures: GlobalConfig.generationModel updated to the new value
+  ensures: for each VisualReasoning where generationModel ≠ new value:
+    Phase 3 is re-triggered with the new model
+    -- the row's existing visualPrompt (from Phase 2) is reused
+    -- Phase 1 and Phase 2 outputs (nluData, visualDom, visualPrompt) are preserved
+    -- bitmap, rawSvg, and pictograma are cleared before the new Phase 3 run
+    -- phase4Status and phase5Status are reset to idle
+    -- VisualReasoning.generationModel will be updated on Phase 3 completion
+  ensures: rows where generationModel = new value are NOT re-triggered
+    -- already consistent; no quota charge for them
+  ensures: regenerations are dispatched concurrently
+  ensures: if the count of affected rows exceeds the user's remaining daily quota:
+    as many rows as quota allows are regenerated
+    remaining rows are left with their prior Phase 3 output and original
+      generationModel
+    the UI indicates which rows were skipped due to quota exhaustion
+
+  @invariant "only affected rows regenerated"
+    -- Rows whose generationModel already matches the new selection are never
+    -- re-triggered by BulkRegeneration, regardless of their pipeline state.
+
+  @invariant "Phase 2 outputs preserved"
+    -- BulkRegeneration never clears nluData, visualDom, or visualPrompt.
+    -- It re-runs Phase 3 only.
+}
+
+-- === Provenance ===
+
+rule RecordProvenance {
+  when: Phase 3 completes successfully for a VisualReasoning
+
+  ensures: VisualReasoning.generationModel = GlobalConfig.generationModel
+    at the time Phase 3 was triggered
+    -- provenance is frozen at trigger time, not at the time the result arrives
+    -- a library-level model change after trigger does not alter this row's record
+
+  @invariant "provenance set only by Phase 3 completion"
+    -- VisualReasoning.generationModel is never set by BulkRegeneration dispatch,
+    -- manual re-triggers, Phase 4, or Phase 5. It is nil until Phase 3 has
+    -- completed at least once for the row.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant GenerationModelDefault {
+  for fresh GlobalConfig:
+    GlobalConfig.generationModel = gemini-2.5-flash-image
+}
+
+invariant VTraceVisibilityByProvenance {
+  -- The Vectorizar (VTrace) action is shown if and only if the row has a bitmap.
+  -- Rows with generationModel = recraftv4_1_vector never have a bitmap and
+  -- therefore never show the action, even after a library-level model switch.
+  for r: VisualReasoning:
+    Vectorizar action visible iff r.bitmap is present
+}
+
+invariant ProvenanceFrozen {
+  -- A row's generationModel does not change after Phase 3 completion
+  -- unless Phase 3 is explicitly re-run for that row.
+  for r: VisualReasoning where r.phase3Status = completed:
+    r.generationModel is set and does not change
+      until r.phase3Status transitions to running again
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface GenerationModelSelector {
+  -- Picker in the "Configuración avanzada" section.
+
+  @guidance "option labels"
+    -- gemini-2.5-flash-image          → "Gemini Flash"
+    -- gemini-3.1-flash-image-preview  → "Gemini Flash 3.1"
+    -- gemini-3-pro-image-preview      → "Gemini Pro"
+    -- recraftv4_1                     → "Recraft (raster)"
+    -- recraftv4_1_vector              → "Recraft (vector)"
+
+  @guidance "default indicator"
+    -- Mark gemini-2.5-flash-image as the default (e.g. "(predeterminado)" suffix).
+
+  exposes:
+    GlobalConfig.generationModel (read/write; triggers ModelChangeWarning flow)
+}
+
+surface ModelChangeWarningDialog {
+  @guidance "heading"
+    -- "¿Cambiar modelo de generación?" (es-419)
+
+  @guidance "body"
+    -- "[N] pictogramas de tu biblioteca se generaron con [modelo anterior].
+    --  Cambiar a [modelo nuevo] no los regenerará automáticamente. Las nuevas
+    --  generaciones usarán [modelo nuevo]."
+
+  @guidance "button order"
+    -- Primary:   "Cambiar y regenerar todo ([N] unidades)"
+    -- Secondary: "Solo cambiar"
+    -- Tertiary:  "Cancelar"
+
+  @guidance "unit cost placement"
+    -- The unit cost appears in the primary button label, not in the body text.
+    -- This makes the cost visible at the decision point.
+
+  exposes:
+    confirmed action (Solo cambiar | Cambiar y regenerar todo | Cancelar)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "When BulkRegeneration is interrupted (app closed or reloaded mid-batch), are incomplete rows resumed on next open, or is the partial batch abandoned silently?"
+
+open question "Should rows skipped by BulkRegeneration due to quota exhaustion receive a persistent visual indicator so the user can identify them and regenerate manually later?"
+
+open question "Gemini model IDs (gemini-2.5-flash-image, gemini-3.1-flash-image-preview, gemini-3-pro-image-preview) must be verified against the live Gemini API before implementation."
+
+open question "Recraft model IDs (recraftv4_1, recraftv4_1_vector) must be verified against https://external.api.recraft.ai/doc/ before implementation."

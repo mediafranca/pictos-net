@@ -106,7 +106,8 @@
     "noBitmapGenerated": "No bitmap generated yet.",
     "noBitmapReference": "No Bitmap Reference",
     "fullSizeRender": "Full size render",
-    "evaluationContext": "Evaluation Context"
+    "evaluationContext": "Evaluation Context",
+    "bitmapRender": "Bitmap image — use Vectorize to convert to SVG"
   },
   "evaluation": {
     "icap": "ICAP Evaluation",
@@ -211,7 +212,20 @@
     "recordingEnabled": "Recording enabled",
     "recordingDisabled": "Recording paused",
     "tutorial": "Tutorial",
-    "tutorialTooltip": "View the PICTOS.net introductory tutorial"
+    "tutorialTooltip": "View the PICTOS.net introductory tutorial",
+    "generationModel": "Generation model",
+    "generationModelTooltip": "AI model used in the PRODUCE phase (Phase 3). Affects output format: vector or bitmap.",
+    "generationModels": {
+      "gemini-2.5-flash-image": "Gemini Flash",
+      "gemini-3.1-flash-image-preview": "Gemini Flash 3.1",
+      "gemini-3-pro-image-preview": "Gemini Pro",
+      "recraftv4_1": "Recraft (raster)",
+      "recraftv4_1_vector": "Recraft (vector)"
+    },
+    "advancedConfig": "Advanced configuration",
+    "annotatedContext": "Additional context",
+    "annotatedContextTooltip": "Free text injected into NLU analysis (Phase 1). Useful for specifying cultural, regional, or communicative context.",
+    "annotatedContextPlaceholder": "E.g.: school community, elderly users, clinical context…"
   },
   "console": {
     "title": "PICTOS Console",
@@ -562,5 +576,12 @@
     "shareLibrary": "Share your library",
     "shareInstructions": "If you have created a pictogram library and want to share it as an example of how the tool can be used, export the .json file and send it by email.",
     "research": "You can also write to me at the same address if you are interested in participating in the study, giving feedback, or if you have ideas on how to improve these technologies."
+  },
+  "modelChangeWarning": {
+    "title": "Change generation model?",
+    "body": "{{n}} pictogram(s) in your library were generated with {{currentModel}}. Switching to {{newModel}} will not regenerate them automatically. New generations will use {{newModel}}.",
+    "confirmChange": "Change only",
+    "confirmChangeAndRegen": "Change and regenerate all ({{n}} units)",
+    "cancel": "Cancel"
   }
 }

@@ -1,3 +1,10 @@
+/**
+ * Netlify Function: Gemini Job Poll
+ * Reads the result blob written by api-gemini-worker-background.
+ * Returns { pending: true } while the job is still running,
+ * or { bitmap } / { error } when complete.
+ */
+
 import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
 
 const ALLOWED_ORIGINS = [
@@ -36,7 +43,7 @@ export const handler = async (event, context) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing jobId' }) };
   }
 
-  const store = getStore('recraft-jobs');
+  const store = getStore('gemini-jobs');
   let result;
   try {
     result = await store.get(jobId, { type: 'json' });
@@ -48,8 +55,7 @@ export const handler = async (event, context) => {
     return { statusCode: 200, headers, body: JSON.stringify({ pending: true }) };
   }
 
-  // Si ya se procesó (con éxito o error), devolvemos el resultado y limpiamos el blob
-  if (result.svg || result.bitmap || result.error) {
+  if (result.bitmap || result.error) {
     await store.delete(jobId);
     return { statusCode: 200, headers, body: JSON.stringify(result) };
   }

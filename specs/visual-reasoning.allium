@@ -3,14 +3,15 @@
 
 -- Scope: Generative pipeline from communicative intention to structured pictogram.
 -- Includes: Phase 1 (COMPRENDER), Phase 2 (COMPONER), Phase 3 (PRODUCIR),
---   Phase 5 (ESTRUCTURAR), artifact lifecycle, invalidation cascade,
---   per-phase re-execution, and phase error handling.
+--   Phase 4 (VECTORIZAR, user-triggered), Phase 5 (ESTRUCTURAR),
+--   artifact lifecycle, invalidation cascade, per-phase re-execution,
+--   background execution pattern (timer, stop), and phase error handling.
 -- Excludes:
---   - Phase 4 (VECTORIZAR / VTracer) — eliminated; Recraft delivers native SVG
+--   - Generation model selection and library-level model config (generation-config.allium)
 --   - Library backward-compatibility and migration (separate spec)
---   - Netlify function infrastructure and security layer (separate spec)
+--   - Netlify function infrastructure, security, and quota (usage-enforcement.allium)
 --   - SVG editor interactions (separate spec)
--- Dependencies: nlu-schema, mf-svg-schema, GlobalConfig
+-- Dependencies: nlu-schema, mf-svg-schema, GlobalConfig, generation-config.allium
 
 ------------------------------------------------------------
 -- Value Types
@@ -73,7 +74,7 @@ external GlobalConfig {
   geoContext: String?
   annotatedContext: String?
   visualStylePrompt: String
-  aspectRatio: String
+  generationModel: GenerationModel    -- see generation-config.allium
 }
 
 ------------------------------------------------------------
@@ -92,15 +93,20 @@ entity VisualReasoning {
 
   -- Phase 2
   visualDom: VisualDOM?
-  visualPrompt: String?       -- prompt text delivered to Recraft in Phase 3
+  visualPrompt: String?         -- prompt text delivered to Phase 3
   phase2Status: PhaseStatus = idle
 
   -- Phase 3
-  rawSvg: String?             -- flat native SVG from Recraft, no semantics
+  bitmap: String?               -- base64 PNG (800×800px); set by bitmap-producing models
+  rawSvg: String?               -- native SVG; set by vector model (Phase 3) or VTrace (Phase 4)
+  generationModel: GenerationModel?   -- model that produced Phase 3 output; frozen at completion
   phase3Status: PhaseStatus = idle
 
+  -- Phase 4 (user-triggered; only available for bitmap-producing model rows)
+  phase4Status: PhaseStatus = idle
+
   -- Phase 5
-  pictograma: String?         -- mf-svg-schema structured SVG, single source of truth
+  pictograma: String?           -- mf-svg-schema structured SVG, single source of truth
   phase5Status: PhaseStatus = idle
 }
 
@@ -125,10 +131,22 @@ rule InvalidateDownstream {
   ensures: every phase downstream of the completed phase
     transitions to outdated if it was previously completed or failed
 
-  -- Downstream order: phase1 → phase2 → phase3 → phase5
-  -- Example: completing phase1 marks phase2, phase3, phase5 as outdated.
-  -- Completing phase3 marks only phase5 as outdated.
+  -- Downstream order for bitmap-producing models:
+  --   phase1 → phase2 → phase3 → phase4 → phase5
+  -- Downstream order for vector-direct models (recraftv4_1_vector):
+  --   phase1 → phase2 → phase3 → phase5
+  --   phase4 is not in the chain; it transitions to idle when phase3 completes
+  --   with a rawSvg output (no bitmap to trace)
+  -- Example: completing phase3 with a bitmap model marks phase4 and phase5 as outdated.
+  -- Example: completing phase3 with a vector model resets phase4 to idle and
+  --   marks phase5 as outdated.
+  -- Example: completing phase4 marks only phase5 as outdated.
   -- Completing phase5 marks nothing (terminal phase).
+
+  -- Artifact clearing on phase3 completion:
+  --   bitmap-producing result: prior rawSvg (from Phase 4) and pictograma are cleared
+  --   vector result: prior bitmap is set to nil; pictograma is cleared
+  -- This ensures artifact fields are consistent with the new phase3 output type.
 }
 
 -- === Phase 1: COMPRENDER ===
@@ -202,25 +220,103 @@ rule Phase3_Producir {
   requires: VisualReasoning.phase2Status = completed
   requires: VisualReasoning.visualPrompt is present
 
-  ensures: Recraft V3 called in SVG mode
-    -- endpoint: text-to-image, style: recraft-v3-svg, flat pictogram
-    -- prompt: VisualReasoning.visualPrompt
-  ensures: on success:
-    VisualReasoning.rawSvg = native SVG content from Recraft
+  ensures: generation call dispatched to the function matching GlobalConfig.generationModel:
+    -- Gemini models → api-gemini function; output: bitmap (PNG, 800×800px, base64)
+    -- Recraft raster (recraftv4_1) → api-recraft function; output: bitmap (PNG, 800×800px, base64)
+    -- Recraft vector (recraftv4_1_vector) → api-recraft function; output: native SVG string
+    -- All calls use background function + polling pattern (see Phase3_BackgroundExecution)
+    -- Pictograms are always square: Gemini imageConfig.aspectRatio "1:1",
+    --   Recraft size "1024×1024" (or the model's square equivalent)
+  ensures: on success with bitmap output:
+    VisualReasoning.bitmap = base64 PNG at 800×800px
+    VisualReasoning.rawSvg = nil        -- prior Phase 4 rawSvg cleared
+    VisualReasoning.pictograma = nil    -- prior Phase 5 output cleared
+    VisualReasoning.generationModel = GlobalConfig.generationModel at trigger time
     VisualReasoning.phase3Status = completed
-  ensures: on any Recraft error (timeout, malformed response, empty body):
+    VisualReasoning.phase4Status = idle
+    VisualReasoning.phase5Status = idle
+  ensures: on success with vector output:
+    VisualReasoning.rawSvg = native SVG content
+    VisualReasoning.bitmap = nil        -- no bitmap produced by this model
+    VisualReasoning.pictograma = nil    -- prior Phase 5 output cleared
+    VisualReasoning.generationModel = GlobalConfig.generationModel at trigger time
+    VisualReasoning.phase3Status = completed
+    VisualReasoning.phase4Status = idle -- phase4 is not applicable for vector rows
+    VisualReasoning.phase5Status = outdated  -- if previously completed
+  ensures: on any generation error (timeout, malformed response, empty body):
     VisualReasoning.phase3Status = failed
+}
 
-  @invariant "native SVG only"
-    -- rawSvg contains real path geometry (anchor points, curves).
-    -- A raster image embedded in an SVG wrapper is not accepted.
+rule Phase3_BackgroundExecution {
+  -- Applies to Phase 3 for all generation models.
+  -- Phase 3 is a long-running operation (2–30 s); it runs via background function
+  -- and is polled until a result is available.
+
+  when: phase3Status transitions to running
+
+  ensures: elapsed time is tracked from this exact moment
+  ensures: elapsed time is visible in the UI while phase3Status = running
+    -- the timer must not wait for the row to be expanded, focused, or scrolled
+    -- the timer is not reset by any UI interaction (collapse, row switch, navigation)
+  ensures: a Stop action is available in the UI while phase3Status = running
+
+  @invariant "timer origin is trigger time"
+    -- The elapsed counter reflects wall-clock time since Phase 3 was triggered.
+    -- It does not start over when the row is first rendered or expanded.
+}
+
+rule Phase3_Stop {
+  when: user triggers Stop on a VisualReasoning while phase3Status = running
+
+  ensures: the in-flight background job is cancelled (poll loop terminated)
+  ensures: phase3Status transitions to idle
+    -- idle, not failed: user-initiated stop is not an error
+  ensures: any partial bitmap or rawSvg from the incomplete run is discarded
+  ensures: VisualReasoning.generationModel is NOT updated
+    -- provenance is set only on successful Phase 3 completion
 }
 
 rule Phase3_Failure {
   when: VisualReasoning.phase3Status transitions to failed
 
-  ensures: full error detail logged to console
+  ensures: full error detail logged to console (model id, raw error, elapsed time)
   ensures: phase 3 indicator shown as failed in UI
+  -- User manually re-triggers phase 3 to retry.
+}
+
+-- === Phase 4: VECTORIZAR (user-triggered) ===
+
+rule Phase4_Vectorizar {
+  when: user triggers Vectorizar on a VisualReasoning
+
+  requires: VisualReasoning.phase3Status = completed
+  requires: VisualReasoning.bitmap is present
+  requires: modelFamily(VisualReasoning.generationModel) = bitmap
+    -- Phase 4 is never triggered for rows where generationModel = recraftv4_1_vector
+
+  ensures: VTracer WASM runs locally on VisualReasoning.bitmap
+    -- no API call; no quota charge; geometry stays in the browser
+  ensures: on success:
+    VisualReasoning.rawSvg = SVG string produced by VTracer
+    VisualReasoning.phase4Status = completed
+  ensures: on VTracer error:
+    VisualReasoning.phase4Status = failed
+
+  @invariant "user-triggered only"
+    -- Phase 4 is never invoked automatically by the pipeline cascade.
+    -- It runs only on explicit user action.
+
+  @invariant "bitmap preserved after vectorization"
+    -- Completing Phase 4 does not clear VisualReasoning.bitmap.
+    -- The bitmap remains available after rawSvg is produced.
+}
+
+rule Phase4_Failure {
+  when: VisualReasoning.phase4Status transitions to failed
+
+  ensures: full error detail logged to console
+  ensures: phase 4 indicator shown as failed in UI
+  -- User can re-trigger Phase 4 to retry.
 }
 
 -- === Phase 5: ESTRUCTURAR ===
@@ -228,8 +324,9 @@ rule Phase3_Failure {
 rule Phase5_Estructurar {
   when: phase 5 is triggered for a VisualReasoning
 
-  requires: VisualReasoning.phase3Status = completed
   requires: VisualReasoning.rawSvg is present
+    -- rawSvg may come from Phase 4 (VTrace of a bitmap) or directly from
+    -- Phase 3 (Recraft vector model). Phase 5 does not distinguish the source.
   requires: VisualReasoning.visualDom is present
 
   ensures: Phase5_SetOfMarks attempted, producing an [ElementMapping]
@@ -327,11 +424,16 @@ invariant DownstreamConsistency {
     r.phase1Status = outdated →
       r.phase2Status in {outdated, idle}
       r.phase3Status in {outdated, idle}
+      r.phase4Status in {outdated, idle}
       r.phase5Status in {outdated, idle}
     r.phase2Status = outdated →
       r.phase3Status in {outdated, idle}
+      r.phase4Status in {outdated, idle}
       r.phase5Status in {outdated, idle}
     r.phase3Status = outdated →
+      r.phase4Status in {outdated, idle}
+      r.phase5Status in {outdated, idle}
+    r.phase4Status = outdated →
       r.phase5Status in {outdated, idle}
 }
 
@@ -345,15 +447,29 @@ invariant GeometryIntegrity {
 
 invariant NativeSVGOnly {
   -- rawSvg always contains real vector paths, never an embedded raster.
-  for r: VisualReasoning where r.phase3Status = completed:
+  -- This applies whether rawSvg came from Phase 3 (vector model) or Phase 4 (VTrace).
+  for r: VisualReasoning where r.rawSvg is present:
     r.rawSvg does not contain <image> elements
+}
+
+invariant BitmapSquare {
+  -- All bitmaps stored in VisualReasoning.bitmap are 800×800px.
+  for r: VisualReasoning where r.bitmap is present:
+    dimensions(r.bitmap) = 800 × 800
+}
+
+invariant Phase4NeverAutoRuns {
+  -- Phase 4 transitions to running only via explicit user action,
+  -- never as a consequence of Phase 3 completing.
+  phase4Status transitions to running
+    only when user explicitly triggers Vectorizar
 }
 
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Does processCascade run phases 1–3 automatically after utterance confirmation, with phase 5 remaining user-initiated? Or does the user trigger each phase manually?"
+open question "Does processCascade run phases 1–3 automatically after utterance confirmation, with phases 4 and 5 remaining user-initiated? Or does the user trigger each phase manually?"
 
 open question "When a required VisualDOMNode has zero elements assigned after max attempts, does the Pictograma contain an empty <g id=node.id> or is the node omitted entirely?"
 

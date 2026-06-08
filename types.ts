@@ -139,10 +139,12 @@ export interface RowData {
   elements?: VisualElement[];
   prompt?: string;
 
-  // Phase 3: "Producir" (Produce) - Bitmap Generation
-  bitmap?: string; // Base64 data URL
-  rawSvg?: string; // Vectorized SVG from vtracer (raw)
-  structuredSvg?: string; // mf-svg-schema compliant SVG (Gemini-processed)
+  // Phase 3: "Producir" (Produce) - Image Generation
+  bitmap?: string;       // Base64 PNG data URL — set by bitmap-producing models
+  rawSvg?: string;       // Native SVG — set by recraftv4_1_vector (Phase 3) or VTrace (Phase 4)
+  structuredSvg?: string; // mf-svg-schema compliant SVG (Phase 5)
+  /** Model that produced Phase 3 output. Frozen at Phase 3 completion. */
+  generationModel?: GenerationModel;
 
   // Discard flags. When true, the artifact is preserved on disk and in
   // memory (for telemetry / research / regeneration) but is NOT
@@ -190,6 +192,54 @@ export interface SVGStyleConfig {
 
 import type { StyleDefinition, KeyframeDefinition } from './lib/style-editor/lib/types';
 
+// ── Generation Model ─────────────────────────────────────────────────────────
+
+/** The five Phase 3 generation models, by stable API identifier. */
+export type GenerationModel =
+  | 'gemini-2.5-flash-image'
+  | 'gemini-3.1-flash-image-preview'
+  | 'gemini-3-pro-image-preview'
+  | 'recraftv4_1'
+  | 'recraftv4_1_vector';
+
+/** Output type classification: 'vector' only for recraftv4_1_vector; all others are 'bitmap'. */
+export type ModelFamily = 'bitmap' | 'vector';
+
+export function getModelFamily(model: GenerationModel): ModelFamily {
+  return model === 'recraftv4_1_vector' ? 'vector' : 'bitmap';
+}
+
+export const DEFAULT_GENERATION_MODEL: GenerationModel = 'gemini-2.5-flash-image';
+
+/** Human-readable labels for GenerationModel values (used by GenerationModelSelector). */
+export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
+  'gemini-2.5-flash-image': 'Gemini Flash',
+  'gemini-3.1-flash-image-preview': 'Gemini Flash 3.1',
+  'gemini-3-pro-image-preview': 'Gemini Pro',
+  'recraftv4_1': 'Recraft (raster)',
+  'recraftv4_1_vector': 'Recraft (vector)',
+};
+
+/** Migrates a legacy imageModel string to the canonical GenerationModel value. */
+export function migrateImageModel(imageModel: string | undefined): GenerationModel {
+  if (!imageModel || imageModel === 'recraftv4_1_vector') return 'recraftv4_1_vector';
+  if (imageModel === 'recraftv4_1') return 'recraftv4_1';
+  if (imageModel.includes('pro')) return 'gemini-3-pro-image-preview';
+  if (imageModel.includes('flash') || imageModel.startsWith('gemini')) return 'gemini-2.5-flash-image';
+  return DEFAULT_GENERATION_MODEL;
+}
+
+/** Result from Phase 3 (PRODUCIR). Exactly one of svg/bitmap will be set. */
+export interface Phase3Result {
+  /** Present for recraftv4_1_vector — native SVG string. */
+  svg?: string;
+  /** Present for all bitmap-producing models — base64 PNG data URL. */
+  bitmap?: string;
+  generationModel: GenerationModel;
+}
+
+// ── Config ───────────────────────────────────────────────────────────────────
+
 export interface GlobalConfig {
   lang: string; // Language for NLU processing (e.g., 'es', 'en')
   uiLang?: 'en-GB' | 'es-419'; // UI language (independent from NLU language)
@@ -200,9 +250,13 @@ export interface GlobalConfig {
   };
   annotatedContext?: string;
   /** @deprecated v2.0 — was Gemini Image aspect ratio; Recraft V4.1 uses fixed size. Kept for persistence compatibility. */
-  aspectRatio: string;
-  /** @deprecated v2.0 — was Gemini flash/pro model selector. No effect in current pipeline. Kept for persistence compatibility. */
-  imageModel: string;
+  aspectRatio?: string;
+  /** @deprecated v2.0 — migrated to generationModel on first load. */
+  imageModel?: string;
+  /** Phase 3 generation model. Persisted in localStorage. */
+  generationModel: GenerationModel;
+  /** Whether the "Configuración avanzada" panel section is expanded. Persisted. */
+  advancedConfigOpen?: boolean;
   name: string;
   credits?: string; // Autores/institución para atribución de la librería
   license: string;

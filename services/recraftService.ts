@@ -6,7 +6,7 @@
  * This SVG (rawSvg) feeds directly into phase 5 (ESTRUCTURAR).
  */
 
-import { GlobalConfig, VisualElement } from "../types";
+import { GlobalConfig, VisualElement, Phase3Result, getModelFamily } from "../types";
 import { callRecraft } from "./aiClient";
 
 /**
@@ -43,23 +43,30 @@ const formatElements = (els: VisualElement[], depth = 0): string => {
 };
 
 /**
- * Phase 3 (PRODUCIR): Generate a native SVG pictogram using Recraft V3.
+ * Phase 3 (PRODUCIR): Generate a pictogram using Recraft V4.1.
+ *
+ * Routes to vector (recraftv4_1_vector → SVG) or raster (recraftv4_1 → bitmap)
+ * based on config.generationModel.
  *
  * @param elements  VisualElement[] from phase 2
  * @param prompt    Spatial composition prompt from phase 2
  * @param row       RowData (for utterance and NLU context)
- * @param config    GlobalConfig
+ * @param config    GlobalConfig (reads generationModel and paletteColors)
  * @param onLog     Progress callback
- * @returns         Raw SVG string from Recraft
+ * @returns         Phase3Result with svg XOR bitmap, plus generationModel provenance
  */
-export const generateSVG = async (
+export const generateImage = async (
     elements: VisualElement[],
     prompt: string,
     row: { UTTERANCE: string; NLU?: any },
     config: GlobalConfig,
     onLog?: LogFn,
-): Promise<string> => {
-    onLog?.('info', '[PRODUCIR] Iniciando generación SVG con Recraft V3…');
+): Promise<Phase3Result> => {
+    const model = (config.generationModel === 'recraftv4_1' || config.generationModel === 'recraftv4_1_vector')
+        ? config.generationModel
+        : 'recraftv4_1_vector';
+
+    onLog?.('info', `[PRODUCIR] Iniciando generación con Recraft (${model})…`);
     onLog?.('info', `[PRODUCIR] Elementos: ${elements.length}`);
 
     const nluContext = row.NLU && typeof row.NLU === 'object'
@@ -85,19 +92,26 @@ export const generateSVG = async (
         const style = config.visualStylePrompt || 'Estilo pictograma plano, sin texto, diseño vectorial simple, fondo blanco.';
         const suffix = `\n\n${style}\nSin texto. Sin etiquetas. Sin marcas de agua. Fondo blanco. Diseño plano.`;
         const prefix = `Pictograma AAC: "${row.UTTERANCE}"\n${nluContext}\n\nElementos:\n${formatElements(elements)}\n\nComposición espacial:\n${prompt}`;
-        const maxPrefixLen = 1995 - suffix.length; // Leave a few characters margin
+        const maxPrefixLen = 1995 - suffix.length;
         fullPrompt = prefix.slice(0, maxPrefixLen) + suffix;
     }
 
     onLog?.('info', '[PRODUCIR] Enviando prompt a Recraft…');
     const colors = config.paletteColors?.filter(c => /^#[0-9a-fA-F]{6}$/.test(c));
-    const response = await callRecraft({ prompt: fullPrompt, ...(colors?.length ? { colors } : {}) });
+    const response = await callRecraft({ prompt: fullPrompt, model, ...(colors?.length ? { colors } : {}) });
 
-    if (!response.svg || !response.svg.includes('<svg')) {
-        throw new Error('Recraft no devolvió un SVG válido');
+    if (getModelFamily(model) === 'vector') {
+        if (!response.svg?.includes('<svg')) {
+            throw new Error('Recraft no devolvió un SVG válido');
+        }
+        const normalized = normalizeSvgDimensions(response.svg);
+        onLog?.('success', `[PRODUCIR] SVG recibido (${(normalized.length / 1024).toFixed(1)} KB)`);
+        return { svg: normalized, generationModel: model };
+    } else {
+        if (!response.bitmap) {
+            throw new Error('Recraft no devolvió imagen bitmap');
+        }
+        onLog?.('success', '[PRODUCIR] Imagen bitmap recibida de Recraft');
+        return { bitmap: response.bitmap, generationModel: model };
     }
-
-    const normalized = normalizeSvgDimensions(response.svg);
-    onLog?.('success', `[PRODUCIR] SVG recibido (${(normalized.length / 1024).toFixed(1)} KB)`);
-    return normalized;
 };

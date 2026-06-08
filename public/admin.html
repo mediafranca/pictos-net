@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>PictoNet — Uso de API</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --border: #2a2f3a;
+    --text: #e6e8ec; --muted: #8b93a3; --accent: #4f8cff;
+    --ok: #3ecf8e; --warn: #f5a623; --danger: #ef5350;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 2rem 1rem;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 1.5rem; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 0.8rem; margin-left: 0.5rem; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem;
+  }
+  /* --- Login --- */
+  #login { max-width: 380px; margin: 10vh auto; text-align: center; }
+  #login input {
+    width: 100%; padding: 0.6rem 0.8rem; margin: 1rem 0 0.75rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 0.95rem;
+  }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 0.55rem 1.1rem; font-size: 0.9rem; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .error { color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2em; }
+  /* --- Toolbar --- */
+  .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  .toolbar select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.5rem;
+  }
+  .toolbar .spacer { flex: 1; }
+  /* --- KPIs --- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+  .kpi .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .kpi .value { font-size: 1.6rem; font-weight: 600; margin-top: 0.25rem; }
+  /* --- Tabla --- */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { background: var(--border); border-radius: 4px; height: 6px; min-width: 60px; overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 4px; background: var(--ok); }
+  .bar.warn > div { background: var(--warn); }
+  .bar.danger > div { background: var(--danger); }
+  .pill {
+    display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem;
+    border-radius: 99px; border: 1px solid var(--border); color: var(--muted); margin-right: 0.25rem;
+  }
+  .domain-fail { color: var(--danger); font-size: 0.8rem; margin-top: 0.5rem; }
+  #status { color: var(--muted); font-size: 0.85rem; }
+  .hidden { display: none; }
+  canvas { max-height: 260px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Pantalla de login: pide la ADMIN_API_KEY (actúa como password).
+       La validación real la hace api-usage-report: si la clave es
+       incorrecta responde 401 y no se muestra nada. -->
+  <div id="login" class="panel">
+    <h1>PictoNet — Uso de API</h1>
+    <p style="color:var(--muted);font-size:0.85rem;">Ingresa la clave de administración</p>
+    <input type="password" id="apikey" placeholder="ADMIN_API_KEY" autocomplete="off">
+    <button id="btn-login">Entrar</button>
+    <div class="error" id="login-error"></div>
+  </div>
+
+  <!-- Dashboard (oculto hasta autenticar) -->
+  <div id="dash" class="hidden">
+    <h1>PictoNet — Uso de API <small>pictos.net + next.pictos.net</small></h1>
+
+    <div class="toolbar">
+      <select id="range">
+        <option value="7">Últimos 7 días</option>
+        <option value="14" selected>Últimos 14 días</option>
+        <option value="30">Últimos 30 días</option>
+      </select>
+      <button id="btn-refresh">Actualizar</button>
+      <span id="status"></span>
+      <span class="spacer"></span>
+      <button class="ghost" id="btn-logout">Salir</button>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="label">Llamadas</div><div class="value" id="kpi-calls">—</div></div>
+      <div class="kpi"><div class="label">Unidades</div><div class="value" id="kpi-units">—</div></div>
+      <div class="kpi"><div class="label">Usuarios</div><div class="value" id="kpi-users">—</div></div>
+      <div class="kpi"><div class="label">Errores</div><div class="value" id="kpi-errors">—</div></div>
+    </div>
+
+    <div class="panel">
+      <canvas id="chart"></canvas>
+      <div id="domain-errors"></div>
+    </div>
+
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th class="num">Llamadas</th>
+            <th class="num">Unidades</th>
+            <th>Consumo máx. diario (tope <span id="limit-label">50</span>)</th>
+            <th>Fases</th>
+            <th>Dominios</th>
+            <th class="num">Errores</th>
+          </tr>
+        </thead>
+        <tbody id="user-rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+/**
+ * Dashboard de uso de PictoNet.
+ *
+ * Lee el endpoint api-usage-report (protegido con Bearer ADMIN_API_KEY)
+ * de ambos despliegues y consolida los datos por día y por usuario.
+ * No requiere build: es un HTML estático en public/, servido como /admin.html.
+ */
+
+const DOMAINS = ['https://pictos.net', 'https://next.pictos.net'];
+const DAILY_LIMIT = 50; // debe coincidir con DAILY_LIMIT_PER_USER en Netlify
+const KEY_STORAGE = 'pictonet_admin_key';
+
+let chart = null;
+
+// --- Utilidades de fecha ---------------------------------------------------
+
+/**
+ * Devuelve un arreglo de fechas YYYY-MM-DD desde hoy hacia atrás.
+ * Se usa para construir el rango de consultas al endpoint.
+ */
+function lastDays(n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    out.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+// --- Capa de datos ----------------------------------------------------------
+
+/**
+ * Consulta el reporte de un dominio para una fecha.
+ * Devuelve null si el dominio falla (p. ej. 500 en next), para que
+ * un despliegue roto no impida ver los datos del otro.
+ * Se usa en loadData().
+ */
+async function fetchReport(domain, date, key) {
+  const res = await fetch(`${domain}/.netlify/functions/api-usage-report?date=${date}`, {
+    headers: { Authorization: `Bearer ${key}` }
+  });
+  if (res.status === 401) throw new Error('401');
+  if (!res.ok) return null;
+  return res.json();
+}
+
+/**
+ * Descarga todo el rango de fechas en paralelo para ambos dominios y
+ * consolida: serie diaria por dominio + agregado por usuario.
+ * Se usa en refresh().
+ */
+async function loadData(days, key) {
+  const dates = lastDays(days);
+  const jobs = [];
+  for (const domain of DOMAINS) {
+    for (const date of dates) {
+      jobs.push(fetchReport(domain, date, key).then(
+        data => ({ domain, date, data }),
+        err => { if (err.message === '401') throw err; return { domain, date, data: null, failed: true }; }
+      ));
+    }
+  }
+  const results = await Promise.all(jobs);
+
+  const daily = {};        // date -> { domain -> units }
+  const users = {};        // email -> { calls, units, maxDayUnits, phases, domains, errors }
+  const failedDomains = new Set();
+
+  for (const { domain, date, data, failed } of results) {
+    if (failed) { failedDomains.add(domain); continue; }
+    if (!data) continue;
+    const host = new URL(domain).hostname;
+    daily[date] = daily[date] || {};
+    daily[date][host] = (daily[date][host] || 0) + (data.total_units || 0);
+
+    for (const [email, u] of Object.entries(data.users || {})) {
+      const agg = users[email] = users[email] || {
+        calls: 0, units: 0, maxDayUnits: 0, phases: {}, domains: new Set(), errors: 0
+      };
+      agg.calls += u.calls;
+      agg.units += u.units;
+      agg.maxDayUnits = Math.max(agg.maxDayUnits, u.units);
+      agg.errors += u.errors || 0;
+      agg.domains.add(host);
+      for (const [phase, n] of Object.entries(u.phases || {})) {
+        agg.phases[phase] = (agg.phases[phase] || 0) + n;
+      }
+    }
+  }
+  return { dates, daily, users, failedDomains };
+}
+
+// --- Render ------------------------------------------------------------------
+
+/**
+ * Dibuja el gráfico de barras apiladas: unidades por día y por dominio.
+ * Se usa en refresh().
+ */
+function renderChart(dates, daily) {
+  const hosts = DOMAINS.map(d => new URL(d).hostname);
+  const colors = ['#4f8cff', '#3ecf8e'];
+  const datasets = hosts.map((host, i) => ({
+    label: host,
+    data: dates.map(d => daily[d]?.[host] || 0),
+    backgroundColor: colors[i],
+    stack: 'units'
+  }));
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type: 'bar',
+    data: { labels: dates.map(d => d.slice(5)), datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#8b93a3' } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b93a3' }, grid: { display: false } },
+        y: { stacked: true, ticks: { color: '#8b93a3', precision: 0 }, grid: { color: '#2a2f3a' } }
+      }
+    }
+  });
+}
+
+/**
+ * Pinta la tabla de usuarios ordenada por unidades consumidas.
+ * La columna de consumo muestra el peor día respecto al tope diario,
+ * que es lo relevante para detectar abuso.
+ * Se usa en refresh().
+ */
+function renderTable(users) {
+  const rows = Object.entries(users).sort((a, b) => b[1].units - a[1].units);
+  const tbody = document.getElementById('user-rows');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">Sin actividad registrada en el rango.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(([email, u]) => {
+    const pct = Math.min(100, Math.round(u.maxDayUnits / DAILY_LIMIT * 100));
+    const cls = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : '';
+    const phases = Object.entries(u.phases).map(([p, n]) => `<span class="pill">${p}: ${n}</span>`).join('');
+    return `<tr>
+      <td>${email}</td>
+      <td class="num">${u.calls}</td>
+      <td class="num">${u.units}</td>
+      <td><div class="bar ${cls}" title="${u.maxDayUnits}/${DAILY_LIMIT} en su peor día"><div style="width:${pct}%"></div></div></td>
+      <td>${phases}</td>
+      <td>${[...u.domains].join(', ')}</td>
+      <td class="num">${u.errors}</td>
+    </tr>`;
+  }).join('');
+}
+
+/**
+ * Orquesta la carga completa: KPIs, gráfico, tabla y avisos de dominios caídos.
+ * Se usa al entrar, al cambiar el rango y con el botón Actualizar.
+ */
+async function refresh() {
+  const key = sessionStorage.getItem(KEY_STORAGE);
+  if (!key) return logout();
+  const days = parseInt(document.getElementById('range').value, 10);
+  const status = document.getElementById('status');
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  status.textContent = 'Cargando…';
+  try {
+    const { dates, daily, users, failedDomains } = await loadData(days, key);
+
+    const totals = Object.values(users).reduce(
+      (t, u) => ({ calls: t.calls + u.calls, units: t.units + u.units, errors: t.errors + u.errors }),
+      { calls: 0, units: 0, errors: 0 }
+    );
+    document.getElementById('kpi-calls').textContent = totals.calls;
+    document.getElementById('kpi-units').textContent = totals.units;
+    document.getElementById('kpi-users').textContent = Object.keys(users).length;
+    document.getElementById('kpi-errors').textContent = totals.errors;
+
+    renderChart(dates, daily);
+    renderTable(users);
+
+    document.getElementById('domain-errors').innerHTML = [...failedDomains]
+      .map(d => `<div class="domain-fail">Sin respuesta de ${new URL(d).hostname} — datos parciales.</div>`)
+      .join('');
+    status.textContent = `Actualizado ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    if (err.message === '401') return logout('Clave inválida o revocada.');
+    status.textContent = 'Error al cargar datos.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --- Autenticación -----------------------------------------------------------
+
+/**
+ * Valida la clave contra el endpoint (consultando la fecha de hoy) y,
+ * si responde 200, la guarda en sessionStorage y muestra el dashboard.
+ * Se usa en el botón Entrar.
+ */
+async function login() {
+  const key = document.getElementById('apikey').value.trim();
+  const errEl = document.getElementById('login-error');
+  if (!key) { errEl.textContent = 'Ingresa la clave.'; return; }
+  const btn = document.getElementById('btn-login');
+  btn.disabled = true;
+  errEl.textContent = '';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch(`${DOMAINS[0]}/.netlify/functions/api-usage-report?date=${today}`, {
+      headers: { Authorization: `Bearer ${key}` }
+    });
+    if (res.status === 401) { errEl.textContent = 'Clave incorrecta.'; return; }
+    if (!res.ok) { errEl.textContent = `Error del servidor (${res.status}).`; return; }
+    sessionStorage.setItem(KEY_STORAGE, key);
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('dash').classList.remove('hidden');
+    refresh();
+  } catch {
+    errEl.textContent = 'No se pudo conectar.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Cierra la sesión local (borra la clave de sessionStorage).
+ * Se usa en el botón Salir y ante respuestas 401.
+ */
+function logout(message) {
+  sessionStorage.removeItem(KEY_STORAGE);
+  document.getElementById('dash').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  if (message) document.getElementById('login-error').textContent = message;
+}
+
+// --- Eventos -----------------------------------------------------------------
+document.getElementById('btn-login').addEventListener('click', login);
+document.getElementById('apikey').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('range').addEventListener('change', refresh);
+document.getElementById('btn-logout').addEventListener('click', () => logout());
+document.getElementById('limit-label').textContent = DAILY_LIMIT;
+
+// Si ya hay clave en la sesión, entra directo.
+if (sessionStorage.getItem(KEY_STORAGE)) {
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('dash').classList.remove('hidden');
+  refresh();
+}
+</script>
+</body>
+</html>

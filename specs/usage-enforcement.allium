@@ -3,9 +3,10 @@
 
 -- Scope: Per-user daily quota enforcement and audit logging for all AI API calls.
 -- Covers: quota model, Netlify Blobs schema, enforcement flow per function,
---   admin report endpoint, dev bypass, 429 contract.
+--   admin report endpoint, dev bypass, 429 contract, Gemini key selection.
 -- Excludes:
 --   - Pipeline phase logic (see visual-reasoning.allium)
+--   - Generation model selection and library config (see generation-config.allium)
 --   - Netlify Identity JWT validation (enforced by each function independently)
 --   - UI feedback for quota exhaustion (separate spec)
 -- Dependencies: Netlify Identity (user.email), Netlify Blobs (pictonet-usage store)
@@ -26,8 +27,8 @@ value AuditRecord {
   -- Keyed by timestamp to avoid write contention.
   ts: Timestamp
   email: String
-  phase: String           -- "claude" | "recraft"
-  model: String           -- e.g. "claude-haiku-4-5-20251001", "recraftv4_1_vector"
+  phase: String           -- "claude" | "recraft" | "gemini"
+  model: String           -- e.g. "claude-haiku-4-5-20251001", "recraftv4_1_vector", "gemini-2.5-flash-image"
   units_charged: Number   -- 0 or 1
   ms: Number              -- wall-clock milliseconds for the upstream call
   tokens_in: Number       -- 0 for Recraft (no token concept)
@@ -57,15 +58,17 @@ config {
 ------------------------------------------------------------
 
 -- The "unit" is the pictogram-level cost atom.
--- One api-recraft call = one completed pictogram attempt = 1 unit.
+-- One image generation call (any model) = one completed pictogram attempt = 1 unit.
 -- All api-claude calls = 0 units (phases 1, 2, and 5 are not counted).
 -- Quota tracks pictogram generation attempts, not AI token consumption.
 
 rule QuotaUnitsPerCall {
   for each incoming request to a proxied function:
 
-  if function = api-recraft:
+  if function = api-recraft OR function = api-gemini:
     units_to_charge = 1
+    -- flat rate: Gemini Flash, Gemini Pro, Recraft raster, Recraft vector
+    -- all charge 1 unit regardless of model
 
   if function = api-claude:
     units_to_charge = 0      -- haiku (phases 1+2) and sonnet (phase 5) both free
@@ -75,7 +78,11 @@ rule QuotaUnitsPerCall {
 
   @invariant "claude never blocked by quota"
     -- No api-claude call (any model, any phase) is ever blocked by quota.
-    -- Only Recraft calls consume quota units.
+    -- Only image generation calls (api-recraft, api-gemini) consume quota units.
+
+  @invariant "flat rate across generation models"
+    -- The unit cost does not vary by model within api-recraft or api-gemini.
+    -- Gemini Pro and Gemini Flash both cost 1 unit.
 
   @invariant "dev bypass applies to local only"
     -- NETLIFY_DEV is not set in deployed Netlify environments.
@@ -151,6 +158,33 @@ rule DevBypass {
   ensures: email = "dev"
   ensures: quota check skipped (dev is always allowed)
   ensures: audit logging skipped (dev calls produce no Blob entries)
+}
+
+------------------------------------------------------------
+-- Gemini Key Selection
+------------------------------------------------------------
+
+rule GeminiKeySelection {
+  -- api-gemini uses different API keys for local dev and deployed environments.
+  -- Both keys are server-side only; neither reaches the browser.
+
+  when: api-gemini function handles a request
+
+  ensures: API key selected as:
+    if NETLIFY_DEV = "true": use GEMINI_LOCAL_API_KEY
+    else: use GEMINI_PUBLIC_API_KEY
+
+  @deployment "key restriction requirement"
+    -- GEMINI_PUBLIC_API_KEY must be restricted by API restriction
+    --   (Generative Language API only), NOT by HTTP referrer.
+    -- HTTP referrer restrictions are enforced by the browser; server-side
+    --   Netlify functions send no browser referrer, so a referrer-restricted
+    --   key will be rejected by Google's API with a 403.
+    -- If the key is currently referrer-restricted (e.g. to pictos.net and
+    --   next.pictos.net), switch it to API restriction in the Google Cloud
+    --   console before deploying api-gemini to production.
+    -- GEMINI_LOCAL_API_KEY is unrestricted or restricted to local use only;
+    --   it must never be deployed to production or preview environments.
 }
 
 ------------------------------------------------------------

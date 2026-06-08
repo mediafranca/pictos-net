@@ -16,7 +16,9 @@ import { CSS } from '@dnd-kit/utilities';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
 import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
+import * as Gemini from './services/geminiService';
 import { QuotaExceededError } from './services/aiClient';
+import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, GENERATION_MODEL_LABELS, Phase3Result } from './types';
 import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
@@ -213,8 +215,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
     lang: 'es-419',
-    aspectRatio: '1:1',
-    imageModel: 'flash',
+    generationModel: DEFAULT_GENERATION_MODEL,
     name: 'PICTOS.NET',
     credits: '',
     license: 'CC BY 4.0',
@@ -225,7 +226,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svgKeyframes: INITIAL_KEYFRAMES,
     recording: { enabled: false },
     paletteColors: DEFAULT_PALETTE,
+    advancedConfigOpen: false,
   });
+  const [modelChangeWarning, setModelChangeWarning] = useState<{
+    pendingModel: GenerationModel;
+    affectedCount: number;
+  } | null>(null);
   const [focusMode, setFocusMode] = useState<{ step: 'nlu' | 'visual' | 'produce' | 'format', rowId: string } | null>(null);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
   const [pdfExportProgress, setPdfExportProgress] = useState<PdfProgress | null>(null);
@@ -375,7 +381,18 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       // ── Step 1: config (localStorage, synchronous) ──────────────────────────
       const savedConfig = localStorage.getItem(CONFIG_KEY);
       if (savedConfig) {
-        try { setConfig(JSON.parse(savedConfig)); } catch (e) { console.error('Failed to load config', e); }
+        try {
+          const parsed = JSON.parse(savedConfig);
+          // MigrateImageModel rule: map legacy imageModel → generationModel
+          if (parsed.imageModel !== undefined && !parsed.generationModel) {
+            parsed.generationModel = migrateImageModel(parsed.imageModel);
+            delete parsed.imageModel;
+          } else if (!parsed.generationModel) {
+            // DefaultGenerationModel rule: fresh config with no prior model → default
+            parsed.generationModel = DEFAULT_GENERATION_MODEL;
+          }
+          setConfig(parsed);
+        } catch (e) { console.error('Failed to load config', e); }
       }
 
       // ── Step 2: row metadata (localStorage, synchronous → instant render) ───
@@ -721,8 +738,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               newConfig.name = newConfig.author;
               delete newConfig.author;
             }
-            if (!newConfig.aspectRatio) newConfig.aspectRatio = '1:1';
-            if (!newConfig.imageModel) newConfig.imageModel = 'flash';
+            if (!newConfig.generationModel) {
+              newConfig.generationModel = newConfig.imageModel
+                ? migrateImageModel(newConfig.imageModel)
+                : DEFAULT_GENERATION_MODEL;
+            }
+            delete newConfig.imageModel;
+            delete newConfig.aspectRatio;
             if (!newConfig.credits) newConfig.credits = '';
             if (!newConfig.license) newConfig.license = 'cc-by';
             setConfig(newConfig);
@@ -1105,6 +1127,61 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   };
 
+  // ── Model change warning & bulk regeneration ─────────────────────────────
+
+  const handleGenerationModelChange = (newModel: GenerationModel) => {
+    const affected = rows.filter(r => r.generationModel && r.generationModel !== newModel && r.bitmapStatus === 'completed');
+    if (affected.length === 0) {
+      // ModelChangeNoWarning rule: no affected rows → commit immediately
+      setConfig(prev => ({ ...prev, generationModel: newModel }));
+    } else {
+      // ModelChangeWarning rule: show dialog before committing
+      setModelChangeWarning({ pendingModel: newModel, affectedCount: affected.length });
+    }
+  };
+
+  const bulkRegenerate = async (newModel: GenerationModel) => {
+    setConfig(prev => ({ ...prev, generationModel: newModel }));
+    const affected = rows.filter(r => r.generationModel && r.generationModel !== newModel && r.bitmapStatus === 'completed');
+    // BulkRegeneration rule: dispatch Phase 3 concurrently for all affected rows
+    const configWithNewModel = { ...config, generationModel: newModel };
+    await Promise.all(
+      affected.map(async (row) => {
+        updateRowById(row.id, {
+          bitmapStatus: 'processing',
+          rawSvg: undefined,
+          bitmap: undefined,
+          structuredSvg: undefined,
+          structuredSvgStatus: 'idle',
+        });
+        try {
+          const p3Result: Phase3Result = (newModel === 'recraftv4_1_vector' || newModel === 'recraftv4_1')
+            ? await Recraft.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, configWithNewModel, addLog)
+            : await Gemini.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, configWithNewModel, addLog);
+          const isVector = !!p3Result.svg;
+          updateRowById(row.id, {
+            rawSvg: isVector ? p3Result.svg : undefined,
+            bitmap: isVector ? undefined : p3Result.bitmap,
+            generationModel: p3Result.generationModel,
+            rawSvgDiscarded: isVector ? false : undefined,
+            structuredSvg: undefined,
+            structuredSvgStatus: isVector ? 'outdated' : 'idle',
+            bitmapStatus: 'completed',
+            status: 'completed',
+          });
+        } catch (err: any) {
+          if (err instanceof QuotaExceededError) {
+            setQuotaModal({ units_used: err.units_used, limit: err.limit });
+            updateRowById(row.id, { bitmapStatus: 'idle' });
+          } else {
+            updateRowById(row.id, { bitmapStatus: 'error' });
+            addLog('error', `[REGENERAR] Error en "${row.UTTERANCE}": ${err.message}`);
+          }
+        }
+      })
+    );
+  };
+
   const processStep = async (rowId: string, step: 'nlu' | 'visual' | 'produce' | 'structure'): Promise<boolean> => {
     // Pre-flight: garantizar sesión antes de tocar estado de UI.
     try {
@@ -1143,8 +1220,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         }
         result = await Claude.generateVisualBlueprint(nluObj as NLUData, config, addLog);
       } else if (step === 'produce') {
-        // Phase 3: PRODUCIR — Recraft V3 → rawSvg (native SVG, no bitmap)
-        result = await Recraft.generateSVG(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
+        // Phase 3: PRODUCIR — dispatch to correct service based on generationModel
+        const model = config.generationModel ?? DEFAULT_GENERATION_MODEL;
+        if (model === 'recraftv4_1_vector' || model === 'recraftv4_1') {
+          result = await Recraft.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
+        } else {
+          result = await Gemini.generateImage(ensureElementsArray(row.elements), row.prompt || "", row, config, addLog);
+        }
       } else if (step === 'structure') {
         // Phase 5: ESTRUCTURAR — Claude Sonnet vision → structuredSvg
         if (!row.rawSvg) throw new Error('Se requiere SVG de Recraft (ejecutar PRODUCIR primero)');
@@ -1175,7 +1257,20 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         [durationKey]: duration,
         ...(step === 'nlu' ? { NLU: result, visualStatus: 'outdated', bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
         ...(step === 'visual' ? { elements: result.elements, prompt: result.prompt, bitmapStatus: 'outdated', structuredSvgStatus: 'outdated' } : {}),
-        ...(step === 'produce' ? { rawSvg: result, rawSvgDiscarded: false, structuredSvgStatus: 'outdated', status: 'completed' } : {}),
+        ...(step === 'produce' ? (() => {
+          const p3 = result as Phase3Result;
+          const isVector = !!p3.svg;
+          return {
+            rawSvg: isVector ? p3.svg : undefined,
+            bitmap: isVector ? undefined : p3.bitmap,
+            generationModel: p3.generationModel,
+            rawSvgDiscarded: isVector ? false : row.rawSvgDiscarded,
+            structuredSvg: undefined,
+            structuredSvgDiscarded: false,
+            structuredSvgStatus: isVector ? 'outdated' : 'idle',
+            status: 'completed',
+          };
+        })() : {}),
         ...(step === 'structure' ? { structuredSvg: result, structuredSvgDiscarded: false, status: 'completed' } : {}),
       });
       if (step === 'nlu') {
@@ -1263,19 +1358,26 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       finalUpdates.visualDuration = (Date.now() - visualStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 2, total: 3, duration: finalUpdates.visualDuration.toFixed(1) }));
 
-      // --- Produce Step (Phase 3: PRODUCIR — Recraft V3 → rawSvg) ---
+      // --- Produce Step (Phase 3: PRODUCIR — dispatch by generationModel) ---
       addLog('info', t('messages.cascadeStep', { current: 3, total: 3, step: stepNames.produce }));
       updateRowById(rowId, { visualStatus: 'completed', visualDuration: finalUpdates.visualDuration, elements: visualResult.elements, prompt: visualResult.prompt, bitmapStatus: 'processing' });
       const bitmapStartTime = Date.now();
-      const rawSvgResult = await Recraft.generateSVG(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
+      const p3Model = config.generationModel ?? DEFAULT_GENERATION_MODEL;
+      const p3Result: Phase3Result = (p3Model === 'recraftv4_1_vector' || p3Model === 'recraftv4_1')
+        ? await Recraft.generateImage(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog)
+        : await Gemini.generateImage(ensureElementsArray(visualResult.elements), visualResult.prompt || "", row, config, addLog);
       if (stopFlags.current[row.id]) {
         addLog('info', t('messages.cascadeStoppedAtStep', { step: stepNames.produce }));
         updateRowById(rowId, { bitmapStatus: 'idle', status: 'idle' });
         return;
       }
-      finalUpdates.rawSvg = rawSvgResult;
-      finalUpdates.rawSvgDiscarded = false;
-      finalUpdates.structuredSvgStatus = 'outdated';
+      const p3IsVector = !!p3Result.svg;
+      finalUpdates.rawSvg = p3IsVector ? p3Result.svg : undefined;
+      finalUpdates.bitmap = p3IsVector ? undefined : p3Result.bitmap;
+      finalUpdates.generationModel = p3Result.generationModel;
+      finalUpdates.rawSvgDiscarded = p3IsVector ? false : undefined;
+      finalUpdates.structuredSvg = undefined;
+      finalUpdates.structuredSvgStatus = p3IsVector ? 'outdated' : 'idle';
       finalUpdates.bitmapStatus = 'completed';
       finalUpdates.bitmapDuration = (Date.now() - bitmapStartTime) / 1000;
       addLog('success', t('messages.cascadeStepComplete', { current: 3, total: 3, duration: finalUpdates.bitmapDuration.toFixed(1) }));
@@ -1712,64 +1814,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors flex-1 min-h-[10rem] resize-none"
                 />
               </div>
-
-              {/* field-palette */}
-              <div id="field-palette">
-                <FieldLabel
-                  label={t('config.paletteColors')}
-                  tooltip={t('config.paletteColorsTooltip')}
-                />
-                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-                  {(config.paletteColors ?? DEFAULT_PALETTE).map((color, i) => (
-                    <div key={i} className="flex items-center gap-1">
-                      <input
-                        type="color"
-                        value={color}
-                        onChange={e => {
-                          const next = [...(config.paletteColors ?? DEFAULT_PALETTE)];
-                          next[i] = e.target.value;
-                          setConfig(prev => ({ ...prev, paletteColors: next }));
-                        }}
-                        className="w-7 h-7 rounded border border-slate-200 cursor-pointer p-0.5 bg-white shrink-0"
-                      />
-                      <span className="text-[10px] font-mono text-slate-400 flex-1 select-all truncate">{color}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = (config.paletteColors ?? DEFAULT_PALETTE).filter((_, idx) => idx !== i);
-                          setConfig(prev => ({ ...prev, paletteColors: next }));
-                        }}
-                        className="p-1 text-slate-300 hover:text-rose-500 rounded transition-colors"
-                        aria-label="Eliminar color"
-                      >
-                        <X size={11} />
-                      </button>
-                    </div>
-                  ))}
-                  {(config.paletteColors ?? DEFAULT_PALETTE).length < 10 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = [...(config.paletteColors ?? DEFAULT_PALETTE), '#888888'];
-                        setConfig(prev => ({ ...prev, paletteColors: next }));
-                      }}
-                      className="col-span-2 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-violet-600 py-1.5 px-1 border border-dashed border-slate-200 hover:border-violet-300 rounded transition-colors mt-0.5"
-                    >
-                      <Plus size={11} aria-hidden="true" /> {t('config.addColor')}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* field-style-editor */}
-              <div id="field-style-editor">
-                <button
-                  onClick={() => setShowStyleEditor(true)}
-                  className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-2.5 rounded transition-colors flex items-center justify-center gap-2"
-                >
-                  <Palette size={14} aria-hidden="true" /> {t('config.openEditor')}
-                </button>
-              </div>
             </div>
 
             {/* ── Col 3: Generación y preferencias ── */}
@@ -1845,7 +1889,168 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             </div>
 
           </div>
+
+          {/* ── Configuración avanzada (collapsible) ── */}
+          <div className="border-t mt-4 pt-4">
+            <button
+              type="button"
+              onClick={() => setConfig(prev => ({ ...prev, advancedConfigOpen: !prev.advancedConfigOpen }))}
+              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-violet-700 transition-colors w-full text-left"
+              aria-expanded={config.advancedConfigOpen ?? false}
+            >
+              <ChevronRight
+                size={14}
+                className={`transition-transform ${config.advancedConfigOpen ? 'rotate-90' : ''}`}
+                aria-hidden="true"
+              />
+              {t('config.advancedConfig')}
+            </button>
+
+            {config.advancedConfigOpen && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                {/* field-generation-model */}
+                <div id="field-generation-model">
+                  <FieldLabel
+                    label={t('config.generationModel')}
+                    tooltip={t('config.generationModelTooltip')}
+                  />
+                  <select
+                    value={config.generationModel ?? DEFAULT_GENERATION_MODEL}
+                    onChange={e => handleGenerationModelChange(e.target.value as GenerationModel)}
+                    className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
+                  >
+                    {(Object.keys(GENERATION_MODEL_LABELS) as GenerationModel[]).map(m => (
+                      <option key={m} value={m}>
+                        {GENERATION_MODEL_LABELS[m]}
+                        {m === DEFAULT_GENERATION_MODEL ? ` (${t('config.generationModels.default') || 'predeterminado'})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* field-annotated-context */}
+                <div id="field-annotated-context">
+                  <FieldLabel
+                    label={t('config.annotatedContext')}
+                    tooltip={t('config.annotatedContextTooltip')}
+                  />
+                  <textarea
+                    value={config.annotatedContext || ''}
+                    onChange={e => setConfig(prev => ({ ...prev, annotatedContext: e.target.value }))}
+                    placeholder={t('config.annotatedContextPlaceholder')}
+                    className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors h-16 resize-none"
+                  />
+                </div>
+
+                {/* field-palette */}
+                <div id="field-palette">
+                  <FieldLabel
+                    label={t('config.paletteColors')}
+                    tooltip={t('config.paletteColorsTooltip')}
+                  />
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    {(config.paletteColors ?? DEFAULT_PALETTE).map((color, i) => (
+                      <div key={i} className="flex items-center gap-1">
+                        <input
+                          type="color"
+                          value={color}
+                          onChange={e => {
+                            const next = [...(config.paletteColors ?? DEFAULT_PALETTE)];
+                            next[i] = e.target.value;
+                            setConfig(prev => ({ ...prev, paletteColors: next }));
+                          }}
+                          className="w-7 h-7 rounded border border-slate-200 cursor-pointer p-0.5 bg-white shrink-0"
+                        />
+                        <span className="text-[10px] font-mono text-slate-400 flex-1 select-all truncate">{color}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = (config.paletteColors ?? DEFAULT_PALETTE).filter((_, idx) => idx !== i);
+                            setConfig(prev => ({ ...prev, paletteColors: next }));
+                          }}
+                          className="p-1 text-slate-300 hover:text-rose-500 rounded transition-colors"
+                          aria-label="Eliminar color"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                    {(config.paletteColors ?? DEFAULT_PALETTE).length < 10 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...(config.paletteColors ?? DEFAULT_PALETTE), '#888888'];
+                          setConfig(prev => ({ ...prev, paletteColors: next }));
+                        }}
+                        className="col-span-2 flex items-center justify-center gap-1.5 text-xs text-slate-400 hover:text-violet-600 py-1.5 px-1 border border-dashed border-slate-200 hover:border-violet-300 rounded transition-colors mt-0.5"
+                      >
+                        <Plus size={11} aria-hidden="true" /> {t('config.addColor')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* field-style-editor — svgStyleDefs + svgKeyframes */}
+                <div id="field-style-editor">
+                  <button
+                    onClick={() => setShowStyleEditor(true)}
+                    className="w-full text-xs font-bold uppercase text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 p-2.5 rounded transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Palette size={14} aria-hidden="true" /> {t('config.openEditor')}
+                  </button>
+                </div>
+
+              </div>
+            )}
+          </div>
+
         </div>
+
+      {/* ── Model change warning dialog ── */}
+      {modelChangeWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-sm font-bold text-slate-800 mb-3">
+              {t('modelChangeWarning.title')}
+            </h2>
+            <p className="text-xs text-slate-600 mb-5">
+              {t('modelChangeWarning.body', {
+                n: String(modelChangeWarning.affectedCount),
+                currentModel: GENERATION_MODEL_LABELS[config.generationModel ?? DEFAULT_GENERATION_MODEL],
+                newModel: GENERATION_MODEL_LABELS[modelChangeWarning.pendingModel],
+              })}
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  const m = modelChangeWarning.pendingModel;
+                  setModelChangeWarning(null);
+                  await bulkRegenerate(m);
+                }}
+                className="w-full text-xs font-bold py-2.5 px-4 bg-violet-700 hover:bg-violet-800 text-white rounded transition-colors"
+              >
+                {t('modelChangeWarning.confirmChangeAndRegen', { n: String(modelChangeWarning.affectedCount) })}
+              </button>
+              <button
+                onClick={() => {
+                  setConfig(prev => ({ ...prev, generationModel: modelChangeWarning.pendingModel }));
+                  setModelChangeWarning(null);
+                }}
+                className="w-full text-xs font-medium py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+              >
+                {t('modelChangeWarning.confirmChange')}
+              </button>
+              <button
+                onClick={() => setModelChangeWarning(null)}
+                className="w-full text-xs text-slate-400 hover:text-slate-600 py-1.5 transition-colors"
+              >
+                {t('modelChangeWarning.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
         </>
       )}
 
@@ -2619,6 +2824,17 @@ const RowComponent: React.FC<{
                       onOpenEditor={onOpenEditor}
                       onDiscardSvg={onDiscardSvg}
                     />
+                  </div>
+                ) : validBitmap(row) ? (
+                  <div id="svg-preview" className="border border-slate-200 bg-white flex flex-col items-center justify-center min-h-[250px] gap-3 p-4">
+                    <img
+                      src={validBitmap(row)}
+                      alt={row.UTTERANCE}
+                      className="max-h-[220px] w-auto object-contain"
+                    />
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wider text-center">
+                      {t('editor.bitmapRender')}
+                    </p>
                   </div>
                 ) : (
                   <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">

@@ -108,15 +108,18 @@ export interface RecraftParams {
     prompt: string;
     /** Preferred colors in hex format (max 10). Sent as controls.colors to Recraft. */
     colors?: string[];
+    /** Recraft model to use. Defaults to recraftv4_1_vector. */
+    model?: 'recraftv4_1' | 'recraftv4_1_vector';
 }
 
 export interface RecraftResponse {
-    svg: string;
+    svg?: string;    // present for recraftv4_1_vector
+    bitmap?: string; // present for recraftv4_1 (base64 PNG data URL)
 }
 
 /**
  * Call Recraft via the Background Worker and polling.
- * Returns { svg: string } — the raw SVG content from Recraft.
+ * Returns { svg } for vector model or { bitmap } for raster model.
  */
 export async function callRecraft(params: RecraftParams): Promise<RecraftResponse> {
     const jobId = 'job-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
@@ -142,11 +145,11 @@ export async function callRecraft(params: RecraftParams): Promise<RecraftRespons
     // 2. Hacer polling hasta por 60 segundos
     for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 2000));
-        
+
         const pollRes = await fetch(`/.netlify/functions/api-recraft-poll?jobId=${jobId}`, {
             headers: reqHeaders
         });
-        
+
         if (!pollRes.ok) {
             // Ignorar errores temporales 5xx de red y seguir intentando
             if ([502, 503, 504].includes(pollRes.status)) continue;
@@ -155,8 +158,9 @@ export async function callRecraft(params: RecraftParams): Promise<RecraftRespons
         }
 
         const data = await pollRes.json();
-        
+
         if (data.svg) return { svg: data.svg };
+        if (data.bitmap) return { bitmap: data.bitmap };
         if (data.quotaExceeded) {
             throw new QuotaExceededError(data.units_used ?? 0, data.limit ?? 100);
         }
@@ -165,4 +169,62 @@ export async function callRecraft(params: RecraftParams): Promise<RecraftRespons
     }
 
     throw new Error('Tiempo de espera agotado tras 60s generando el pictograma');
+}
+
+export interface GeminiParams {
+    prompt: string;
+    model: string;
+}
+
+export interface GeminiResponse {
+    bitmap: string; // base64 PNG data URL
+}
+
+/**
+ * Call Gemini image generation via Background Worker and polling.
+ * Returns { bitmap } — a base64 PNG data URL.
+ */
+export async function callGemini(params: GeminiParams): Promise<GeminiResponse> {
+    const jobId = 'gemini-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    const isLocalDev = import.meta.env.DEV;
+    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isLocalDev) {
+        const token = await getAuthToken();
+        reqHeaders['Authorization'] = `Bearer ${token}`;
+    }
+
+    const startRes = await fetch('/.netlify/functions/api-gemini-worker-background', {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify({ ...params, jobId }),
+    });
+
+    if (!startRes.ok && startRes.status !== 202) {
+        throw new Error(`Fallo al iniciar el trabajo de Gemini: ${startRes.statusText}`);
+    }
+
+    for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+
+        const pollRes = await fetch(`/.netlify/functions/api-gemini-poll?jobId=${jobId}`, {
+            headers: reqHeaders,
+        });
+
+        if (!pollRes.ok) {
+            if ([502, 503, 504].includes(pollRes.status)) continue;
+            const err = await pollRes.json().catch(() => ({}));
+            throw new Error(err.error || `Proxy error ${pollRes.status}`);
+        }
+
+        const data = await pollRes.json();
+
+        if (data.bitmap) return { bitmap: data.bitmap };
+        if (data.quotaExceeded) {
+            throw new QuotaExceededError(data.units_used ?? 0, data.limit ?? 100);
+        }
+        if (data.error) throw new Error(data.error);
+        if (data.pending) continue;
+    }
+
+    throw new Error('Tiempo de espera agotado tras 60s generando imagen con Gemini');
 }

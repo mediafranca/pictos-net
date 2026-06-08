@@ -20,9 +20,16 @@ export const handler = async (event, context) => {
     return;
   }
 
-  const { prompt, colors, jobId } = bodyPayload;
+  const { prompt, colors, jobId, model = 'recraftv4_1_vector' } = bodyPayload;
   if (!jobId || !prompt) {
     console.error('[api-recraft-worker] Missing jobId or prompt');
+    return;
+  }
+
+  const ALLOWED_MODELS = ['recraftv4_1', 'recraftv4_1_vector'];
+  if (!ALLOWED_MODELS.includes(model)) {
+    console.error(`[api-recraft-worker] Disallowed model: ${model}`);
+    await store.setJSON(jobId, { error: `Model not allowed: ${model}` });
     return;
   }
 
@@ -87,13 +94,13 @@ export const handler = async (event, context) => {
     return;
   }
 
-  console.log(`[api-recraft-worker] user=${email} model=recraftv4_1_vector today=${quota.units_used}/${quota.limit} jobId=${jobId}`);
+  console.log(`[api-recraft-worker] user=${email} model=${model} today=${quota.units_used}/${quota.limit} jobId=${jobId}`);
 
   const startMs = Date.now();
 
   try {
     const body = {
-      model: 'recraftv4_1_vector',
+      model,
       prompt,
       n: 1,
       size: '1:1',
@@ -123,7 +130,7 @@ export const handler = async (event, context) => {
       const errText = await recraftRes.text().catch(() => recraftRes.statusText);
       console.error(`[api-recraft-worker] Recraft error ${recraftRes.status}: ${errText}`);
       await logCall({
-        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        email, phase: 'recraft', model, units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: `Recraft ${recraftRes.status}: ${errText}`,
       });
@@ -137,7 +144,7 @@ export const handler = async (event, context) => {
     if (!imageUrl) {
       console.error('[api-recraft-worker] No image URL in response');
       await logCall({
-        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        email, phase: 'recraft', model, units_charged: 1,
         ms: Date.now() - startMs,
         tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'No image URL in Recraft response',
       });
@@ -145,42 +152,51 @@ export const handler = async (event, context) => {
       return;
     }
 
-    const svgRes = await fetch(imageUrl);
-    if (!svgRes.ok) {
+    const imageRes = await fetch(imageUrl);
+    if (!imageRes.ok) {
       await logCall({
-        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+        email, phase: 'recraft', model, units_charged: 1,
         ms: Date.now() - startMs,
-        tokens_in: 0, tokens_out: 0, ok: false, error_msg: `CDN fetch failed: ${svgRes.status}`,
+        tokens_in: 0, tokens_out: 0, ok: false, error_msg: `CDN fetch failed: ${imageRes.status}`,
       });
-      await store.setJSON(jobId, { error: `Failed to fetch SVG from Recraft CDN: ${svgRes.status}` });
-      return;
-    }
-
-    const svgContent = await svgRes.text();
-
-    if (!svgContent.trim().startsWith('<') && !svgContent.includes('<svg')) {
-      await logCall({
-        email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
-        ms: Date.now() - startMs,
-        tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'Response not valid SVG',
-      });
-      await store.setJSON(jobId, { error: 'Recraft response is not valid SVG' });
+      await store.setJSON(jobId, { error: `Failed to fetch image from Recraft CDN: ${imageRes.status}` });
       return;
     }
 
     const ms = Date.now() - startMs;
-    await logCall({
-      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
-      ms, tokens_in: 0, tokens_out: Math.round(svgContent.length / 4), ok: true,
-    });
 
-    // Save final SVG success
-    await store.setJSON(jobId, { svg: svgContent });
+    if (model === 'recraftv4_1_vector') {
+      // Vector model: fetch and validate SVG text
+      const svgContent = await imageRes.text();
+      if (!svgContent.trim().startsWith('<') && !svgContent.includes('<svg')) {
+        await logCall({
+          email, phase: 'recraft', model, units_charged: 1,
+          ms, tokens_in: 0, tokens_out: 0, ok: false, error_msg: 'Response not valid SVG',
+        });
+        await store.setJSON(jobId, { error: 'Recraft response is not valid SVG' });
+        return;
+      }
+      await logCall({
+        email, phase: 'recraft', model, units_charged: 1,
+        ms, tokens_in: 0, tokens_out: Math.round(svgContent.length / 4), ok: true,
+      });
+      await store.setJSON(jobId, { svg: svgContent });
+    } else {
+      // Raster model (recraftv4_1): fetch PNG, convert to base64 data URL
+      const arrayBuffer = await imageRes.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const bitmap = `data:image/png;base64,${base64}`;
+      await logCall({
+        email, phase: 'recraft', model, units_charged: 1,
+        ms, tokens_in: 0, tokens_out: Math.round(base64.length / 4), ok: true,
+      });
+      await store.setJSON(jobId, { bitmap });
+    }
 
   } catch (error) {
     console.error(`[api-recraft-worker] Error: ${error.message}`);
     await logCall({
-      email, phase: 'recraft', model: 'recraftv4_1_vector', units_charged: 1,
+      email, phase: 'recraft', model, units_charged: 1,
       ms: Date.now() - startMs,
       tokens_in: 0, tokens_out: 0, ok: false, error_msg: error.message,
     });

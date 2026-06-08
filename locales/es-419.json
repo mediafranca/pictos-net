@@ -106,7 +106,8 @@
     "noBitmapGenerated": "Aún no se ha generado bitmap.",
     "noBitmapReference": "Sin Referencia de Bitmap",
     "fullSizeRender": "Renderizado tamaño completo",
-    "evaluationContext": "Contexto de Evaluación"
+    "evaluationContext": "Contexto de Evaluación",
+    "bitmapRender": "Imagen bitmap — usar Vectorizar para convertir a SVG"
   },
   "evaluation": {
     "icap": "Evaluación ICAP",
@@ -211,7 +212,20 @@
     "recordingEnabled": "Registro activado",
     "recordingDisabled": "Registro pausado",
     "tutorial": "Tutorial",
-    "tutorialTooltip": "Ver el tutorial de introducción a PICTOS.net"
+    "tutorialTooltip": "Ver el tutorial de introducción a PICTOS.net",
+    "generationModel": "Modelo de generación",
+    "generationModelTooltip": "Modelo de IA usado en la fase PRODUCIR (Fase 3). Afecta el formato de salida: vectorial o bitmap.",
+    "generationModels": {
+      "gemini-2.5-flash-image": "Gemini Flash",
+      "gemini-3.1-flash-image-preview": "Gemini Flash 3.1",
+      "gemini-3-pro-image-preview": "Gemini Pro",
+      "recraftv4_1": "Recraft (raster)",
+      "recraftv4_1_vector": "Recraft (vectorial)"
+    },
+    "advancedConfig": "Configuración avanzada",
+    "annotatedContext": "Contexto adicional",
+    "annotatedContextTooltip": "Texto libre inyectado en el análisis NLU (Fase 1). Útil para especificar contexto cultural, regional o comunicativo.",
+    "annotatedContextPlaceholder": "Ej.: comunidad escolar, adultos mayores, contexto clínico…"
   },
   "console": {
     "title": "Consola PICTOS",
@@ -562,5 +576,12 @@
     "shareLibrary": "Comparte tu biblioteca",
     "shareInstructions": "Si has creado una biblioteca de pictogramas y quieres compartirla como ejemplo de uso de la herramienta, exporta el archivo .json y envíalo por correo electrónico.",
     "research": "También puedes escribirme a la misma dirección si te interesa participar en el estudio, dar feedback, o tienes ideas sobre cómo mejorar estas tecnologías."
+  },
+  "modelChangeWarning": {
+    "title": "¿Cambiar modelo de generación?",
+    "body": "{{n}} pictograma(s) de tu biblioteca se generaron con {{currentModel}}. Cambiar a {{newModel}} no los regenerará automáticamente. Las nuevas generaciones usarán {{newModel}}.",
+    "confirmChange": "Solo cambiar",
+    "confirmChangeAndRegen": "Cambiar y regenerar todo ({{n}} unidades)",
+    "cancel": "Cancelar"
   }
 }
