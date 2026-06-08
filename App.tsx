@@ -220,7 +220,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     credits: '',
     license: 'CC BY 4.0',
     visualStylePrompt: getDefaultStylePrompt('es-419'),
-    geoContext: { lat: '40.4168', lng: '-3.7038', region: 'Madrid, ES' },
+    geoContext: { lat: '-33.0245', lng: '-71.5518', region: 'Viña del Mar, CL' },
     annotatedContext: '',
     svgStyleDefs: INITIAL_STYLES,
     svgKeyframes: INITIAL_KEYFRAMES,

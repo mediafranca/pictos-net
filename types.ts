@@ -209,7 +209,7 @@ export function getModelFamily(model: GenerationModel): ModelFamily {
   return model === 'recraftv4_1_vector' ? 'vector' : 'bitmap';
 }
 
-export const DEFAULT_GENERATION_MODEL: GenerationModel = 'gemini-2.5-flash-image';
+export const DEFAULT_GENERATION_MODEL: GenerationModel = 'gemini-3.1-flash-image';
 
 /** Human-readable labels for GenerationModel values (used by GenerationModelSelector). */
 export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
