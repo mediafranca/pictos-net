@@ -84,6 +84,7 @@ export const handler = async (event, context) => {
     return;
   }
 
+
   // Quota check — 1 unit per image generation call (usage-enforcement.allium)
   const quota = await checkAndCharge(email, 1);
   if (!quota.allowed) {
