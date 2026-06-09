@@ -104,9 +104,14 @@ export const handler = async (event, context) => {
 
   try {
     const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`;
+    // Add Referer so HTTP-referrer-restricted keys are not blocked by Google.
+    // The proper fix is to switch GEMINI_PUBLIC_API_KEY from HTTP-referrer to
+    // API restriction in Google Cloud Console (see .env.example), but this
+    // header ensures server-side calls are accepted either way.
+    const deployUrl = process.env.URL || 'https://next.pictos.net';
     const geminiRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Referer': `${deployUrl}/` },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
