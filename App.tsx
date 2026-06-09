@@ -2359,7 +2359,18 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         <div id="console" className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-500 mono text-xs p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
             <span className="flex items-center gap-3"><Terminal size={14} /> PICTOS Console</span>
-            <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush</button>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setLogs([])}
+                className="hover:text-white transition-colors"
+                aria-label="Flush console"
+              >Flush</button>
+              <button
+                onClick={() => setShowConsole(false)}
+                className="hover:text-white transition-colors"
+                aria-label="Close console"
+              >Cerrar</button>
+            </div>
           </div>
           {logs.slice().reverse().map(l => (
             <div key={l.id} className="flex gap-4 py-1 border-b border-slate-900 last:border-0 items-start">

@@ -27,7 +27,7 @@ import { callClaude, extractToolUse } from "./aiClient";
 
 const PHASE5_MAX_ATTEMPTS = 3;
 const CONFIDENCE_THRESHOLD = 0.7;
-const MARK_RENDER_SIZE = 1024; // canvas px (longest side)
+const MARK_RENDER_SIZE = 800; // canvas px (longest side) — kept small to stay within Netlify 6 MB body limit
 
 // ─── Public helpers ──────────────────────────────────────────────────────────
 
@@ -368,7 +368,7 @@ async function rasterizeWithMarks(svgString: string, inventory: PathInventory): 
                 ctx.fillText(String(index), cx, cy);
             });
 
-            const dataUrl = canvas.toDataURL('image/png');
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
             resolve(dataUrl.split(',')[1]); // base64 only, no prefix
         };
         img.onerror = () => {
@@ -417,7 +417,7 @@ async function rasterizeIsolated(svgString: string, pathId: string, viewBox: str
             ctx.fillRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
             URL.revokeObjectURL(url);
-            resolve(canvas.toDataURL('image/png').split(',')[1]);
+            resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
         };
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to rasterize isolated path')); };
         img.src = url;
@@ -425,6 +425,35 @@ async function rasterizeIsolated(svgString: string, pathId: string, viewBox: str
 }
 
 // ─── Claude Vision Tool Use (Phase 5) ────────────────────────────────────────
+
+/**
+ * Build a compact structural summary of the SVG for Claude's text context.
+ * Sends group hierarchy + path-mark correspondence without raw path data.
+ */
+function buildStructuralContext(inventory: PathInventory): string {
+    const lines: string[] = ['SVG structural context:'];
+
+    const groupKeys = Object.keys(inventory.vtracerGroups);
+    if (groupKeys.length > 0) {
+        lines.push('\nGroups (group-id → path-ids):');
+        for (const [gId, pathIds] of Object.entries(inventory.vtracerGroups)) {
+            lines.push(`  ${gId}: [${pathIds.join(', ')}]`);
+        }
+    }
+    if (inventory.standalonePathIds.length > 0) {
+        lines.push(`\nStandalone paths: [${inventory.standalonePathIds.join(', ')}]`);
+    }
+    if (inventory.backgroundPathIds.length > 0) {
+        lines.push(`\nBackground paths (excluded): [${inventory.backgroundPathIds.join(', ')}]`);
+    }
+
+    lines.push('\nPath marks (image mark# → SVG path-id → fill-role → centroid-xy):');
+    inventory.paths.forEach((p, i) => {
+        lines.push(`  mark ${i}: id="${p.id}" fill="${p.fillRole}" centroid=(${p.cx},${p.cy})`);
+    });
+
+    return lines.join('\n');
+}
 
 interface ElementMapping {
     elementIndex: number;
@@ -518,7 +547,8 @@ Rules:
 5. Multiple elements can share the same nodeId (one semantic node may span many paths).
 6. Respond in ${lang}.`;
 
-    const userContent = `Analyze this numbered SVG pictogram. Map each numbered element to its semantic node.`;
+    const structuralContext = buildStructuralContext(inventory);
+    const userText = `Analyze this numbered SVG pictogram and map each numbered element to its semantic node.\n\n${structuralContext}`;
 
     const response = await callClaude({
         model: 'claude-sonnet-4-6',
@@ -531,9 +561,9 @@ Rules:
             content: [
                 {
                     type: 'image',
-                    source: { type: 'base64', media_type: 'image/png', data: markedImageBase64 },
+                    source: { type: 'base64', media_type: 'image/jpeg', data: markedImageBase64 },
                 },
-                { type: 'text', text: userContent },
+                { type: 'text', text: userText },
             ],
         }],
     });

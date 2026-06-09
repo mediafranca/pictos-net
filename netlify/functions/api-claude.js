@@ -41,7 +41,7 @@ function corsHeaders(origin) {
   };
 }
 
-export const handler = async (event, context) => {
+async function handleRequest(event, context) {
   connectBlobs(event);
   const origin = event.headers?.origin || '';
   const headers = corsHeaders(origin);
@@ -152,4 +152,19 @@ export const handler = async (event, context) => {
       usage: response.usage,
     }),
   };
+}
+
+export const handler = async (event, context) => {
+  const origin = event.headers?.origin || '';
+  const headers = corsHeaders(origin);
+  try {
+    return await handleRequest(event, context);
+  } catch (err) {
+    console.error('[api-claude] unhandled exception:', err);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: err?.message || 'Internal server error' }),
+    };
+  }
 };

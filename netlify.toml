@@ -14,8 +14,8 @@
   node_bundler = "esbuild"
 
 [functions."api-claude"]
-  # Claude Sonnet vision (phase 5) can take 20-40s
-  timeout = 26
+  # Claude Sonnet vision (phase 5) can take 20-40s; raised to 90s
+  timeout = 90
 
 [functions."api-recraft"]
   # Recraft SVG generation + fetch
