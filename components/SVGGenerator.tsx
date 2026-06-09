@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, AlertCircle, FileCode, Edit, Layers, Eraser, Trash2 } from 'lucide-react';
+import { Download, AlertCircle, FileCode, Edit, Layers, Eraser, Trash2, Scan } from 'lucide-react';
 import { RowData, VisualElement, NLUData } from '../types';
 import { structureSVG, canStructureSVG } from '../services/svgStructureService';
 import useSVGLibrary from '../hooks/useSVGLibrary';
@@ -47,9 +47,11 @@ interface SVGGeneratorProps {
      * See specs/intervention-recording.allium § ReStructurarDiscardsStructured.
      */
     onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
+    /** Opens the VectorizerModal so the user can re-trace the bitmap → rawSvg. */
+    onOpenVectorizer?: () => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, layout = 'stacked', onDiscardSvg }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, layout = 'stacked', onDiscardSvg, onOpenVectorizer }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -607,17 +609,30 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         onClick={() => handleFormat()}
                         disabled={!structureEligibility.eligible}
                         title={structureEligibility.eligible ? undefined : structureEligibility.reason}
+                        aria-label={t('svg.formatGemini')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-none'}`}
                     >
                         <Layers size={16} aria-hidden="true" /> {t('svg.formatGemini')}
                     </button>
 
+                    {onOpenVectorizer && (
+                        <button
+                            onClick={onOpenVectorizer}
+                            title={t('svg.retrace')}
+                            aria-label={t('svg.retrace')}
+                            className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-violet-50 text-slate-500 hover:text-violet-700 py-2 px-3 rounded transition-colors border border-slate-200 hover:border-violet-300 text-xs"
+                        >
+                            <Scan size={13} aria-hidden="true" />
+                        </button>
+                    )}
+
                     <button
                         onClick={cleanInlineStyles}
                         title={t('svg.clearInlineStyles')}
+                        aria-label={t('svg.clearInlineStyles')}
                         className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs"
                     >
-                        <Eraser size={13} />
+                        <Eraser size={13} aria-hidden="true" />
                     </button>
 
                 </div>

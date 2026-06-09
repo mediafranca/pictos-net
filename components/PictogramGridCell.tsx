@@ -17,7 +17,7 @@
  */
 
 import React, { useState } from 'react';
-import { Play, Square, FileDown, Edit } from 'lucide-react';
+import { Play, Square, FileDown, Edit, Scan } from 'lucide-react';
 import type { RowData, StepStatus } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { injectSvgA11y } from '../utils/svgAccessibility';
@@ -33,6 +33,7 @@ interface Props {
   onStop: () => void;
   onFocus: (step: FocusStep) => void;
   onOpenEditor: (source?: 'raw' | 'structured') => void;
+  onOpenVectorizer?: () => void;
   onSettleField?: () => void;
 }
 
@@ -66,7 +67,7 @@ const StatusBadge: React.FC<{ step: number; status: StepStatus; label: string; o
 
 export const PictogramGridCell: React.FC<Props> = ({
   row, onUpdate, onCascade, onStop, onFocus,
-  onOpenEditor, onSettleField,
+  onOpenEditor, onOpenVectorizer, onSettleField,
 }) => {
   const { t } = useTranslation();
   const stage = stageOf(row);
@@ -160,40 +161,53 @@ export const PictogramGridCell: React.FC<Props> = ({
         className="relative aspect-square bg-slate-50 cursor-pointer overflow-hidden"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        onClick={() => { if (stage !== 'none') onFocus(stage === 'bitmap' ? 'produce' : 'nlu'); }}
+        onClick={() => { if (stage !== 'none') onFocus(stage === 'bitmap' ? 'produce' : 'format'); }}
         role={stage !== 'none' ? 'button' : undefined}
         aria-label={stage !== 'none' ? t('library.openInFocus', { utterance: row.UTTERANCE }) : undefined}
         tabIndex={stage !== 'none' ? 0 : -1}
-        onKeyDown={(e) => { if (stage !== 'none' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onFocus(stage === 'bitmap' ? 'produce' : 'nlu'); } }}
+        onKeyDown={(e) => { if (stage !== 'none' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onFocus(stage === 'bitmap' ? 'produce' : 'format'); } }}
       >
         {renderPictogram()}
 
         {/* Hover overlay: stage pill + actions */}
         {stage !== 'none' && isHovered && (
           <>
-            <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded">
+            <div className="absolute top-2 left-2 px-2 py-1 bg-black/70 text-white text-[10px] font-medium uppercase tracking-wider rounded" aria-hidden="true">
               {stageLabel[stage]}
             </div>
             <div className="absolute bottom-2 right-2 flex gap-1">
+              {/* Vectorize — only available for bitmap stage */}
+              {stage === 'bitmap' && onOpenVectorizer && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onOpenVectorizer(); }}
+                  className="p-2 bg-black/60 hover:bg-violet-700 text-white rounded-full shadow-lg transition-colors"
+                  title={t('svg.traceSvg')}
+                  aria-label={t('svg.traceSvg')}
+                >
+                  <Scan size={14} aria-hidden="true" />
+                </button>
+              )}
+              {/* Edit SVG — only for traced/structured stages */}
               {(stage === 'trazado' || stage === 'estructurado') && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onOpenEditor(stage === 'estructurado' ? 'structured' : 'raw'); }}
-                  className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                  className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg transition-colors"
                   title={t('svgEditor.editor')}
                   aria-label={t('svgEditor.editor')}
                 >
-                  <Edit size={14} />
+                  <Edit size={14} aria-hidden="true" />
                 </button>
               )}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); downloadCurrent(); }}
-                className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg transition-colors"
                 title={t('actions.download')}
                 aria-label={t('actions.download')}
               >
-                <FileDown size={14} />
+                <FileDown size={14} aria-hidden="true" />
               </button>
             </div>
           </>
@@ -256,7 +270,7 @@ export const PictogramGridCell: React.FC<Props> = ({
           <div className="flex gap-1.5">
             <StatusBadge step={1} status={row.nluStatus}    label={t('pipeline.understand')} onClick={() => onFocus('nlu')} />
             <StatusBadge step={2} status={row.visualStatus} label={t('pipeline.compose')}    onClick={() => onFocus('visual')} />
-            <StatusBadge step={3} status={row.bitmapStatus} label={t('pipeline.produce')}    onClick={() => onFocus('bitmap')} />
+            <StatusBadge step={3} status={row.bitmapStatus} label={t('pipeline.produce')}    onClick={() => onFocus('produce')} />
           </div>
         </div>
       </div>

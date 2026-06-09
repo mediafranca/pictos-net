@@ -8,7 +8,7 @@ import {
   X, Code, Plus, FileText, Maximize, Copy, BrainCircuit, PlusCircle, CornerDownRight, Image as ImageIcon,
   Library, ScreenShare, Globe, HelpCircle, ExternalLink, Palette, GripVertical, Edit,
   ChevronLeft, ChevronRight, ArrowUp, FileCode, Layers, LogOut, LogIn, History,
-  List, LayoutGrid, Clock
+  List, LayoutGrid, Clock, Scan
 } from 'lucide-react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -42,6 +42,8 @@ import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
+import { VectorizerModal } from './components/VectorizerModal';
+import type { VectorizerResult } from './services/vtracerService';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -305,6 +307,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     svg: null,
     svgSource: null,
   });
+
+  const [vectorizerState, setVectorizerState] = useState<{ isOpen: boolean; rowId: string | null }>({ isOpen: false, rowId: null });
 
   const [quotaModal, setQuotaModal] = useState<{ units_used: number; limit: number } | null>(null);
 
@@ -1485,6 +1489,20 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     addLog('info', t('messages.openingSvgEditor', { utterance: row.UTTERANCE }));
   };
 
+  // VectorizerApplyDiscardsRaw: applying a fresh trace overwrites rawSvg and
+  // invalidates structuredSvg (which was derived from the previous trace).
+  const handleVectorizerApply = (result: VectorizerResult) => {
+    if (!vectorizerState.rowId) return;
+    updateRowById(vectorizerState.rowId, {
+      rawSvg: result.svg,
+      rawSvgDiscarded: false,
+      structuredSvg: undefined,
+      structuredSvgDiscarded: false,
+      structuredSvgStatus: 'outdated',
+    });
+    setVectorizerState({ isOpen: false, rowId: null });
+  };
+
   const handleSVGEditorSave = (updatedSvg: string) => {
     if (!svgEditorState.rowId) return;
     const source = svgEditorState.svgSource;
@@ -2224,6 +2242,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 onStop={() => handleStopProcess(row.id)}
                 onFocus={step => setFocusMode({ step, rowId: row.id })}
                 onOpenEditor={source => openSVGEditor(row.id, source)}
+                onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                 onSettleField={() => settleRowEdits(row.id)}
               />
             ))}
@@ -2261,6 +2280,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   config={config}
                   onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
                   onOpenEditor={(source) => openSVGEditor(row.id, source)}
+                  onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
                   onSettleField={() => settleRowEdits(row.id)}
                   onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
                   onUpdateInterventionLog={(log) => updateRowInterventionLog(row.id, log)}
@@ -2367,6 +2387,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           onSettleField={() => settleRowEdits(focusMode!.rowId)}
           onProcess={(step) => processStep(focusMode!.rowId, step)}
           onStop={() => handleStopProcess(focusMode!.rowId)}
+          onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: focusMode!.rowId })}
           onDiscardSvg={(phase, previousSvg) => {
             // See the matching handler on RowComponent above for rationale.
             const metrics = Recording.computeSvgMetrics(previousSvg);
@@ -2382,6 +2403,21 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           }}
         />
       )}
+
+      {/* Vectorizer Modal — bitmap → rawSvg via VTracer WASM */}
+      {vectorizerState.isOpen && vectorizerState.rowId && (() => {
+        const vRow = rows.find(r => r.id === vectorizerState.rowId);
+        const bmp = vRow ? validBitmap(vRow) : undefined;
+        return bmp ? (
+          <VectorizerModal
+            isOpen={vectorizerState.isOpen}
+            bitmap={bmp}
+            utterance={vRow!.UTTERANCE}
+            onClose={() => setVectorizerState({ isOpen: false, rowId: null })}
+            onApply={handleVectorizerApply}
+          />
+        ) : null;
+      })()}
 
       {/* PDF export progress modal */}
       {pdfExportInFlight && (
@@ -2633,6 +2669,7 @@ const RowComponent: React.FC<{
   config: GlobalConfig;
   onConfigChange: (partial: Partial<GlobalConfig>) => void;
   onOpenEditor: (source?: 'raw' | 'structured') => void;
+  onOpenVectorizer: () => void;
   onSettleField?: () => void;
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
@@ -2641,7 +2678,7 @@ const RowComponent: React.FC<{
    *  schema header and the RowClipboardContext so it stays self-describing
    *  when pasted outside of a library. */
   onBuildRowClipboard?: (row: RowData) => string;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2825,16 +2862,27 @@ const RowComponent: React.FC<{
                       onLog={onLog}
                       onUpdate={onUpdate}
                       onOpenEditor={onOpenEditor}
+                      onOpenVectorizer={onOpenVectorizer}
                       onDiscardSvg={onDiscardSvg}
                     />
                   </div>
                 ) : validBitmap(row) ? (
-                  <div id="svg-preview" className="border border-slate-200 bg-white flex items-center justify-center min-h-[250px] p-4">
-                    <img
-                      src={validBitmap(row)}
-                      alt={row.UTTERANCE}
-                      className="max-h-[220px] w-auto object-contain"
-                    />
+                  <div id="svg-preview" className="flex flex-col gap-3">
+                    <div className="border border-slate-200 bg-white flex items-center justify-center min-h-[220px] p-4">
+                      <img
+                        src={validBitmap(row)}
+                        alt={row.UTTERANCE}
+                        className="max-h-[200px] w-auto object-contain"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onOpenVectorizer}
+                      className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
+                      aria-label={t('svg.traceSvg')}
+                    >
+                      <Scan size={15} aria-hidden="true" /> {t('svg.traceSvg')}
+                    </button>
                   </div>
                 ) : (
                   <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">
@@ -3676,7 +3724,8 @@ const FocusViewModal: React.FC<{
   onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
   onStop?: () => void;
   onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg }) => {
+  onOpenVectorizer?: () => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg, onOpenVectorizer }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
@@ -3792,6 +3841,7 @@ const FocusViewModal: React.FC<{
       );
       case 'produce': {
         const rawSvgContent = validRawSvg(row);
+        const bitmapContent = validBitmap(row);
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
             {rawSvgContent ? (
@@ -3799,6 +3849,24 @@ const FocusViewModal: React.FC<{
                 dangerouslySetInnerHTML={{ __html: injectSvgA11y(rawSvgContent, row.UTTERANCE) }}
                 className="w-full h-full max-w-full max-h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full shadow-2xl bg-white"
               />
+            ) : bitmapContent ? (
+              <div className="flex flex-col items-center gap-4 max-w-sm w-full">
+                <img
+                  src={bitmapContent}
+                  alt={row.UTTERANCE}
+                  className="max-h-[320px] w-auto object-contain shadow-2xl bg-white"
+                />
+                {onOpenVectorizer && (
+                  <button
+                    type="button"
+                    onClick={onOpenVectorizer}
+                    className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 font-bold uppercase text-xs tracking-widest transition-all shadow-lg hover:shadow-xl"
+                    aria-label={t('svg.traceSvg')}
+                  >
+                    <Scan size={15} aria-hidden="true" /> {t('svg.traceSvg')}
+                  </button>
+                )}
+              </div>
             ) : (
               <p className="text-slate-500 font-mono">{t('editor.noSvgRender')}</p>
             )}
@@ -3809,14 +3877,34 @@ const FocusViewModal: React.FC<{
         const hasRaw = !!validRawSvg(row);
         const hasStructured = !!validStructuredSvg(row);
 
-        // Nothing yet: rawSvg comes from phase 3 (Recraft) — run PRODUCIR first.
+        // Nothing yet: check for bitmap first (can vectorize), otherwise prompt to produce.
         if (!hasRaw && !hasStructured) {
+          const bmp = validBitmap(row);
           return (
             <div className="flex items-center justify-center h-full bg-slate-50 p-6">
-              <div className="flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-8 max-w-xs text-center">
-                <FileCode size={40} className="text-slate-300" />
-                <p className="text-sm text-slate-500">{t('library.structureRequiresRaw')}</p>
-              </div>
+              {bmp && onOpenVectorizer ? (
+                <div className="flex flex-col items-center gap-6 max-w-xs w-full">
+                  <img
+                    src={bmp}
+                    alt={row.UTTERANCE}
+                    className="max-h-[240px] w-auto object-contain border border-slate-200 bg-white shadow"
+                  />
+                  <button
+                    type="button"
+                    onClick={onOpenVectorizer}
+                    className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-8 py-4 font-bold uppercase text-xs tracking-widest transition-all shadow-lg hover:shadow-xl"
+                    aria-label={t('svg.traceSvg')}
+                  >
+                    <Scan size={16} aria-hidden="true" /> {t('svg.traceSvg')}
+                  </button>
+                  <p className="text-xs text-slate-400 text-center">{t('svg.traceConverts')}</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-4 bg-white border border-slate-200 p-8 max-w-xs text-center">
+                  <FileCode size={40} className="text-slate-300" aria-hidden="true" />
+                  <p className="text-sm text-slate-500">{t('library.structureRequiresRaw')}</p>
+                </div>
+              )}
             </div>
           );
         }
@@ -3829,7 +3917,7 @@ const FocusViewModal: React.FC<{
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} layout="columns" onDiscardSvg={onDiscardSvg} />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} />
             </div>
           </div>
         );
