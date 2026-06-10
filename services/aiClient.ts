@@ -27,7 +27,14 @@ async function getAuthToken(): Promise<string> {
     if (!user) {
         user = await requestLogin();
     }
-    return user.jwt();
+    try {
+        return await user.jwt();
+    } catch {
+        // GoTrue token-refresh failure (e.g. "401 status code (no body)" from an
+        // expired session). Clear the stale session and prompt re-login once.
+        user = await requestLogin();
+        return user.jwt();
+    }
 }
 
 async function callProxy(endpoint: string, params: object): Promise<any> {
@@ -101,6 +108,16 @@ export interface ClaudeResponse {
  */
 export async function callClaude(params: ClaudeParams): Promise<ClaudeResponse> {
     return callProxy('api-claude', params);
+}
+
+/**
+ * Call the Phase 5 structuring model (vision + tool use).
+ * Routes claude-* models to api-claude; gemini-* models to api-gemini-structure.
+ * Both endpoints return a ClaudeResponse-compatible shape.
+ */
+export async function callStructuringModel(params: ClaudeParams): Promise<ClaudeResponse> {
+    const endpoint = params.model.startsWith('gemini-') ? 'api-gemini-structure' : 'api-claude';
+    return callProxy(endpoint, params);
 }
 
 /**

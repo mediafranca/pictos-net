@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
-import { Download, AlertCircle, FileCode, Edit, Layers, Eraser, Trash2, Scan } from 'lucide-react';
-import { RowData, VisualElement, NLUData } from '../types';
-import { structureSVG, canStructureSVG } from '../services/svgStructureService';
+import { Download, AlertCircle, FileCode, Edit, Layers, Trash2, Scan } from 'lucide-react';
+import { RowData, VisualElement, NLUData, StructuringMapping, PHASE5_MODELS, DEFAULT_PHASE5_MODEL } from '../types';
+import { structureSVG, assembleFromMapping, canStructureSVG } from '../services/svgStructureService';
+import { Phase5ReviewPanel } from './Phase5ReviewPanel';
 import useSVGLibrary from '../hooks/useSVGLibrary';
 import { GlobalConfig } from '../types';
 
@@ -49,9 +50,13 @@ interface SVGGeneratorProps {
     onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
     /** Opens the VectorizerModal so the user can re-trace the bitmap → rawSvg. */
     onOpenVectorizer?: () => void;
+    /** Session-only vision model for Phase 5 structuring. Not persisted. */
+    phase5Model?: string;
+    /** Called when the user changes the Phase 5 model via the selector. */
+    onPhase5ModelChange?: (model: string) => void;
 }
 
-export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, layout = 'stacked', onDiscardSvg, onOpenVectorizer }) => {
+export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, onUpdate, onOpenEditor, layout = 'stacked', onDiscardSvg, onOpenVectorizer, phase5Model = DEFAULT_PHASE5_MODEL, onPhase5ModelChange }) => {
     const { t } = useTranslation();
     const { addSVG, getSVGByRowId, removeSVGByRowId } = useSVGLibrary();
     const [status, setStatus] = useState<'idle' | 'traced' | 'structuring' | 'completed' | 'error'>('idle');
@@ -69,6 +74,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     );
     const [confirmingDelete, setConfirmingDelete] = useState<'raw' | 'structured' | null>(null);
     const [structureProgress, setStructureProgress] = useState(0);
+    const [pendingMapping, setPendingMapping] = useState<StructuringMapping | null>(null);
     const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // row.structuredSvg is the authoritative source (updated by parent via updateRow).
@@ -295,7 +301,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
             const nluData = typeof row.NLU === 'object' ? row.NLU as NLUData : undefined;
             if (!nluData) throw new Error("Invalid NLU data");
 
-            onLog('info', `Estructurando SVG semántico con contexto NLU...`);
+            onLog('info', `Estructurando SVG semántico [modelo: ${phase5Model}]…`);
             const sStart = performance.now();
             const result = await structureSVG({
                 rawSvg: svg,
@@ -303,36 +309,41 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 elements: row.elements || [],
                 utterance: row.UTTERANCE,
                 config,
+                phase5Model,
                 onProgress: (msg) => onLog('info', msg),
-                onStatus: (s) => {
-                    switch (s) {
-                        case 'sending': setSubStatus('Enviando imagen marcada a Claude Sonnet…'); break;
-                        case 'receiving': setSubStatus('Recibiendo mapeo semántico…'); break;
-                        case 'sanitizing': setSubStatus('Ensamblando SVG + IDs semánticos…'); break;
-                        default: setSubStatus(s);
-                    }
-                }
+                onStatus: (s) => setSubStatus(s),
             });
 
             stopHeartbeat();
             const sEnd = performance.now();
 
-            if (!result.success || !result.svg) {
-                throw new Error(result.error || "Failed to structure SVG");
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to structure SVG');
             }
+
+            // Recording mode: mapping awaits user review
+            if (result.pendingReview && result.mapping) {
+                onLog('info', `Mapeo listo — esperando revisión (modo grabación)`);
+                setPendingMapping(result.mapping);
+                setStatus('idle');
+                return;
+            }
+
+            if (!result.svg) {
+                throw new Error('ESTRUCTURAR devolvió resultado vacío');
+            }
+
             onLog('success', `Estructuración completada en ${((sEnd - sStart) / 1000).toFixed(2)}s`);
 
-            // Step 3: Save to library and persist to row
             addSVG({
-                id: row.id, // Use row ID as SVG ID to maintain 1:1 relationship
+                id: row.id,
                 utterance: row.UTTERANCE,
                 svg: result.svg,
                 createdAt: new Date().toISOString(),
                 sourceRowId: row.id,
-                lang: nluData.lang
+                lang: nluData.lang,
             });
 
-            // Persist structured SVG to row, re-validating the artifact.
             onUpdate({ structuredSvg: result.svg, structuredSvgDiscarded: false });
 
             activeStructuring.delete(row.id);
@@ -370,23 +381,21 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
         const isColumns = layout === 'columns';
         const previewWrapperClass = isColumns
             ? 'flex-1 flex flex-row gap-3 min-h-0'
-            : 'flex-1 flex flex-col min-h-0';
+            : 'flex flex-col gap-3';
         const rawSectionStyle = isColumns
             ? { flex: '1 1 0%', minHeight: 80 }
-            : { flex: '2 1 0%', minHeight: 80 };
+            : { height: 200, flexShrink: 0 };
         const structuredSectionStyle = isColumns
             ? { flex: '1 1 0%', minHeight: 120 }
-            : { flex: '3 1 0%', minHeight: 120 };
-        const rawMargin = isColumns ? '' : 'mb-2';
-        const structuredMargin = isColumns ? '' : 'mb-3';
+            : { height: 200, flexShrink: 0 };
         return (
-            <div className="flex flex-col h-full">
+            <div className={isColumns ? "flex flex-col h-full" : "flex flex-col"}>
               <div className={previewWrapperClass}>
                 {/* Raw traced SVG — compact preview (only when rawSvg exists) */}
                 {rawSvg && (
-                    <div className={`bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact ${rawMargin}`} style={rawSectionStyle}>
+                    <div className="bg-white border border-slate-200 flex items-center justify-center p-3 relative overflow-hidden group/raw-compact" style={rawSectionStyle}>
                         <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                        <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                        <div className="absolute top-1.5 left-1.5 bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider pointer-events-none z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
                             {t('svg.traceLabel')}
                         </div>
                         <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/raw-compact:opacity-100 transition-opacity">
@@ -447,9 +456,9 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 )}
 
                 {/* Structured SVG — main preview */}
-                <div className={`bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview ${structuredMargin}`} style={structuredSectionStyle}>
+                <div className="bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/svg-preview" style={structuredSectionStyle}>
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                    <div className="absolute top-2 left-2 bg-emerald-600 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
                         {t('svg.structureLabel')}
                     </div>
                     <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/svg-preview:opacity-100 transition-opacity">
@@ -513,30 +522,81 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                 </div>
               </div>
 
-                <div className={`flex gap-2 ${isColumns ? 'mt-3' : ''}`}>
-                    {/* Re-structure: go back to traced if a raw SVG is available */}
-                    {row.rawSvg && !row.rawSvgDiscarded && (
-                        <button
-                            onClick={() => {
-                                // Re-Structure: record the discard for
-                                // telemetry; the regeneration below will
-                                // overwrite structuredSvg and clear the
-                                // discard flag on success.
-                                if (row.structuredSvg) {
-                                    onDiscardSvg?.('svg_structured', row.structuredSvg);
-                                }
-                                removeSVGByRowId(row.id);
-                                setRawSvg(row.rawSvg!);
-                                handleFormat(row.rawSvg!);
-                            }}
-                            className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
-                            title={t('svg.reStructureTooltip')}
-                        >
-                            <Layers size={14} aria-hidden="true" /> {t('svg.reStructure')}
-                        </button>
-                    )}
-
-                </div>
+                {isColumns ? (
+                    /* Format step (focused view): per-column action rows */
+                    <div className="flex gap-3 mt-3">
+                        {/* Left column (trazado) actions */}
+                        <div className="flex-1 flex gap-2">
+                            {rawSvg && onOpenEditor && (
+                                <button
+                                    onClick={() => onOpenEditor('raw')}
+                                    className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
+                                    title={t('svg.editor')}
+                                >
+                                    <Edit size={13} aria-hidden="true" /> {t('svg.editor')}
+                                </button>
+                            )}
+                            {onOpenVectorizer && !!row.bitmap && !row.bitmapDiscarded && (
+                                <button
+                                    onClick={onOpenVectorizer}
+                                    title={t('svg.retrace')}
+                                    aria-label={t('svg.retrace')}
+                                    className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-violet-50 text-slate-500 hover:text-violet-700 py-2 px-3 rounded transition-colors border border-slate-200 hover:border-violet-300 text-xs font-bold uppercase tracking-widest"
+                                >
+                                    <Scan size={13} aria-hidden="true" /> {t('svg.retrace')}
+                                </button>
+                            )}
+                        </div>
+                        {/* Right column (estructurado) actions */}
+                        <div className="flex-1 flex gap-2 justify-end">
+                            {onOpenEditor && (
+                                <button
+                                    onClick={() => onOpenEditor('structured')}
+                                    className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
+                                    title={t('svg.editor')}
+                                >
+                                    <Edit size={13} aria-hidden="true" /> {t('svg.editor')}
+                                </button>
+                            )}
+                            {row.rawSvg && !row.rawSvgDiscarded && (
+                                <button
+                                    onClick={() => {
+                                        if (row.structuredSvg) {
+                                            onDiscardSvg?.('svg_structured', row.structuredSvg);
+                                        }
+                                        removeSVGByRowId(row.id);
+                                        setRawSvg(row.rawSvg!);
+                                        handleFormat(row.rawSvg!);
+                                    }}
+                                    className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
+                                    title={t('svg.reStructureTooltip')}
+                                >
+                                    <Layers size={13} aria-hidden="true" /> {t('svg.reStructure')}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    /* Stacked mode (row list): single restructure button */
+                    <div className="flex gap-2">
+                        {row.rawSvg && !row.rawSvgDiscarded && (
+                            <button
+                                onClick={() => {
+                                    if (row.structuredSvg) {
+                                        onDiscardSvg?.('svg_structured', row.structuredSvg);
+                                    }
+                                    removeSVGByRowId(row.id);
+                                    setRawSvg(row.rawSvg!);
+                                    handleFormat(row.rawSvg!);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest"
+                                title={t('svg.reStructureTooltip')}
+                            >
+                                <Layers size={14} aria-hidden="true" /> {t('svg.reStructure')}
+                            </button>
+                        )}
+                    </div>
+                )}
 
             </div>
         );
@@ -544,11 +604,111 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
 
     // Show raw traced SVG with Format button
     if (status === 'traced' && rawSvg) {
+        const isColumns = layout === 'columns';
+
+        // Columns layout (format step in FocusViewModal): left = trazado, right = Estructurar CTA
+        if (isColumns) {
+            return (
+                <div className="flex flex-col h-full">
+                    <div className="flex-1 flex flex-row gap-3 min-h-0">
+                        {/* Left column: trazado preview */}
+                        <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative overflow-hidden group/raw-preview" style={{ minHeight: 80 }}>
+                            <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
+                            <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
+                                {t('svg.traceLabel')}
+                            </div>
+                            <div className="absolute bottom-2 right-2 flex gap-2 z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
+                                {onOpenEditor && (
+                                    <button onClick={(e) => { e.stopPropagation(); onOpenEditor('raw'); }} className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg" title={t('svg.editor')}>
+                                        <Edit size={14} />
+                                    </button>
+                                )}
+                                <button onClick={downloadRawSvg} className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg" title={t('svg.download')}>
+                                    <Download size={14} />
+                                </button>
+                            </div>
+                            <div
+                                dangerouslySetInnerHTML={{ __html: injectSvgA11y(displayRawSvg, row.UTTERANCE) }}
+                                className="w-full h-full svg-preview flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
+                            />
+                        </div>
+                        {/* Right column: Estructurar CTA */}
+                        <div className="flex-1 bg-white border border-dashed border-slate-300 flex flex-col items-center justify-center p-6 gap-3" style={{ minHeight: 80 }}>
+                            {pendingMapping ? (
+                                <Phase5ReviewPanel
+                                    mapping={pendingMapping}
+                                    onConfirm={(selectionOverrides, labelOverrides) => {
+                                        setPendingMapping(null);
+                                        const nluData = typeof row.NLU === 'object' ? row.NLU as NLUData : undefined;
+                                        if (!nluData) { onLog('error', 'NLU no disponible para ensamblar'); return; }
+                                        const assembled = assembleFromMapping(pendingMapping, {
+                                            rawSvg: row.rawSvg!,
+                                            nlu: nluData,
+                                            elements: row.elements || [],
+                                            utterance: row.UTTERANCE,
+                                            config,
+                                            onProgress: (msg) => onLog('info', msg),
+                                        }, selectionOverrides, labelOverrides);
+                                        if (assembled.success && assembled.svg) {
+                                            addSVG({ id: row.id, utterance: row.UTTERANCE, svg: assembled.svg, createdAt: new Date().toISOString(), sourceRowId: row.id, lang: nluData.lang });
+                                            onUpdate({ structuredSvg: assembled.svg, structuredSvgDiscarded: false });
+                                            onLog('success', 'SVG estructurado ensamblado tras revisión');
+                                        } else {
+                                            onLog('error', assembled.error || 'Fallo en ensamblado tras revisión');
+                                        }
+                                    }}
+                                />
+                            ) : (
+                                <>
+                                    <Layers size={28} className="text-slate-300" aria-hidden="true" />
+                                    <button
+                                        onClick={() => handleFormat()}
+                                        disabled={!structureEligibility.eligible}
+                                        title={structureEligibility.eligible ? undefined : structureEligibility.reason}
+                                        aria-label={t('svg.formatGemini')}
+                                        className={`flex items-center justify-center gap-2 py-3 px-6 text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md ${structureEligibility.eligible ? 'bg-violet-600 hover:bg-violet-700 text-white hover:shadow-lg' : 'bg-slate-200 text-slate-500 cursor-not-allowed shadow-none'}`}
+                                    >
+                                        <Layers size={14} aria-hidden="true" /> {t('svg.formatGemini')}
+                                    </button>
+                                    <select
+                                        value={phase5Model}
+                                        onChange={e => onPhase5ModelChange?.(e.target.value)}
+                                        className="text-xs text-slate-500 border border-slate-200 rounded px-2 py-1 bg-white hover:border-slate-300 cursor-pointer"
+                                        title="Modelo para ESTRUCTURAR (sesión)"
+                                    >
+                                        {PHASE5_MODELS.map(m => (
+                                            <option key={m.id} value={m.id}>{m.label}</option>
+                                        ))}
+                                    </select>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    {/* Per-column action rows */}
+                    <div className="flex gap-3 mt-3">
+                        <div className="flex-1 flex gap-2">
+                            {onOpenEditor && (
+                                <button onClick={() => onOpenEditor('raw')} className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs font-bold uppercase tracking-widest" title={t('svg.editor')}>
+                                    <Edit size={13} aria-hidden="true" /> {t('svg.editor')}
+                                </button>
+                            )}
+                            {onOpenVectorizer && !!row.bitmap && !row.bitmapDiscarded && (
+                                <button onClick={onOpenVectorizer} title={t('svg.retrace')} aria-label={t('svg.retrace')} className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-violet-50 text-slate-500 hover:text-violet-700 py-2 px-3 rounded transition-colors border border-slate-200 hover:border-violet-300 text-xs font-bold uppercase tracking-widest">
+                                    <Scan size={13} aria-hidden="true" /> {t('svg.retrace')}
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex-1" />
+                    </div>
+                </div>
+            );
+        }
+
         return (
-            <div className="flex flex-col h-full">
-                <div className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview">
+            <div className="flex flex-col">
+                <div className="bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden group/raw-preview" style={{ height: 200 }}>
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none"></div>
-                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">
+                    <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10 opacity-0 group-hover/raw-preview:opacity-100 transition-opacity">
                         {t('svg.traceLabel')}
                     </div>
                     {/* Download, Edit & Delete overlay — bottom on hover */}
@@ -615,7 +775,7 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                         <Layers size={16} aria-hidden="true" /> {t('svg.formatGemini')}
                     </button>
 
-                    {onOpenVectorizer && (
+                    {onOpenVectorizer && !!row.bitmap && !row.bitmapDiscarded && (
                         <button
                             onClick={onOpenVectorizer}
                             title={t('svg.retrace')}
@@ -625,15 +785,6 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
                             <Scan size={13} aria-hidden="true" />
                         </button>
                     )}
-
-                    <button
-                        onClick={cleanInlineStyles}
-                        title={t('svg.clearInlineStyles')}
-                        aria-label={t('svg.clearInlineStyles')}
-                        className="flex items-center justify-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 py-2 px-3 rounded transition-colors border border-slate-200 text-xs"
-                    >
-                        <Eraser size={13} aria-hidden="true" />
-                    </button>
 
                 </div>
 
@@ -647,10 +798,10 @@ export const SVGGenerator: React.FC<SVGGeneratorProps> = ({ row, config, onLog, 
     // Structuring in progress — keep rawSvg visible with progress bar below
     if (status === 'structuring' && rawSvg) {
         return (
-            <div className="flex flex-col h-full">
+            <div className="flex flex-col">
                 <div
-                    className="flex-1 bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden"
-                    style={{ minHeight: 120 }}
+                    className="bg-white border border-slate-200 flex items-center justify-center p-4 relative mb-3 overflow-hidden"
+                    style={{ height: 200 }}
                 >
                     <div className="absolute inset-0 pattern-grid-sm opacity-5 pointer-events-none" />
                     <div className="absolute top-2 right-2 bg-amber-500 text-white text-xs px-2 py-1 rounded font-bold uppercase tracking-wider pointer-events-none z-10">

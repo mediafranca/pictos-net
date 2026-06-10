@@ -51,7 +51,47 @@ export interface NLUData {
   visual_guidelines: NLUVisualGuidelines;
 }
 
-export type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdated';
+export type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdated' | 'review';
+
+// ── Phase 5: ESTRUCTURAR ─────────────────────────────────────────────────────
+
+export type Phase5StructuringModel =
+  | 'claude-sonnet-4-6'
+  | 'claude-opus-4-6'
+  | 'gemini-2.5-pro'
+  | 'gemini-2.5-flash'
+  | 'gemini-2.0-flash';
+
+export const PHASE5_MODELS: { id: Phase5StructuringModel; label: string }[] = [
+  { id: 'claude-sonnet-4-6',  label: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4-6',    label: 'Claude Opus 4.6' },
+  { id: 'gemini-2.5-pro',     label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.5-flash',   label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.0-flash',   label: 'Gemini 2.0 Flash' },
+];
+
+export const DEFAULT_PHASE5_MODEL: Phase5StructuringModel = 'gemini-2.5-flash';
+
+export interface MergedPath {
+  d: string;         // combined SVG path data (space-joined subpaths)
+  sources: string[]; // original path ids that were merged
+}
+
+export interface StructuringGroup {
+  nodeId: string;
+  label: string;
+  cssClass: string;
+  parentId?: string | null;
+  keep: string[];
+  merge?: MergedPath | null;
+  selected: boolean; // default true; toggled in Phase5_Review
+}
+
+export interface StructuringMapping {
+  description: string;
+  groups: StructuringGroup[];
+  discard: string[];
+}
 
 export type SortCriteria = 'alphabetical' | 'completeness';
 
@@ -162,7 +202,8 @@ export interface RowData {
   nluStatus: StepStatus;            // Phase 1: Comprender (Claude Haiku → NLU)
   visualStatus: StepStatus;         // Phase 2: Componer  (Claude Haiku → VisualDOM + prompt)
   bitmapStatus: StepStatus;         // Phase 3: Producir  (Recraft V3 → rawSvg)
-  structuredSvgStatus?: StepStatus; // Phase 5: Estructurar (Claude Sonnet vision → structuredSvg)
+  structuredSvgStatus?: StepStatus; // Phase 5: Estructurar (vision model → structuredSvg)
+  phase5Mapping?: StructuringMapping; // intermediate result awaiting review (recording mode)
 
   // Metrics
   nluDuration?: number;

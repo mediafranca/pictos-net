@@ -23,12 +23,14 @@ const ALLOWED_ORIGINS = [
 const ALLOWED_MODELS = [
   'claude-haiku-4-5-20251001',
   'claude-sonnet-4-6',
+  'claude-opus-4-6',
 ];
 
 // All Claude calls are free-tier in the quota — only Recraft (phase 3) counts.
 const UNITS_BY_MODEL = {
   'claude-haiku-4-5-20251001': 0,
   'claude-sonnet-4-6': 0,
+  'claude-opus-4-6': 0,
 };
 
 function corsHeaders(origin) {
@@ -65,9 +67,11 @@ async function handleRequest(event, context) {
 
   const email = user?.email ?? 'dev';
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // PICTOS_ANTHROPIC_KEY avoids Netlify CLI v24 overriding ANTHROPIC_API_KEY with
+  // a Netlify AI Gateway JWT. baseURL is set explicitly below for the same reason.
+  const apiKey = process.env.PICTOS_ANTHROPIC_KEY ?? process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('[api-claude] ANTHROPIC_API_KEY not configured');
+    console.error('[api-claude] PICTOS_ANTHROPIC_KEY (or ANTHROPIC_API_KEY) not configured');
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
   }
 
@@ -108,7 +112,8 @@ async function handleRequest(event, context) {
   let response, ok = true, errorMsg;
 
   try {
-    const client = new Anthropic({ apiKey });
+    // baseURL hardcoded to bypass Netlify CLI v24 ANTHROPIC_BASE_URL injection
+    const client = new Anthropic({ apiKey, baseURL: 'https://api.anthropic.com' });
 
     const params = {
       model,

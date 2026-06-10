@@ -13,12 +13,12 @@ import {
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics, DEFAULT_PHASE5_MODEL } from './types';
 import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
 import * as Gemini from './services/geminiService';
 import { QuotaExceededError } from './services/aiClient';
-import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, migrateGenerationModel, GENERATION_MODEL_LABELS, Phase3Result } from './types';
+import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, migrateGenerationModel, GENERATION_MODEL_LABELS, Phase3Result, getModelFamily } from './types';
 import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
@@ -296,6 +296,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   });
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [loadingLibraryName, setLoadingLibraryName] = useState('');
+  // Session-only Phase 5 model selector (not persisted — for experimentation)
+  const [sessionPhase5Model, setSessionPhase5Model] = useState<string>(DEFAULT_PHASE5_MODEL);
   const [svgEditorState, setSvgEditorState] = useState<{
     isOpen: boolean;
     rowId: string | null;
@@ -2304,6 +2306,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                     }));
                   }}
                   onBuildRowClipboard={buildRowClipboardJson}
+                  phase5Model={sessionPhase5Model}
+                  onPhase5ModelChange={setSessionPhase5Model}
                 />
               );
             })}
@@ -2412,6 +2416,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 : flagged;
             }));
           }}
+          phase5Model={sessionPhase5Model}
+          onPhase5ModelChange={setSessionPhase5Model}
         />
       )}
 
@@ -2689,7 +2695,9 @@ const RowComponent: React.FC<{
    *  schema header and the RowClipboardContext so it stays self-describing
    *  when pasted outside of a library. */
   onBuildRowClipboard?: (row: RowData) => string;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard }) => {
+  phase5Model?: string;
+  onPhase5ModelChange?: (model: string) => void;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard, phase5Model, onPhase5ModelChange }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2755,7 +2763,7 @@ const RowComponent: React.FC<{
 
       {isOpen && (
         <>
-          <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
+          <div id={`row-detail-${row.id}`} className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2 max-h-[calc(100vh-7.5rem)] overflow-y-auto lg:overflow-y-hidden snap-y snap-mandatory lg:snap-none">
             <StepBox id="block-nlu" label={t('pipeline.understand')} status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} onFocus={() => onFocus('nlu')} duration={row.nluDuration}>
               <SmartNLUEditor
                 data={row.NLU}
@@ -2863,10 +2871,36 @@ const RowComponent: React.FC<{
             </StepBox>
             <StepBox id="block-produce" label={t('pipeline.produce')} status={row.bitmapStatus} onRegen={() => onProcess('produce')} onStop={onStop} onFocus={() => onFocus('produce')} duration={row.bitmapDuration}
             >
-              <div className="flex flex-col h-full gap-4">
+              <div className="flex flex-col gap-4">
 
+                {/* Bitmap slot — shown whenever bitmap exists; download only */}
+                {validBitmap(row) && (
+                  <div className="border border-slate-200 bg-white flex items-center justify-center relative overflow-hidden group/bitmap-row" style={{ height: 200 }}>
+                    <img
+                      src={validBitmap(row)!}
+                      alt={row.UTTERANCE}
+                      className="max-h-[180px] w-auto object-contain p-3"
+                    />
+                    <div className="absolute bottom-1.5 right-1.5 flex gap-1.5 z-10 opacity-0 group-hover/bitmap-row:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => {
+                          const a = document.createElement('a');
+                          a.href = validBitmap(row)!;
+                          a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.png`;
+                          a.click();
+                        }}
+                        className="p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full shadow-lg"
+                        title={t('svg.download')}
+                      >
+                        <Download size={12} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* SVG artifacts: trazado (rawSvg) and/or estructurado (structuredSvg) */}
                 {hasAnyValidSvg(row) ? (
-                  <div id="svg-preview" className="min-h-[250px] flex flex-col">
+                  <div id="svg-preview">
                     <SVGGenerator
                       row={row}
                       config={config}
@@ -2875,27 +2909,22 @@ const RowComponent: React.FC<{
                       onOpenEditor={onOpenEditor}
                       onOpenVectorizer={onOpenVectorizer}
                       onDiscardSvg={onDiscardSvg}
+                      phase5Model={phase5Model}
+                      onPhase5ModelChange={onPhase5ModelChange}
                     />
                   </div>
                 ) : validBitmap(row) ? (
-                  <div id="svg-preview" className="flex flex-col gap-3">
-                    <div className="border border-slate-200 bg-white flex items-center justify-center min-h-[220px] p-4">
-                      <img
-                        src={validBitmap(row)}
-                        alt={row.UTTERANCE}
-                        className="max-h-[200px] w-auto object-contain"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={onOpenVectorizer}
-                      className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
-                      aria-label={t('svg.traceSvg')}
-                    >
-                      <Scan size={15} aria-hidden="true" /> {t('svg.traceSvg')}
-                    </button>
-                  </div>
+                  /* Bitmap exists but no SVG yet: offer Trazar */
+                  <button
+                    type="button"
+                    onClick={onOpenVectorizer}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold uppercase tracking-widest rounded transition-colors shadow-md hover:shadow-lg"
+                    aria-label={t('svg.traceSvg')}
+                  >
+                    <Scan size={15} aria-hidden="true" /> {t('svg.traceSvg')}
+                  </button>
                 ) : (
+                  /* No artifacts at all */
                   <div id="svg-preview" className="border border-slate-200 flex items-center justify-center min-h-[250px]">
                     <div className="text-xs text-slate-500 uppercase font-medium">{t('editor.noSvgRender')}</div>
                   </div>
@@ -3021,7 +3050,7 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
   const bg = status === 'processing' ? 'bg-orange-50/50' : status === 'completed' ? 'bg-white' : status === 'outdated' ? 'bg-amber-50/50' : 'bg-slate-50/50';
 
   return (
-    <div id={id} role="region" aria-label={label} className={`flex flex-col gap-4 min-h-[500px] border p-6 transition-all shadow-sm ${bg}`}>
+    <div id={id} role="region" aria-label={label} className={`flex flex-col gap-4 min-h-[300px] max-h-[calc(100vh-11.5rem)] snap-start border p-6 transition-all shadow-sm ${bg}`}>
       <div className="flex items-center justify-between border-b pb-4 border-slate-100">
         <h3 className="text-xs font-medium uppercase tracking-wider text-slate-900">{label}</h3>
         <div className="flex items-center gap-3">
@@ -3040,7 +3069,7 @@ const StepBox: React.FC<{ id?: string; label: string; status: StepStatus; onRege
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-auto">{children}</div>
+      <div className="flex-1 overflow-auto pb-4">{children}</div>
     </div>
   );
 };
@@ -3689,12 +3718,13 @@ const ElementsEditor: React.FC<{
 };
 
 const Badge: React.FC<{ step: number; label: string; status: StepStatus }> = ({ step, label, status }) => {
-  const styles = {
+  const styles: Record<StepStatus, string> = {
     idle: 'bg-slate-100 text-slate-500 border-slate-200',
     processing: 'bg-orange-600 text-white animate-pulse border-orange-500',
     completed: 'bg-emerald-50 text-emerald-700 border-emerald-300',
     outdated: 'bg-amber-50 text-amber-800 border-amber-300',
-    error: 'bg-rose-50 text-rose-700 border-rose-300'
+    error: 'bg-rose-50 text-rose-700 border-rose-300',
+    review: 'bg-violet-50 text-violet-700 border-violet-300 animate-pulse',
   };
   const tooltipId = `badge-tip-${step}`;
   return (
@@ -3732,17 +3762,23 @@ const FocusViewModal: React.FC<{
   onModeChange: (mode: 'nlu' | 'visual' | 'produce' | 'format') => void;
   onRecordElementOp?: (op: ElementOpKind, before: VisualElement[], after: VisualElement[]) => void;
   onSettleField?: () => void;
-  onProcess?: (step: 'nlu' | 'visual' | 'bitmap') => Promise<boolean>;
+  onProcess?: (step: 'nlu' | 'visual' | 'produce') => Promise<boolean>;
   onStop?: () => void;
   onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
   onOpenVectorizer?: () => void;
-}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg, onOpenVectorizer }) => {
+  phase5Model?: string;
+  onPhase5ModelChange?: (model: string) => void;
+}> = ({ mode, row, onClose, onUpdate, onRegeneratePrompt, config, onConfigChange, onLog, onOpenEditor, onModeChange, onRecordElementOp, onSettleField, onProcess, onStop, onDiscardSvg, onOpenVectorizer, phase5Model, onPhase5ModelChange }) => {
   const { t } = useTranslation();
   const { dialogProps: focusDialogProps } = useDialogA11y({ isOpen: true, onClose, label: `${row.UTTERANCE} — ${mode}` });
   const [copyStatus, setCopyStatus] = useState(t('actions.copy'));
   const [isPromptEditing, setIsPromptEditing] = useState(false);
   const [elementsManuallyEdited, setElementsManuallyEdited] = useState(false);
   const [isRegeneratingPrompt, setIsRegeneratingPrompt] = useState(false);
+
+  const isVectorRow = row.generationModel
+    ? getModelFamily(row.generationModel) === 'vector'
+    : false;
 
   const currentIndex = FOCUS_STEPS.indexOf(mode);
   const hasPrev = currentIndex > 0;
@@ -3851,19 +3887,31 @@ const FocusViewModal: React.FC<{
         </div>
       );
       case 'produce': {
-        const rawSvgContent = validRawSvg(row);
-        const bitmapContent = validBitmap(row);
+        // Phase 3 output: native SVG for vector models, bitmap for everything else.
+        // Phase 4 trazado (VTracer rawSvg) must NOT appear here — it belongs in step 4 (format).
+        const phase3Svg = isVectorRow ? validRawSvg(row) : null;
+        const phase3Bitmap = !isVectorRow ? validBitmap(row) : null;
         return (
           <div className="flex items-center justify-center h-full bg-neutral-200 p-8 border-2 border-slate-300 shadow-inner">
-            {rawSvgContent ? (
-              <div
-                dangerouslySetInnerHTML={{ __html: injectSvgA11y(rawSvgContent, row.UTTERANCE) }}
-                className="w-full h-full max-w-full max-h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full shadow-2xl bg-white"
-              />
-            ) : bitmapContent ? (
+            {phase3Svg ? (
+              <div className="flex flex-col items-center gap-4 w-full h-full max-w-full max-h-full">
+                <div
+                  dangerouslySetInnerHTML={{ __html: injectSvgA11y(phase3Svg, row.UTTERANCE) }}
+                  className="flex-1 w-full min-h-0 [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full shadow-2xl bg-white"
+                />
+                {onOpenEditor && (
+                  <button
+                    onClick={() => onOpenEditor('raw')}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-black text-white px-5 py-2.5 text-xs font-bold uppercase tracking-widest transition-all shadow-lg flex-shrink-0"
+                  >
+                    <Edit size={13} aria-hidden="true" /> {t('svg.editor')}
+                  </button>
+                )}
+              </div>
+            ) : phase3Bitmap ? (
               <div className="flex flex-col items-center gap-4 max-w-sm w-full">
                 <img
-                  src={bitmapContent}
+                  src={phase3Bitmap}
                   alt={row.UTTERANCE}
                   className="max-h-[320px] w-auto object-contain shadow-2xl bg-white"
                 />
@@ -3928,7 +3976,7 @@ const FocusViewModal: React.FC<{
               <h3 className="text-xs font-bold uppercase text-slate-500 tracking-widest">SVG Output (SSoT)</h3>
             </div>
             <div className="flex-1 overflow-hidden">
-              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} />
+              <SVGGenerator row={row} config={config} onLog={onLog} onUpdate={onUpdate} onOpenEditor={onOpenEditor} onOpenVectorizer={onOpenVectorizer} layout="columns" onDiscardSvg={onDiscardSvg} phase5Model={phase5Model} onPhase5ModelChange={onPhase5ModelChange} />
             </div>
           </div>
         );
@@ -3966,7 +4014,7 @@ const FocusViewModal: React.FC<{
           <button onClick={onClose} className="p-2 hover:bg-slate-100 ml-1" aria-label={t('actions.close')}><X size={18} aria-hidden="true" /></button>
         </header>
         <main className="flex-1 p-6 overflow-auto bg-slate-50">{renderContent()}</main>
-        <footer className="p-4 border-t bg-white flex justify-between gap-3">
+        <footer className="px-6 py-4 border-t bg-white flex justify-between gap-3">
           {/* Left actions */}
           <div className="flex gap-3">
             {/* Regenerate this step (mirrors the per-step Play button in the row's StepBox).
@@ -3986,7 +4034,7 @@ const FocusViewModal: React.FC<{
               );
             })()}
             {(() => {
-              const rawSvgContent = validRawSvg(row);
+              const rawSvgContent = isVectorRow ? validRawSvg(row) : null;
               return mode === 'produce' && rawSvgContent && (
                 <button onClick={() => { const blob = new Blob([rawSvgContent], { type: 'image/svg+xml' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}_raw.svg`; a.click(); URL.revokeObjectURL(url); }} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
                   <Download size={14} /> SVG
@@ -3996,14 +4044,7 @@ const FocusViewModal: React.FC<{
           </div>
           {/* Right actions */}
           <div className="flex gap-3">
-            {(() => {
-              const svg = validDownstreamSvg(row);
-              return mode === 'format' && svg && onOpenEditor && (
-                <button onClick={onOpenEditor} className="flex items-center gap-2 bg-slate-100 text-slate-600 px-6 py-3 font-bold uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                  <Edit size={14} /> Editar SVG
-                </button>
-              );
-            })()}
+            {/* Per-column edit buttons for format step live inside SVGGenerator (columns layout) */}
             {(() => {
               const svg = validDownstreamSvg(row);
               return mode === 'format' && svg && (

@@ -5,7 +5,8 @@
 -- Includes: Phase 1 (COMPRENDER), Phase 2 (COMPONER), Phase 3 (PRODUCIR),
 --   Phase 4 (VECTORIZAR, user-triggered), Phase 5 (ESTRUCTURAR),
 --   artifact lifecycle, invalidation cascade, per-phase re-execution,
---   background execution pattern (timer, stop), and phase error handling.
+--   background execution pattern (timer, stop), phase error handling,
+--   Phase 5 model selection (session-only), timed review (recording mode).
 -- Excludes:
 --   - Generation model selection and library-level model config (generation-config.allium)
 --   - Library backward-compatibility and migration (separate spec)
@@ -58,10 +59,37 @@ value ElementMark {
 
 value ElementMapping {
   -- Claude's assignment of one marked element to a DOM node.
+  -- @deprecated: replaced by StructuringGroup in Phase 5 v2.
   elementIndex: Number
   nodeId: String | "none"    -- must be a valid VisualDOMNode id or "none"
   confidence: Number         -- 0.0 to 1.0
   justification: String
+}
+
+value MergedPath {
+  -- A simplified union of two or more overlapping source paths.
+  -- d is validated locally before use; invalid d falls back to original paths.
+  d: String         -- combined SVG path data (space-joined subpaths)
+  sources: [String] -- original path ids that were merged
+}
+
+value StructuringGroup {
+  -- One semantic node in the Phase 5 restructured output.
+  -- Groups are flat (one per node) with parentId for hierarchy reconstruction.
+  nodeId: String              -- VisualDOMNode id from Phase 2
+  label: String               -- human label (editable during Phase5_Review)
+  cssClass: String            -- CSS class from the style palette
+  parentId: String?           -- parent nodeId; null for top-level groups
+  keep: [String]              -- path ids to include verbatim from rawSvg
+  merge: MergedPath?          -- optional simplified union of overlapping paths
+  selected: Boolean = true    -- user toggle during Phase5_Review (default: true)
+}
+
+value StructuringMapping {
+  -- Complete restructuring result from one Phase 5 model call.
+  description: String           -- visual description of the pictogram (1–2 sentences)
+  groups: [StructuringGroup]    -- flat list; hierarchy via parentId
+  discard: [String]             -- path ids excluded as tracing noise
 }
 
 ------------------------------------------------------------
@@ -75,6 +103,8 @@ external GlobalConfig {
   annotatedContext: String?
   visualStylePrompt: String
   generationModel: GenerationModel    -- see generation-config.allium
+  recording: RecordingSetting?        -- { enabled: Boolean }; enables Phase5_Review timer
+  svgStyleDefs: [StyleDefinition]?    -- CSS palette forwarded to Phase 5 as style context
 }
 
 ------------------------------------------------------------
@@ -108,6 +138,14 @@ entity VisualReasoning {
   -- Phase 5
   pictograma: String?           -- mf-svg-schema structured SVG, single source of truth
   phase5Status: PhaseStatus = idle
+  -- Phase 5 intermediate (populated in recording mode; cleared after assembly)
+  phase5Mapping: StructuringMapping?
+  phase5ReviewTimerMs: Number?  -- total review window; derived from label word count × 3
+
+  -- Session-only (not persisted with VisualReasoning)
+  -- phase5Model: String        -- selected vision model; defaults to claude-sonnet-4-6
+  --   Allowed: claude-sonnet-4-6, claude-opus-4-6,
+  --            gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
 }
 
 ------------------------------------------------------------
@@ -115,8 +153,9 @@ entity VisualReasoning {
 ------------------------------------------------------------
 
 config {
-  phase5_max_attempts: Number = 3
-  phase5_confidence_threshold: Number = 0.7
+  phase5_review_reading_wpm: Number = 200  -- words/min for review timer calculation
+  phase5_review_min_ms: Number = 10000     -- floor: 10 s
+  phase5_review_max_ms: Number = 90000     -- ceiling: 90 s
 }
 
 ------------------------------------------------------------
@@ -325,93 +364,157 @@ rule Phase5_Estructurar {
   when: phase 5 is triggered for a VisualReasoning
 
   requires: VisualReasoning.rawSvg is present
-    -- rawSvg may come from Phase 4 (VTrace of a bitmap) or directly from
-    -- Phase 3 (Recraft vector model). Phase 5 does not distinguish the source.
+    -- rawSvg may come from Phase 4 (VTrace of a bitmap) or Phase 3 (Recraft vector).
   requires: VisualReasoning.visualDom is present
 
-  ensures: Phase5_SetOfMarks attempted, producing an [ElementMapping]
-  ensures: Phase5_Validate runs on the mapping, triggering focused retries as needed
-  ensures: Phase5_Assemble runs on the final mapping
-  ensures: on successful assembly:
+  ensures: phase5Status transitions to running
+  ensures: Phase5_SingleCall executes (one API call; no retry loop)
+  ensures: Phase5_Console logs throughout execution
+  ensures: Phase5_GeometryValidation runs on any MergedPath in the result
+  ensures: if GlobalConfig.recording.enabled = true:
+    phase5Mapping = returned StructuringMapping
+    phase5ReviewTimerMs = computed per Phase5_Review formula
+    phase5Status transitions to review
+    Phase5_Review begins
+  ensures: if GlobalConfig.recording.enabled = false:
+    Phase5_Assemble runs immediately on returned mapping
     VisualReasoning.pictograma = assembled SVG content
-    VisualReasoning.phase5Status = completed
-  ensures: on tool-use failure in all attempts:
-    VisualReasoning.phase5Status = failed
-
-  @invariant "always delivers on coverage or confidence issues"
-    -- Low confidence and unmapped nodes are not failure conditions.
-    -- Phase 5 only fails if Claude does not invoke the tool at all.
-    -- After config.phase5_max_attempts, the best available mapping is used.
+    phase5Status transitions to completed
+  ensures: on API error or tool-use failure:
+    phase5Status transitions to failed
 }
 
-rule Phase5_SetOfMarks {
-  when: phase 5 begins an attempt
+rule Phase5_SingleCall {
+  -- One API call per user trigger. No retry loop.
+  when: phase 5 begins
 
-  ensures: rawSvg parsed into indexed elements (paths and closed shapes)
-    -- each element assigned a stable numeric index (0, 1, 2, ...)
-    -- bounding box and centroid computed per element
-  ensures: rawSvg rasterized to image
-  ensures: numeric label overlaid at centroid of each element
-    -- labels must be visually distinct and legible at the rendered resolution
-  ensures: Claude Sonnet called with vision:
-    -- image: marked rasterization
-    -- context: VisualDOM from phase 2
-    -- tool name: "map_elements"
-    -- tool input_schema: [ElementMapping]
-        where ElementMapping.nodeId is constrained to valid VisualDOMNode ids or "none"
-    -- tool_choice: forced to "map_elements"
-  ensures: on success: mapping returned as [ElementMapping] with confidence per assignment
+  ensures: rawSvg preprocessed locally:
+    -- all paths assigned stable numeric marks (0, 1, 2, …)
+    -- path inventory built (id, centroid, fill-role)
+    -- background paths detected and excluded from marks
+  ensures: rawSvg rasterized to JPEG with numeric labels at path centroids
+  ensures: single API call dispatched to the session-selected Phase 5 model:
+    -- image: marked JPEG rasterization
+    -- text: raw SVG source, VisualDOM (each node: id + label + concept),
+             CSS palette (class names and declarations)
+    -- system: restructuring instructions (see Phase5_Console rule 1)
+    -- tool: restructure_svg (returns StructuringMapping)
+    -- tool_choice: forced to restructure_svg
+    -- max_tokens: 8192
+    -- routing: claude-* models → api-claude; gemini-* models → api-gemini-structure
+  ensures: on success: StructuringMapping returned
+  ensures: on tool-use failure: phase5Status transitions to failed immediately
+
+  @invariant "NLU excluded from prompt"
+    -- utterance, domain, frames, pragmatics, visual_guidelines are NOT sent to the model.
+    -- The model works from visual evidence (image + SVG source) only.
+
+  @invariant "single call, no retry loop"
+    -- Phase 5 makes exactly one API call per user trigger.
+    -- Low-confidence or wrong assignments are corrected by the user via
+    -- re-triggering or the review panel (recording mode), not by auto-retry.
 }
 
-rule Phase5_Validate {
-  when: a mapping is produced by Phase5_SetOfMarks
+rule Phase5_Console {
+  -- Verbosity requirements for the Phase 5 console output.
+  when: Phase 5 is running
 
-  ensures: mapping inspected for:
-    -- total coverage: every indexed element has exactly one assignment
-    -- required node coverage: every required VisualDOMNode has at least
-        one element assigned to it (nodeId = node.id)
-
-  ensures: for each assignment with confidence below config.phase5_confidence_threshold:
-    if current attempt < config.phase5_max_attempts:
-      Phase5_FocusedRetry triggered for that element
-    else:
-      assignment retained as-is regardless of confidence
+  ensures: console receives the following events in order:
+    1. full system prompt text sent to the model
+    2. "imagen adjunta: {W}×{H}px JPEG, {sizeKB} KB" when image is attached
+    3. "llamando {model}…" when the API request is dispatched
+    4. elapsed ms and HTTP status when the response arrives
+    5. token usage: input_tokens and output_tokens
+    6. per-group summary: nodeId → path ids, cssClass, merge indicator if present
+    7. discards: path ids listed with any justification text from the model
+    8. for each MergedPath: sources → new d (first 80 chars), validation result
+    9. if geometry validation fails: path id, reason, "fallback: usando paths originales"
 }
 
-rule Phase5_FocusedRetry {
-  when: an element assignment has low confidence AND attempts remain
+rule Phase5_GeometryValidation {
+  -- Validates any MergedPath.d returned by the model before use.
+  when: a StructuringGroup.merge is present in the returned StructuringMapping
 
-  ensures: element rendered in isolation (tightly cropped rasterization)
-  ensures: Claude Sonnet called again with isolated image and same VisualDOM
-    -- only the ambiguous element is re-evaluated
-  ensures: result replaces the original assignment for that element only
-  ensures: attempt counter incremented
+  ensures: MergedPath.d is parsed locally as a valid SVG path sequence
+  ensures: on valid parse:
+    merged path replaces source paths in the assembled group
+    console receives: "merge OK: {sources} → {d[:80]}"
+  ensures: on invalid parse (Fallback B):
+    console receives warning: path ids, invalid d excerpt, "usando paths originales"
+    group.keep = merge.sources, group.merge = null
+    assembly continues with original paths unmodified
+    phase5Status is NOT affected — fallback is silent and non-blocking
+}
+
+rule Phase5_Review {
+  -- Timed interactive review step. Active only when recording.enabled = true.
+  when: GlobalConfig.recording.enabled = true
+    AND StructuringMapping returned by Phase5_SingleCall without error
+
+  ensures: phase5ReviewTimerMs computed as:
+    words = total word count across all StructuringGroup.label and nodeId values
+    duration = clamp(
+      (words / config.phase5_review_reading_wpm) × 60 × 3 × 1000,
+      config.phase5_review_min_ms,
+      config.phase5_review_max_ms
+    )
+
+  ensures: review panel displayed with:
+    -- hierarchical tree following VisualDOM parent-child order (parentId)
+    -- each row: checkbox (default checked), label (editable), nodeId, path count, cssClass
+    -- countdown timer visible and decrementing
+    -- early-confirm action always available
+
+  ensures: during the timer the user may:
+    -- uncheck individual groups (excluded from assembly)
+    -- edit any label in-place (reflected in assembled SVG aria-label)
+    -- click confirm early (timer stops; assembly runs immediately)
+
+  ensures: on timer expiry OR early confirm:
+    Phase5_Assemble runs with current selections and label overrides
+    phase5Mapping cleared
+    phase5ReviewTimerMs cleared
+    phase5Status transitions to completed
+
+  @invariant "all selected by default"
+    -- StructuringGroup.selected = true for all groups at review start.
+
+  @invariant "timer is mandatory in recording mode"
+    -- The review panel cannot be dismissed; only confirmed (early or on expiry).
 }
 
 rule Phase5_Assemble {
-  when: mapping is final (validated or max attempts reached)
+  -- Local SVG assembly from a final StructuringMapping.
+  when: mapping is final (after Phase5_SingleCall directly, or after Phase5_Review confirm)
 
-  ensures: local code assembles the Pictograma SVG:
-    -- elements grouped under their assigned VisualDOMNode ids as <g> elements
-    -- elements assigned "none" placed in a fallback group
-    -- path geometry (d attributes) sourced exclusively from rawSvg
+  ensures: local code assembles Pictograma SVG:
+    -- groups with selected = false are omitted entirely from output
+    -- for each selected group: paths in keep sourced verbatim from rawSvg
+    -- for groups with a validated merge: merged path replaces keep paths
+    -- paths in discard are excluded from output
+    -- any rawSvg path not accounted for is placed in a fallback "contexto" group
+    -- hierarchy reconstructed from parentId: child groups nested inside parent <g>
+    -- each group: <g id=nodeId role="group" tabindex="0" aria-label=label class=cssClass>
+    -- no inline fill attributes — all color via CSS classes from the palette
+    -- CSS: only classes actually used in the output included in <defs>
     -- result conforms to mf-svg-schema document structure
 
   @invariant "geometry stays local"
-    -- Claude provides only the mapping (index → nodeId).
-    -- No path d attribute is read from or modified by Claude's response.
+    -- The model provides only the mapping (nodeId → path ids, optional merge.d).
+    -- No path d attribute is generated by the model, except MergedPath.d
+    -- which is validated before use and falls back to original paths on failure.
 
-  @invariant "one element, one group"
-    -- Each element appears in exactly one <g> in the assembled Pictograma,
-    -- whether it is a named semantic group or the fallback group.
+  @invariant "label edits reflected"
+    -- Labels edited during Phase5_Review replace model labels in assembled
+    -- SVG aria-label attributes.
 }
 
 rule Phase5_Failure {
   when: VisualReasoning.phase5Status transitions to failed
 
-  ensures: full error detail logged to console (attempt count, last raw response)
+  ensures: console receives: model used, elapsed ms, full error message, raw response excerpt
   ensures: phase 5 indicator shown as failed in UI
-  -- User can re-trigger phase 5 to start a fresh set of attempts.
+  -- User can re-trigger phase 5. Model can be changed before retry.
 }
 
 ------------------------------------------------------------
@@ -437,11 +540,12 @@ invariant DownstreamConsistency {
       r.phase5Status in {outdated, idle}
 }
 
-invariant GeometryIntegrity {
-  -- Path geometry in the Pictograma is identical to rawSvg.
-  -- Phase 5 only rearranges paths into groups; it does not alter geometry.
+invariant PartialGeometryIntegrity {
+  -- Path geometry in the Pictograma is sourced from rawSvg for all non-merged paths.
+  -- Merged paths (MergedPath.d) are validated locally; invalid merges fall back
+  -- to original paths, so the invariant holds at assembly time regardless.
   for r: VisualReasoning where r.phase5Status = completed:
-    for path in paths(r.pictograma):
+    for path in non-merged-paths(r.pictograma):
       path.d = getPath(r.rawSvg, path.id).d
 }
 
@@ -471,10 +575,12 @@ invariant Phase4NeverAutoRuns {
 
 open question "Does processCascade run phases 1–3 automatically after utterance confirmation, with phases 4 and 5 remaining user-initiated? Or does the user trigger each phase manually?"
 
-open question "When a required VisualDOMNode has zero elements assigned after max attempts, does the Pictograma contain an empty <g id=node.id> or is the node omitted entirely?"
-
-open question "What render resolution is used for the set-of-marks image? It must be high enough to distinguish small elements without exceeding API image size limits."
-
-open question "Is config.phase5_confidence_threshold the right abstraction, or does the model's justification string need human review to determine retry worthiness?"
-
 open question "Should VisualDOM validation against mf-svg-schema happen in phase 2 (before phase3Status can proceed) or lazily at the start of phase 5?"
+
+open question "When a VisualDOMNode has no paths assigned by the model, does Phase5_Assemble emit an empty <g id=node.id> or omit the node entirely? Empty group preserves schema compliance; omission reduces clutter."
+
+open question "Should the Phase5_Review timer formula use a minimum per-node floor (e.g., 2s per node) rather than a word-count formula, to ensure adequate time for complex pictograms?"
+
+open question "Should confirmed review data (user selections, label edits, final mapping) be captured as a training tuple alongside the assembled SVG for the long-term local model?"
+
+open question "Should Phase5_Review allow per-path selection within a node (not just per-node), for cases where a node has 5+ assigned paths and the user wants to prune individual ones?"

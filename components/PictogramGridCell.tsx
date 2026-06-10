@@ -51,6 +51,7 @@ const StatusBadge: React.FC<{ step: number; status: StepStatus; label: string; o
     completed:  'bg-emerald-50 text-emerald-700 border-emerald-300',
     outdated:   'bg-amber-50 text-amber-800 border-amber-300',
     error:      'bg-rose-50 text-rose-700 border-rose-300',
+    review:     'bg-violet-50 text-violet-700 border-violet-300 animate-pulse',
   };
   return (
     <button

@@ -1,33 +1,33 @@
 /**
- * SVG Structure Service v3 — Set-of-Marks + Claude Vision + Local Assembly
+ * SVG Structure Service v4 — Single-Call Vision + Local Assembly
  *
  * Phase 5 (ESTRUCTURAR): Takes a raw SVG from Recraft and restructures it
- * according to the semantic DOM proposed by phase 2 (VisualElement tree).
+ * into a clean, semantically grouped, CSS-styled SVG conforming to mf-svg-schema.
  *
  * Pipeline:
  *   rawSvg → ensurePathIds (local)
  *          → buildPathInventory (local)
- *          → rasterizeWithMarks (local, canvas → base64 PNG)
- *          → Claude Sonnet vision (map_elements tool use)
- *          → validate + focused retry (up to 3 attempts, local)
- *          → elementMappingsToAssignment (local)
- *          → assembleSVGFromAssignment (local — geometry never leaves browser)
+ *          → rasterizeWithMarks (local, canvas → base64 JPEG)
+ *          → callStructuringModel (single API call — Claude or Gemini)
+ *              inputs: marked image + raw SVG source + VisualDOM + CSS palette
+ *              tool: restructure_svg → StructuringMapping
+ *          → Phase5_GeometryValidation (local — validate MergedPath.d)
+ *          → if recording.enabled: return mapping for Phase5_Review
+ *          → assembleFromMapping (local — geometry never leaves browser)
  *          → post-process: deriveChildIds, filterCSS, validateXML
  *
- * Claude's job: look at the marked image, decide which mark belongs to
- * which semantic node. All geometry manipulation is local.
+ * NLU context is NOT sent to the model — structuring is a purely visual task.
  *
  * @module services/svgStructureService
  */
 
-import type { NLUData, VisualElement, GlobalConfig } from "../types";
-import { SVG_STYLESHEET } from "./svgStyles";
-import { generateCssString } from "../lib/style-editor/lib/utils/cssGenerator";
-import { callClaude, extractToolUse } from "./aiClient";
+import type { NLUData, VisualElement, GlobalConfig, StructuringMapping, StructuringGroup, MergedPath } from '../types';
+import { SVG_STYLESHEET } from './svgStyles';
+import { generateCssString } from '../lib/style-editor/lib/utils/cssGenerator';
+import { callStructuringModel, extractToolUse } from './aiClient';
+import type { ClaudeResponse } from './aiClient';
 
-const PHASE5_MAX_ATTEMPTS = 3;
-const CONFIDENCE_THRESHOLD = 0.7;
-const MARK_RENDER_SIZE = 800; // canvas px (longest side) — kept small to stay within Netlify 6 MB body limit
+const MARK_RENDER_SIZE = 800;
 
 // ─── Public helpers ──────────────────────────────────────────────────────────
 
@@ -46,6 +46,7 @@ export interface SVGStructureInput {
     elements: VisualElement[];
     utterance: string;
     config: GlobalConfig;
+    phase5Model?: string;
     onProgress?: (msg: string) => void;
     onStatus?: (status: string) => void;
 }
@@ -54,6 +55,8 @@ export interface SVGStructureResult {
     svg: string;
     success: boolean;
     error?: string;
+    mapping?: StructuringMapping; // populated in recording mode (pending review)
+    pendingReview?: boolean;
 }
 
 // ─── Path Inventory (local pre-processing) ───────────────────────────────────
@@ -121,16 +124,6 @@ function getDominantFillRole(pathIds: string[], pathInfoMap: Map<string, PathInf
     if (counts.light >= counts.accent && counts.light > 0) return 'light';
     if (counts.accent > 0) return 'accent';
     return 'dark';
-}
-
-function collectAllPathIds(node: AssignmentNode): string[] {
-    const ids = [...(node.paths ?? [])];
-    if (node.children) {
-        for (const child of Object.values(node.children)) {
-            ids.push(...collectAllPathIds(child));
-        }
-    }
-    return ids;
 }
 
 function getTranslateOffset(transform: string | null): [number, number] {
@@ -308,7 +301,7 @@ export function buildPathInventory(svg: string): PathInventory {
     }
 
     if (backgroundPathIds.length > 0) {
-        console.info(`[inventory] Excluded ${backgroundPathIds.length} background path(s): ${backgroundPathIds.join(', ')}`);
+        console.info(`[inventory] Excluidos ${backgroundPathIds.length} path(s) de fondo: ${backgroundPathIds.join(', ')}`);
     }
 
     return { paths, vtracerGroups, groupClasses, pathClasses, standalonePathIds, backgroundPathIds, viewBox, rawStyleRules, cssFillMap };
@@ -316,11 +309,7 @@ export function buildPathInventory(svg: string): PathInventory {
 
 // ─── Set-of-Marks Rasterization (browser canvas) ─────────────────────────────
 
-/**
- * Rasterize the SVG and overlay numbered labels at each path's centroid.
- * Returns base64-encoded PNG (without data: prefix).
- */
-async function rasterizeWithMarks(svgString: string, inventory: PathInventory): Promise<string> {
+async function rasterizeWithMarks(svgString: string, inventory: PathInventory): Promise<{ base64: string; widthPx: number; heightPx: number; sizeKB: number }> {
     return new Promise((resolve, reject) => {
         const parts = inventory.viewBox.split(/\s+/).map(Number);
         const vbW = parts[2] || 1024;
@@ -345,13 +334,10 @@ async function rasterizeWithMarks(svgString: string, inventory: PathInventory): 
             ctx.drawImage(img, 0, 0, w, h);
             URL.revokeObjectURL(url);
 
-            // Draw a numbered label at each path centroid
             inventory.paths.forEach((path, index) => {
                 const cx = Math.round(path.cx * scale);
                 const cy = Math.round(path.cy * scale);
                 const radius = 13;
-
-                // Red circle
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius, 0, Math.PI * 2);
                 ctx.fillStyle = 'rgba(220, 38, 38, 0.90)';
@@ -359,8 +345,6 @@ async function rasterizeWithMarks(svgString: string, inventory: PathInventory): 
                 ctx.strokeStyle = 'white';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
-
-                // Index number
                 ctx.fillStyle = 'white';
                 ctx.font = `bold ${radius}px Arial, sans-serif`;
                 ctx.textAlign = 'center';
@@ -369,7 +353,9 @@ async function rasterizeWithMarks(svgString: string, inventory: PathInventory): 
             });
 
             const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            resolve(dataUrl.split(',')[1]); // base64 only, no prefix
+            const base64 = dataUrl.split(',')[1];
+            const sizeKB = Math.round(base64.length * 3 / 4 / 1024);
+            resolve({ base64, widthPx: w, heightPx: h, sizeKB });
         };
         img.onerror = () => {
             URL.revokeObjectURL(url);
@@ -379,315 +365,303 @@ async function rasterizeWithMarks(svgString: string, inventory: PathInventory): 
     });
 }
 
-/**
- * Rasterize a single element in isolation (tightly cropped).
- * Used for focused retries on low-confidence assignments.
- */
-async function rasterizeIsolated(svgString: string, pathId: string, viewBox: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const parts = viewBox.split(/\s+/).map(Number);
-        const vbW = parts[2] || 1024;
-        const vbH = parts[3] || 1024;
-        const scale = MARK_RENDER_SIZE / Math.max(vbW, vbH);
-        const w = Math.round(vbW * scale);
-        const h = Math.round(vbH * scale);
+// ─── Node list from VisualElement tree ──────────────────────────────────────
 
-        // Build SVG that shows only the target path
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(svgString, 'image/svg+xml');
-        doc.querySelectorAll('path').forEach(p => {
-            if (p.getAttribute('id') !== pathId) {
-                p.setAttribute('opacity', '0.08');
-            }
-        });
-        const isolatedSvg = new XMLSerializer().serializeToString(doc);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Could not get canvas context')); return; }
-
-        const img = new Image();
-        const blob = new Blob([isolatedSvg], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-
-        img.onload = () => {
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, w, h);
-            ctx.drawImage(img, 0, 0, w, h);
-            URL.revokeObjectURL(url);
-            resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to rasterize isolated path')); };
-        img.src = url;
-    });
+interface NodeInfo {
+    id: string;
+    label: string;
+    concept: string;
+    parentId: string | null;
 }
 
-// ─── Claude Vision Tool Use (Phase 5) ────────────────────────────────────────
+function guessConceptFromId(id: string): string {
+    const lower = id.toLowerCase();
+    if (lower === 'pictograma' || lower === 'pictogram') return 'Root';
+    if (lower.startsWith('actor') || lower.startsWith('persona') || lower.startsWith('sujeto') || lower.startsWith('agent')) return 'Agent';
+    if (lower.startsWith('accion') || lower.startsWith('action') || lower.startsWith('verbo')) return 'Action';
+    if (lower.startsWith('objeto') || lower.startsWith('object') || lower.startsWith('cosa')) return 'Object';
+    if (lower.startsWith('contexto') || lower.startsWith('context') || lower.startsWith('escenario') || lower.startsWith('fondo')) return 'Context';
+    return 'Element';
+}
 
-/**
- * Build a compact structural summary of the SVG for Claude's text context.
- * Sends group hierarchy + path-mark correspondence without raw path data.
- */
-function buildStructuralContext(inventory: PathInventory): string {
-    const lines: string[] = ['SVG structural context:'];
-
-    const groupKeys = Object.keys(inventory.vtracerGroups);
-    if (groupKeys.length > 0) {
-        lines.push('\nGroups (group-id → path-ids):');
-        for (const [gId, pathIds] of Object.entries(inventory.vtracerGroups)) {
-            lines.push(`  ${gId}: [${pathIds.join(', ')}]`);
+function flattenElements(elements: VisualElement[], parentId: string | null = null): NodeInfo[] {
+    const result: NodeInfo[] = [];
+    for (const el of elements) {
+        const label = el.id.replace(/_/g, ' ');
+        const concept = guessConceptFromId(el.id);
+        result.push({ id: el.id, label, concept, parentId });
+        if (el.children) {
+            result.push(...flattenElements(el.children, el.id));
         }
     }
-    if (inventory.standalonePathIds.length > 0) {
-        lines.push(`\nStandalone paths: [${inventory.standalonePathIds.join(', ')}]`);
+    return result;
+}
+
+// ─── CSS Palette extraction ──────────────────────────────────────────────────
+
+function extractPaletteClasses(cssString: string): string {
+    const lines: string[] = [];
+    const ruleRe = /\.([a-zA-Z][\w-]*)\s*\{([^}]+)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = ruleRe.exec(cssString)) !== null) {
+        const cls = m[1];
+        const decls = m[2].trim().replace(/\s+/g, ' ').slice(0, 120);
+        lines.push(`.${cls} { ${decls} }`);
+        if (lines.length >= 30) break;
     }
-    if (inventory.backgroundPathIds.length > 0) {
-        lines.push(`\nBackground paths (excluded): [${inventory.backgroundPathIds.join(', ')}]`);
-    }
-
-    lines.push('\nPath marks (image mark# → SVG path-id → fill-role → centroid-xy):');
-    inventory.paths.forEach((p, i) => {
-        lines.push(`  mark ${i}: id="${p.id}" fill="${p.fillRole}" centroid=(${p.cx},${p.cy})`);
-    });
-
-    return lines.join('\n');
+    return lines.length > 0
+        ? lines.join('\n')
+        : '(sin paleta definida — usa "k" para agentes/actores, "f" para objetos/acciones)';
 }
 
-interface ElementMapping {
-    elementIndex: number;
-    nodeId: string;
-    confidence: number;
-    justification: string;
-}
+// ─── Tool Schema ─────────────────────────────────────────────────────────────
 
-interface MappingResult {
-    description: string;
-    mappings: ElementMapping[];
-}
-
-/** Collect all node IDs from a VisualElement tree (depth-first). */
-function collectNodeIds(elements: VisualElement[]): string[] {
-    const ids: string[] = [];
-    function walk(els: VisualElement[]) {
-        for (const el of els) {
-            ids.push(el.id);
-            if (el.children) walk(el.children);
-        }
-    }
-    walk(elements);
-    return ids;
-}
-
-/** Build Claude tool schema for map_elements, with nodeId enum from VisualDOM. */
-function buildMappingToolSchema(nodeIds: string[], pathCount: number) {
+function buildRestructureToolSchema(nodeList: NodeInfo[]) {
+    const nodeIds = nodeList.map(n => n.id);
     return {
-        name: 'map_elements',
-        description: `Map each numbered SVG element (0 to ${pathCount - 1}) to a semantic DOM node. Use "none" for background/irrelevant elements.`,
+        name: 'restructure_svg',
+        description: 'Restructure the SVG by assigning paths to semantic nodes, discarding tracing noise, and optionally proposing simple path merges.',
         input_schema: {
             type: 'object' as const,
             properties: {
                 description: {
                     type: 'string',
-                    description: 'Brief visual description of the pictogram (1-2 sentences).',
+                    description: 'Brief visual description of the pictogram (1–2 sentences).',
                 },
-                mappings: {
+                groups: {
                     type: 'array',
-                    description: `Array of exactly ${pathCount} mappings, one per numbered element.`,
+                    description: 'One entry per VisualDOM node. Flat list — use parentId for hierarchy.',
                     items: {
                         type: 'object',
                         properties: {
-                            elementIndex: { type: 'integer', minimum: 0, maximum: pathCount - 1 },
-                            nodeId: { type: 'string', enum: ['none', ...nodeIds] },
-                            confidence: { type: 'number', minimum: 0, maximum: 1 },
-                            justification: { type: 'string' },
+                            nodeId: { type: 'string', enum: nodeIds, description: 'VisualDOM node id.' },
+                            label: { type: 'string', description: 'Human-readable label for this node.' },
+                            cssClass: { type: 'string', description: 'CSS class from the palette (e.g. "k", "f", "accent").' },
+                            parentId: { type: 'string', description: 'Parent nodeId for nesting; omit or null for top-level.', nullable: true },
+                            keep: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Path IDs (by mark number or id) to include verbatim from the SVG.',
+                            },
+                            merge: {
+                                description: 'Optional: propose a union merge of overlapping paths. Combine their d attributes with a space separator.',
+                                oneOf: [
+                                    { type: 'null' },
+                                    {
+                                        type: 'object',
+                                        properties: {
+                                            d: { type: 'string', description: 'Combined SVG path data.' },
+                                            sources: { type: 'array', items: { type: 'string' }, description: 'Source path ids merged.' },
+                                        },
+                                        required: ['d', 'sources'],
+                                    },
+                                ],
+                            },
                         },
-                        required: ['elementIndex', 'nodeId', 'confidence', 'justification'],
+                        required: ['nodeId', 'label', 'cssClass', 'keep'],
                     },
                 },
+                discard: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Path IDs to exclude. Only use for: (a) micro-blobs with no visible area, (b) geometrically identical duplicates, (c) background fill rects. When uncertain, assign to a group instead.',
+                },
             },
-            required: ['description', 'mappings'],
+            required: ['description', 'groups', 'discard'],
         },
     };
 }
 
-async function callVisionMapping(
-    markedImageBase64: string,
+// ─── System Prompt ───────────────────────────────────────────────────────────
+
+function buildSystemPrompt(): string {
+    return `Eres un agente de restructuración semántica de SVG para pictogramas AAC (Comunicación Aumentativa y Alternativa).
+
+Recibes:
+1. Una imagen del SVG con un círculo numerado en rojo sobre el centroide de cada path
+2. El código fuente SVG en bruto (paths con sus IDs)
+3. El DOM semántico objetivo — nodos con id, concepto y etiqueta
+4. La paleta CSS de la librería — clases disponibles para estilizar
+
+Tu tarea:
+- Identifica qué paths numerados corresponden visualmente a cada nodo semántico
+- Descarta SOLO estos casos:
+  · Micro-blobs: paths con área visualmente insignificante (punto sin significado funcional)
+  · Duplicados exactos: paths con geometría d= idéntica a otro path ya asignado
+  · Fondos: rectángulos de relleno que cubren todo el viewBox (ya pre-excluidos en su mayoría)
+- En caso de duda, CONSERVA el path. Eliminar un elemento visualmente presente es un error grave; incluir un artefacto menor es tolerable.
+- Asigna clases CSS de la paleta (nunca uses colores inline)
+- Opcionalmente propón una fusión de paths: si múltiples paths claramente forman la misma región visual, puedes combinar sus atributos d con un separador de espacio (unión SVG de sub-paths). Sé conservador con las fusiones.
+
+Reglas:
+1. Trabaja desde la evidencia visual de la imagen — no asumas contenido semántico a partir de los nombres de nodos
+2. Cada path que no sea fondo debe aparecer en exactamente un keep de grupo, o en discard
+3. Usa solo los valores de cssClass listados en la paleta
+4. "k" = agente/actor (personaje principal), "f" = objeto o acción, "accent" = acento de color
+5. parentId debe ser null para nodos de nivel superior, o un nodeId válido para nodos hijo`;
+}
+
+// ─── User Prompt ─────────────────────────────────────────────────────────────
+
+function buildUserText(rawSvg: string, nodeList: NodeInfo[], cssStyles: string, inventory: PathInventory): string {
+    const domSection = nodeList
+        .map(n => `- ${n.id} [${n.concept}] "${n.label}"${n.parentId ? ` (hijo de ${n.parentId})` : ''}`)
+        .join('\n');
+
+    const paletteSection = extractPaletteClasses(cssStyles);
+
+    const marksSection = inventory.paths
+        .map((p, i) => `  mark ${i}: id="${p.id}" fill-role="${p.fillRole}" centroide=(${p.cx},${p.cy})`)
+        .join('\n');
+
+    const svgSource = rawSvg.length > 10000
+        ? rawSvg.slice(0, 10000) + '\n<!-- … SVG truncado —>'
+        : rawSvg;
+
+    return `Analiza esta imagen SVG numerada y restructúrala semánticamente.
+
+DOM semántico objetivo:
+${domSection}
+
+Paleta CSS disponible:
+${paletteSection}
+
+Marcas en la imagen (mark# → path-id → fill-role → centroide):
+${marksSection}
+
+SVG fuente:
+${svgSource}`;
+}
+
+// ─── Single Vision Call ───────────────────────────────────────────────────────
+
+async function callVisionStructuring(
+    image: { base64: string; widthPx: number; heightPx: number; sizeKB: number },
+    rawSvg: string,
     elements: VisualElement[],
-    nlu: NLUData,
+    cssStyles: string,
     inventory: PathInventory,
+    model: string,
     onProgress?: (msg: string) => void,
-): Promise<MappingResult> {
-    const nodeIds = collectNodeIds(elements);
-    const tool = buildMappingToolSchema(nodeIds, inventory.paths.length);
+): Promise<StructuringMapping> {
+    const nodeList = flattenElements(elements);
+    const tool = buildRestructureToolSchema(nodeList);
+    const systemPrompt = buildSystemPrompt();
+    const userText = buildUserText(rawSvg, nodeList, cssStyles, inventory);
 
-    const lang = nlu.lang || 'es-419';
-    const vg = nlu.visual_guidelines;
+    // ── Console: Phase5_Console event 1 — full prompt
+    if (onProgress) {
+        onProgress(`[ESTRUCTURAR] Prompt del sistema:\n${systemPrompt}`);
+        onProgress(`[ESTRUCTURAR] Prompt de usuario (${userText.length} chars):\n${userText.slice(0, 800)}${userText.length > 800 ? '…' : ''}`);
+    }
 
-    const systemPrompt = `You are a visual semantic mapping agent for AAC pictogram analysis.
-You receive an SVG image where each visual element has been numbered with a red circle.
-Your task: assign each numbered element to the correct semantic node from the visual DOM.
+    // ── Console: Phase5_Console event 2 — image attached
+    if (onProgress) {
+        onProgress(`[ESTRUCTURAR] imagen adjunta: ${image.widthPx}×${image.heightPx}px JPEG, ${image.sizeKB} KB`);
+    }
 
-Semantic context:
-- Utterance: "${nlu.utterance}"
-- Actor: ${vg?.focus_actor || '?'}
-- Action: ${vg?.action_core || '?'}
-- Object: ${vg?.object_core || '?'}
-- Domain: ${nlu.domain || 'general'}
+    // ── Console: Phase5_Console event 3 — calling model
+    if (onProgress) {
+        onProgress(`[ESTRUCTURAR] llamando ${model}…`);
+    }
 
-Visual DOM (target structure):
-${elements.map(e => formatElementTree(e)).join('\n')}
+    const startMs = Date.now();
 
-Rules:
-1. Every numbered element (0 to ${inventory.paths.length - 1}) must appear in mappings exactly once.
-2. Use only the nodeIds from the enum: ${['none', ...nodeIds].join(', ')}.
-3. Use "none" only for clear background shapes or irrelevant decorative elements.
-4. Confidence 1.0 = certain, 0.0 = pure guess. Flag anything below ${CONFIDENCE_THRESHOLD}.
-5. Multiple elements can share the same nodeId (one semantic node may span many paths).
-6. Respond in ${lang}.`;
-
-    const structuralContext = buildStructuralContext(inventory);
-    const userText = `Analyze this numbered SVG pictogram and map each numbered element to its semantic node.\n\n${structuralContext}`;
-
-    const response = await callClaude({
-        model: 'claude-sonnet-4-6',
+    const response: ClaudeResponse = await callStructuringModel({
+        model,
         max_tokens: 8192,
         system: systemPrompt,
         tools: [tool],
-        tool_choice: { type: 'tool', name: 'map_elements' },
+        tool_choice: { type: 'tool', name: 'restructure_svg' },
         messages: [{
             role: 'user',
             content: [
                 {
                     type: 'image',
-                    source: { type: 'base64', media_type: 'image/jpeg', data: markedImageBase64 },
+                    source: { type: 'base64', media_type: 'image/jpeg', data: image.base64 },
                 },
                 { type: 'text', text: userText },
             ],
         }],
     });
 
-    return extractToolUse(response, 'map_elements') as MappingResult;
-}
+    const elapsedMs = Date.now() - startMs;
 
-function formatElementTree(el: VisualElement, depth = 0): string {
-    const indent = '  '.repeat(depth);
-    const line = `${indent}- ${el.id}`;
-    const children = el.children?.map(c => formatElementTree(c, depth + 1)).join('\n') || '';
-    return children ? `${line}\n${children}` : line;
-}
-
-// ─── Conversion: ElementMapping[] → AssignmentNode tree ──────────────────────
-
-interface AssignmentNode {
-    concept: string;
-    label: string;
-    class?: string;
-    paths?: string[];
-    evenodd?: boolean;
-    children?: Record<string, AssignmentNode>;
-}
-
-interface Assignment {
-    desc: string;
-    groups: Record<string, AssignmentNode>;
-}
-
-function guessConceptFromNLU(elementId: string, nlu: NLUData): string {
-    const id = elementId.toLowerCase().replace(/_/g, ' ');
-    const vg = nlu.visual_guidelines;
-    if (vg?.focus_actor && id.includes(vg.focus_actor.toLowerCase())) return 'Agent';
-    if (vg?.action_core && id.includes(vg.action_core.toLowerCase())) return 'Action';
-    if (vg?.object_core && id.includes(vg.object_core.toLowerCase())) return 'Object';
-    if (id === 'pictograma' || id === 'pictogram') return 'Agent';
-    return 'Object';
-}
-
-function buildAssignmentNode(
-    el: VisualElement,
-    nodePathMap: Map<string, string[]>,
-    nlu: NLUData,
-): AssignmentNode {
-    const pathIds = nodePathMap.get(el.id) || [];
-    const concept = guessConceptFromNLU(el.id, nlu);
-    const cls = concept === 'Agent' ? 'k' : 'f';
-
-    const children: Record<string, AssignmentNode> = {};
-    for (const child of el.children ?? []) {
-        children[child.id] = buildAssignmentNode(child, nodePathMap, nlu);
+    // ── Console: Phase5_Console events 4 & 5 — timing + tokens
+    if (onProgress) {
+        onProgress(`[ESTRUCTURAR] respuesta recibida en ${(elapsedMs / 1000).toFixed(1)}s`);
+        if (response.usage) {
+            onProgress(`[ESTRUCTURAR] tokens: entrada=${response.usage.input_tokens}, salida=${response.usage.output_tokens}`);
+        }
     }
 
+    const mapping = extractToolUse(response, 'restructure_svg') as StructuringMapping;
+
+    // ── Console: Phase5_Console event 6 — group assignments
+    if (onProgress) {
+        onProgress(`[ESTRUCTURAR] grupos: ${mapping.groups?.length ?? 0}, descartados: ${mapping.discard?.length ?? 0}`);
+        for (const g of (mapping.groups ?? [])) {
+            const mergeHint = g.merge ? ` [MERGE de ${g.merge.sources?.join(',')}]` : '';
+            onProgress(`  ${g.nodeId} (${g.cssClass}): keep=[${g.keep?.join(', ')}]${mergeHint}`);
+        }
+    }
+
+    // ── Console: Phase5_Console event 7 — discards
+    if (onProgress && mapping.discard?.length > 0) {
+        onProgress(`[ESTRUCTURAR] descartados: ${mapping.discard.join(', ')}`);
+    }
+
+    // Normalize: ensure required fields exist with defaults
     return {
-        concept,
-        label: el.id.replace(/_/g, ' '),
-        class: cls,
-        paths: pathIds,
-        ...(Object.keys(children).length > 0 ? { children } : {}),
+        description: mapping.description ?? '',
+        groups: (mapping.groups ?? []).map(g => ({
+            ...g,
+            keep: g.keep ?? [],
+            selected: true,
+            merge: g.merge ?? null,
+            parentId: g.parentId ?? null,
+        })),
+        discard: mapping.discard ?? [],
     };
 }
 
-function elementMappingsToAssignment(
-    result: MappingResult,
-    inventory: PathInventory,
-    elements: VisualElement[],
-    nlu: NLUData,
-): Assignment {
-    // Build index → pathId lookup
-    const indexToPathId = new Map<number, string>(
-        inventory.paths.map((p, i) => [i, p.id])
-    );
+// ─── Geometry Validation (Phase5_GeometryValidation) ─────────────────────────
 
-    // Group pathIds by nodeId
-    const nodePathMap = new Map<string, string[]>();
-    const nonePaths: string[] = [];
-
-    for (const m of result.mappings) {
-        const pathId = indexToPathId.get(m.elementIndex);
-        if (!pathId) continue;
-        if (m.nodeId === 'none') {
-            nonePaths.push(pathId);
-        } else {
-            const list = nodePathMap.get(m.nodeId) ?? [];
-            list.push(pathId);
-            nodePathMap.set(m.nodeId, list);
-        }
+function validateMergedPath(d: string): boolean {
+    try {
+        const hasValidStart = /^\s*[MmZzLlHhVvCcSsQqTtAa]/.test(d);
+        if (!hasValidStart) return false;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${d.replace(/"/g, '&quot;')}"/></svg>`, 'image/svg+xml');
+        return !doc.querySelector('parsererror');
+    } catch {
+        return false;
     }
-
-    // Build groups from the VisualElement tree
-    const groups: Record<string, AssignmentNode> = {};
-
-    // Skip the root 'pictograma' node — use its children as top-level groups
-    const rootEl = elements.find(e => e.id === 'pictograma');
-    const topLevel = rootEl?.children ?? elements;
-
-    for (const el of topLevel) {
-        groups[el.id] = buildAssignmentNode(el, nodePathMap, nlu);
-    }
-
-    // Paths assigned to root pictograma go to the first group or fallback
-    const rootPaths = nodePathMap.get('pictograma') ?? [];
-    if (rootPaths.length > 0) {
-        if (topLevel.length > 0) {
-            const firstGroup = groups[topLevel[0].id];
-            firstGroup.paths = [...(firstGroup.paths ?? []), ...rootPaths];
-        } else {
-            groups['contexto'] = { concept: 'Context', label: 'elementos de contexto', class: 'f', paths: rootPaths };
-        }
-    }
-
-    // Fallback: unassigned ("none") paths
-    if (nonePaths.length > 0) {
-        groups['contexto'] = {
-            ...(groups['contexto'] ?? { concept: 'Context', label: 'elementos de contexto', class: 'f', paths: [] }),
-            paths: [...(groups['contexto']?.paths ?? []), ...nonePaths],
-        };
-    }
-
-    return { desc: result.description ?? '', groups };
 }
 
-// ─── Local SVG Assembly (unchanged from v2) ──────────────────────────────────
+function applyGeometryValidation(
+    mapping: StructuringMapping,
+    onProgress?: (msg: string) => void,
+): StructuringMapping {
+    const groups = mapping.groups.map(g => {
+        if (!g.merge) return g;
+        const { d, sources } = g.merge;
+        const valid = validateMergedPath(d);
+        // ── Console: Phase5_Console event 8
+        if (onProgress) {
+            onProgress(`[ESTRUCTURAR] merge ${g.nodeId}: ${sources.join('+')} → "${d.slice(0, 80)}${d.length > 80 ? '…' : ''}" [${valid ? 'OK' : 'INVÁLIDO'}]`);
+        }
+        if (!valid) {
+            // ── Console: Phase5_Console event 9 — Fallback B
+            onProgress?.(`[ESTRUCTURAR] fallback B — ${g.nodeId}: merge inválido, usando paths originales (${sources.join(', ')})`);
+            return { ...g, keep: [...(g.keep ?? []), ...sources], merge: null };
+        }
+        return g;
+    });
+    return { ...mapping, groups };
+}
+
+// ─── Assembly ─────────────────────────────────────────────────────────────────
 
 interface OriginalPathData {
     d: string;
@@ -722,108 +696,151 @@ function escapeXmlAttr(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function renderNode(
-    groupId: string,
-    node: AssignmentNode,
+function renderGroup(
+    group: StructuringGroup,
+    childGroups: StructuringGroup[],
     originalPaths: Map<string, OriginalPathData>,
-    groupClasses: Record<string, string>,
-    pathClasses: Record<string, string>,
     pathInfoMap: Map<string, PathInfo>,
-    cssFillMap: Record<string, string> = {},
     indent = '  ',
 ): string {
-    const allIds = collectAllPathIds(node);
-    const dominantRole = getDominantFillRole(allIds, pathInfoMap);
+    const dominantRole = getDominantFillRole(group.keep, pathInfoMap);
     const colorCls = fillRoleToColorClass(dominantRole);
-    const semanticCls = node.class ?? 'f';
-    const groupUserCls = groupClasses[groupId] ?? '';
-    const pathUserClasses = (node.paths ?? [])
-        .map(pid => pathClasses[pid]).filter(Boolean)
-        .flatMap(c => c.split(/\s+/)).filter(c => c);
-    const allUserCls = [groupUserCls, ...new Set(pathUserClasses)].filter(Boolean).join(' ');
-    const userHasFill = allUserCls.split(/\s+/).some(c => cssFillMap[c]);
+    const semanticCls = group.cssClass || 'f';
+    const userHasColorClass = ['k', 'f', 'w', 'main', 'accent'].includes(semanticCls);
     const clsParts = [semanticCls];
-    if (!userHasFill) clsParts.push(colorCls);
-    if (allUserCls) clsParts.push(allUserCls);
+    if (!userHasColorClass) clsParts.push(colorCls);
     const cls = clsParts.join(' ');
-    const label = escapeXmlAttr(node.label);
-    const concept = escapeXmlAttr(node.concept);
-    const openTag = `${indent}<g id="${groupId}" role="group" tabindex="0" data-concept="${concept}" aria-label="${label}" class="${cls}">`;
-    const lines = [openTag];
+    const label = escapeXmlAttr(group.label || group.nodeId);
+    const concept = escapeXmlAttr(guessConceptFromId(group.nodeId));
+    const lines: string[] = [];
+    lines.push(`${indent}<g id="${group.nodeId}" role="group" tabindex="0" data-concept="${concept}" aria-label="${label}" class="${cls}">`);
 
-    if (node.paths?.length) {
-        if (node.evenodd && node.paths.length > 1) {
-            const darkPath = node.paths.map(id => originalPaths.get(id)).find(p => p && getFillRole(p.fill) === 'dark');
-            const fill = darkPath?.fill ?? '#000000';
-            const subpaths = node.paths.map(id => {
-                const p = originalPaths.get(id);
-                if (!p) return '';
-                if (p.transform) {
-                    const tm = p.transform.match(/translate\(\s*([^,\s]+)[\s,]+([^)\s]+)\s*\)/);
-                    if (tm) {
-                        const tx = parseFloat(tm[1]); const ty = parseFloat(tm[2]);
-                        if (tx !== 0 || ty !== 0) return offsetPathD(p.d, tx, ty);
-                    }
-                }
-                return p.d;
-            }).filter(Boolean).join(' ');
-            lines.push(`${indent}  <path d="${subpaths}" fill="${fill}" fill-rule="evenodd"/>`);
-        } else {
-            for (const pathId of node.paths) {
-                const p = originalPaths.get(pathId);
-                if (!p) { console.warn(`[assemble] path not found: ${pathId}`); continue; }
-                const transformAttr = p.transform ? ` transform="${p.transform}"` : '';
-                const classAttr = p.className ? ` class="${p.className}"` : '';
-                const otherAttrs = p.otherAttrs ? ` ${p.otherAttrs}` : '';
-                lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${classAttr}${transformAttr}${otherAttrs}/>`);
-            }
+    // Merged path (validated before reaching here)
+    if (group.merge) {
+        lines.push(`${indent}  <path d="${escapeXmlAttr(group.merge.d)}" />`);
+    } else {
+        for (const pathId of (group.keep ?? [])) {
+            const p = originalPaths.get(pathId);
+            if (!p) { console.warn(`[assemble] path no encontrado: ${pathId}`); continue; }
+            const transformAttr = p.transform ? ` transform="${p.transform}"` : '';
+            const classAttr = p.className ? ` class="${p.className}"` : '';
+            const otherAttrs = p.otherAttrs ? ` ${p.otherAttrs}` : '';
+            lines.push(`${indent}  <path id="${pathId}" d="${p.d}"${classAttr}${transformAttr}${otherAttrs}/>`);
         }
     }
 
-    if (node.children) {
-        for (const [childId, childNode] of Object.entries(node.children)) {
-            lines.push(renderNode(childId, childNode, originalPaths, groupClasses, pathClasses, pathInfoMap, cssFillMap, indent + '  '));
-        }
+    // Nested children
+    for (const child of childGroups) {
+        const grandChildren = [];
+        lines.push(renderGroup(child, grandChildren, originalPaths, pathInfoMap, indent + '  '));
     }
 
     lines.push(`${indent}</g>`);
     return lines.join('\n');
 }
 
-function assembleSVGFromAssignment(
-    rawSvg: string,
-    assignment: Assignment,
+export function assembleFromMapping(
+    mapping: StructuringMapping,
     input: SVGStructureInput,
-    metadata: object,
-    filteredCSS: string,
-    viewBox: string,
-    groupClasses: Record<string, string>,
-    pathClasses: Record<string, string>,
-    pathInfoMap: Map<string, PathInfo>,
-    cssFillMap: Record<string, string> = {},
-    excludePathIds: Set<string> = new Set(),
-): string {
-    const originalPaths = extractOriginalPaths(rawSvg);
-    const assignedIds = new Set<string>();
-    function collectIds(node: AssignmentNode) {
-        node.paths?.forEach(id => assignedIds.add(id));
-        if (node.children) Object.values(node.children).forEach(collectIds);
+    selectionOverrides?: Map<string, boolean>,
+    labelOverrides?: Map<string, string>,
+): SVGStructureResult {
+    try {
+        const rawSvgWithIds = ensurePathIds(input.rawSvg);
+        const inventory = buildPathInventory(rawSvgWithIds);
+        const originalPaths = extractOriginalPaths(rawSvgWithIds);
+        const pathInfoMap = new Map<string, PathInfo>(inventory.paths.map(p => [p.id, p]));
+
+        // Apply selection and label overrides (from Phase5_Review)
+        const effectiveGroups = mapping.groups.map(g => ({
+            ...g,
+            selected: selectionOverrides?.has(g.nodeId) ? selectionOverrides.get(g.nodeId)! : g.selected,
+            label: labelOverrides?.get(g.nodeId) ?? g.label,
+        })).filter(g => g.selected !== false);
+
+        // Build parent → children map
+        const childMap = new Map<string | null, StructuringGroup[]>();
+        for (const g of effectiveGroups) {
+            const parentId = g.parentId ?? null;
+            if (!childMap.has(parentId)) childMap.set(parentId, []);
+            childMap.get(parentId)!.push(g);
+        }
+
+        // Track all assigned path ids
+        const assignedIds = new Set<string>();
+        for (const g of effectiveGroups) {
+            (g.keep ?? []).forEach(id => assignedIds.add(id));
+            g.merge?.sources?.forEach(id => assignedIds.add(id));
+        }
+        for (const id of (mapping.discard ?? [])) assignedIds.add(id);
+
+        // Unaccounted paths → fallback contexto group
+        const allOriginalIds = Array.from(originalPaths.keys()).filter(id => !inventory.backgroundPathIds.includes(id));
+        const orphans = allOriginalIds.filter(id => !assignedIds.has(id));
+        if (orphans.length > 0) {
+            console.warn(`[assemble] paths sin asignar (→ contexto): ${orphans.join(', ')}`);
+            const existing = effectiveGroups.find(g => g.nodeId === 'contexto');
+            if (existing) {
+                existing.keep = [...(existing.keep ?? []), ...orphans];
+            } else {
+                effectiveGroups.push({ nodeId: 'contexto', label: 'elementos de contexto', cssClass: 'f', parentId: null, keep: orphans, selected: true });
+                if (!childMap.has(null)) childMap.set(null, []);
+                childMap.get(null)!.push(effectiveGroups[effectiveGroups.length - 1]);
+            }
+        }
+
+        // Render top-level groups (parentId = null)
+        const topLevel = childMap.get(null) ?? [];
+        const body = topLevel
+            .map(g => renderGroup(g, childMap.get(g.nodeId) ?? [], originalPaths, pathInfoMap))
+            .join('\n');
+
+        // CSS
+        const fullCSS = generateStylesheet(input.config);
+        const usedClasses = new Set<string>();
+        effectiveGroups.forEach(g => g.cssClass?.split(/\s+/).forEach(c => usedClasses.add(c)));
+        for (const cls of Object.values(inventory.pathClasses)) cls.split(/\s+/).filter(Boolean).forEach(c => usedClasses.add(c));
+
+        let filteredCSS = buildFilteredCSS(fullCSS, usedClasses);
+
+        // Preserve original fill rules from raw SVG
+        const pathFillRules = inventory.paths
+            .filter(p => {
+                const pCls = inventory.pathClasses[p.id];
+                if (pCls && pCls.split(/\s+/).some(c => inventory.cssFillMap[c])) return false;
+                return p.fill && p.fill !== '#000000';
+            })
+            .map(p => `#${p.id} { fill: ${p.fill}; }`)
+            .join('\n');
+        if (pathFillRules) {
+            filteredCSS = filteredCSS ? `${filteredCSS}\n\n/* Original path fills */\n${pathFillRules}` : pathFillRules;
+        }
+        if (inventory.rawStyleRules) {
+            filteredCSS = filteredCSS ? `${filteredCSS}\n\n/* User-defined styles */\n${inventory.rawStyleRules}` : inventory.rawStyleRules;
+        }
+
+        const metadata = buildMetadataJSON(input);
+        let svgContent = assembleStructuredSVG(body, input, metadata, filteredCSS, inventory.viewBox);
+        svgContent = removeEmptyGroupsFromFragment(svgContent);
+
+        const validation = validateXML(svgContent);
+        if (validation) {
+            input.onProgress?.(`[ESTRUCTURAR] advertencia XML: ${validation.slice(0, 120)}`);
+        } else {
+            svgContent = deriveChildIds(svgContent);
+        }
+
+        const groupCount = (svgContent.match(/<g /g) ?? []).length;
+        input.onProgress?.(`[ESTRUCTURAR] completado — ${(svgContent.length / 1024).toFixed(1)} KB, ${groupCount} grupos semánticos`);
+
+        return { svg: svgContent, success: true };
+    } catch (error) {
+        return {
+            svg: '',
+            success: false,
+            error: error instanceof Error ? error.message : 'Error desconocido en ensamblado',
+        };
     }
-    Object.values(assignment.groups).forEach(collectIds);
-
-    const allOriginalIds = Array.from(originalPaths.keys()).filter(id => !excludePathIds.has(id));
-    const missing = allOriginalIds.filter(id => !assignedIds.has(id));
-    if (missing.length > 0) {
-        console.warn(`[assemble] paths sin asignar: ${missing.join(', ')}`);
-        assignment.groups['contexto'] = assignment.groups['contexto'] ?? { concept: 'Context', label: 'elementos de contexto', class: 'f', paths: [] };
-        assignment.groups['contexto'].paths = [...(assignment.groups['contexto'].paths ?? []), ...missing];
-    }
-
-    const body = Object.entries(assignment.groups)
-        .map(([gid, node]) => renderNode(gid, node, originalPaths, groupClasses, pathClasses, pathInfoMap, cssFillMap))
-        .join('\n');
-
-    return assembleStructuredSVG(body, input, metadata, filteredCSS, viewBox);
 }
 
 // ─── Post-processing ─────────────────────────────────────────────────────────
@@ -909,9 +926,9 @@ function buildMetadataJSON(input: SVGStructureInput): object {
         vg?.context && `contexto: ${vg.context}`,
     ].filter(Boolean).join(', ') || input.utterance;
     return {
-        version: "1.0.0",
-        schema: "mediafranca/mf-svg-schema",
-        pipeline: "claude+recraft",
+        version: '1.0.0',
+        schema: 'mediafranca/mf-svg-schema',
+        pipeline: 'claude+recraft',
         utterance: input.utterance,
         lang: nlu.lang || config.lang || 'es-419',
         domain: nlu.domain ?? 'general',
@@ -928,7 +945,7 @@ function buildMetadataJSON(input: SVGStructureInput): object {
         },
         visualGuidelines: { focusActor: vg?.focus_actor ?? null, actionCore: vg?.action_core ?? null, objectCore: vg?.object_core ?? null, context: vg?.context ?? null, temporal: vg?.temporal ?? null },
         accessibility: { cognitiveDescription: input.utterance, visualDescription: naturalDesc, lang: nlu.lang || config.lang || 'es-419' },
-        provenance: { generator: "PictoNet", generatedAt: new Date().toISOString(), sourceDataset: "MediaFranca-PictoNet", licence: config.license || "CC BY 4.0" },
+        provenance: { generator: 'PictoNet', generatedAt: new Date().toISOString(), sourceDataset: 'MediaFranca-PictoNet', licence: config.license || 'CC BY 4.0' },
     };
 }
 
@@ -956,7 +973,7 @@ ${filteredCSS}
 </svg>`;
 }
 
-// ─── Main structuring function (v3: set-of-marks + Claude vision) ─────────────
+// ─── Main structuring function ────────────────────────────────────────────────
 
 export async function structureSVG(input: SVGStructureInput): Promise<SVGStructureResult> {
     try {
@@ -964,138 +981,44 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
             return { svg: '', success: false, error: 'rawSvg no es un string válido' };
         }
 
-        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Pre-procesando SVG local…');
+        const model = input.phase5Model ?? 'claude-sonnet-4-6';
 
-        // Step 0: Ensure all paths have ids
+        input.onProgress?.('[ESTRUCTURAR] Pre-procesando SVG local…');
         const rawSvgWithIds = ensurePathIds(input.rawSvg);
-
-        // Step 1: Build path inventory
         const inventory = buildPathInventory(rawSvgWithIds);
+
         if (inventory.paths.length === 0) {
             return { svg: '', success: false, error: 'No se encontraron paths en el SVG' };
         }
 
-        if (input.onProgress) {
-            input.onProgress(`[ESTRUCTURAR] Inventario: ${inventory.paths.length} paths, ${Object.keys(inventory.vtracerGroups).length} grupos`);
-        }
+        input.onProgress?.(`[ESTRUCTURAR] Inventario: ${inventory.paths.length} paths, ${Object.keys(inventory.vtracerGroups).length} grupos, ${inventory.backgroundPathIds.length} fondo excluido`);
 
-        // Step 2: Rasterize with set-of-marks labels
-        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Renderizando marcas numeradas…');
-        const markedImageBase64 = await rasterizeWithMarks(rawSvgWithIds, inventory);
+        input.onProgress?.('[ESTRUCTURAR] Renderizando marcas numeradas…');
+        const image = await rasterizeWithMarks(rawSvgWithIds, inventory);
 
-        // Step 3: Claude vision call (with retry loop)
-        let mappingResult: MappingResult | null = null;
-        let attempt = 0;
+        const cssStyles = generateStylesheet(input.config);
 
-        // Initial full-image pass
-        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Enviando imagen marcada a Claude Sonnet…');
-        if (input.onStatus) input.onStatus('sending');
-
-        mappingResult = await callVisionMapping(markedImageBase64, input.elements, input.nlu, inventory, input.onProgress);
-
-        if (input.onStatus) input.onStatus('receiving');
-        if (input.onProgress) input.onProgress(`[ESTRUCTURAR] Mapeo recibido (${mappingResult.mappings.length} asignaciones)`);
-
-        // Step 4: Focused retry for low-confidence assignments
-        attempt = 1;
-        while (attempt < PHASE5_MAX_ATTEMPTS) {
-            const lowConfidence = mappingResult.mappings.filter(m => m.confidence < CONFIDENCE_THRESHOLD);
-            if (lowConfidence.length === 0) break;
-
-            if (input.onProgress) {
-                input.onProgress(`[ESTRUCTURAR] Intento ${attempt + 1}/${PHASE5_MAX_ATTEMPTS} — ${lowConfidence.length} asignaciones con baja confianza`);
-            }
-
-            // For each low-confidence element, do a focused retry
-            for (const m of lowConfidence) {
-                const pathId = inventory.paths[m.elementIndex]?.id;
-                if (!pathId) continue;
-
-                try {
-                    const isolatedBase64 = await rasterizeIsolated(rawSvgWithIds, pathId, inventory.viewBox);
-                    const focusedResult = await callVisionMapping(isolatedBase64, input.elements, input.nlu, inventory, input.onProgress);
-                    const refined = focusedResult.mappings.find(x => x.elementIndex === m.elementIndex);
-                    if (refined && refined.confidence > m.confidence) {
-                        const idx = mappingResult!.mappings.findIndex(x => x.elementIndex === m.elementIndex);
-                        if (idx !== -1) mappingResult!.mappings[idx] = refined;
-                    }
-                } catch (retryErr) {
-                    console.warn(`[ESTRUCTURAR] Focused retry failed for element ${m.elementIndex}:`, retryErr);
-                }
-            }
-
-            attempt++;
-        }
-
-        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Convirtiendo mapeo a árbol semántico…');
-
-        // Step 5: Convert ElementMapping[] → AssignmentNode tree
-        const assignment = elementMappingsToAssignment(mappingResult, inventory, input.elements, input.nlu);
-
-        if (!assignment.groups || Object.keys(assignment.groups).length === 0) {
-            return { svg: '', success: false, error: 'No se pudo generar estructura semántica' };
-        }
-
-        // Step 6: Prepare CSS
-        const viewBox = inventory.viewBox;
-        const metadata = buildMetadataJSON(input);
-        const pathInfoMap = new Map<string, PathInfo>(inventory.paths.map(p => [p.id, p]));
-
-        const usedClasses = new Set<string>();
-        function collectClasses(node: AssignmentNode) {
-            if (node.class) node.class.split(/\s+/).forEach(c => usedClasses.add(c));
-            const allIds = collectAllPathIds(node);
-            usedClasses.add(fillRoleToColorClass(getDominantFillRole(allIds, pathInfoMap)));
-            if (node.children) Object.values(node.children).forEach(collectClasses);
-        }
-        Object.values(assignment.groups).forEach(collectClasses);
-        for (const cls of Object.values(inventory.groupClasses)) cls.split(/\s+/).forEach(c => c && usedClasses.add(c));
-        for (const cls of Object.values(inventory.pathClasses)) cls.split(/\s+/).forEach(c => c && usedClasses.add(c));
-
-        const fullCSS = generateStylesheet(input.config);
-        let filteredCSS = buildFilteredCSS(fullCSS, usedClasses);
-
-        if (inventory.rawStyleRules) {
-            filteredCSS = filteredCSS
-                ? `${filteredCSS}\n\n/* User-defined styles */\n${inventory.rawStyleRules}`
-                : inventory.rawStyleRules;
-        }
-
-        const pathFillRules = inventory.paths
-            .filter(p => {
-                const pCls = inventory.pathClasses[p.id];
-                if (pCls && pCls.split(/\s+/).some(c => inventory.cssFillMap[c])) return false;
-                return p.fill && p.fill !== '#000000';
-            })
-            .map(p => `#${p.id} { fill: ${p.fill}; }`)
-            .join('\n');
-        if (pathFillRules) {
-            filteredCSS = filteredCSS ? `${filteredCSS}\n\n/* Original path fills */\n${pathFillRules}` : pathFillRules;
-        }
-
-        // Step 7: Assemble SVG locally
-        if (input.onProgress) input.onProgress('[ESTRUCTURAR] Ensamblando SVG final…');
-        let svgContent = assembleSVGFromAssignment(
-            rawSvgWithIds, assignment, input, metadata, filteredCSS, viewBox,
-            inventory.groupClasses, inventory.pathClasses, pathInfoMap, inventory.cssFillMap,
-            new Set(inventory.backgroundPathIds),
+        let mapping = await callVisionStructuring(
+            image,
+            rawSvgWithIds,
+            input.elements,
+            cssStyles,
+            inventory,
+            model,
+            input.onProgress,
         );
 
-        // Step 8: Post-process
-        svgContent = removeEmptyGroupsFromFragment(svgContent);
-        const validation = validateXML(svgContent);
-        if (validation) {
-            if (input.onProgress) input.onProgress(`[ESTRUCTURAR] XML issue: ${validation.slice(0, 120)}`);
-        } else {
-            svgContent = deriveChildIds(svgContent);
+        // Phase5_GeometryValidation
+        mapping = applyGeometryValidation(mapping, input.onProgress);
+
+        // Recording mode → return mapping for review timer
+        if (input.config.recording?.enabled) {
+            input.onProgress?.('[ESTRUCTURAR] Modo grabación activo — esperando revisión del usuario');
+            return { svg: '', success: true, mapping, pendingReview: true };
         }
 
-        const groupCount = (svgContent.match(/<g /g) ?? []).length;
-        if (input.onProgress) {
-            input.onProgress(`[ESTRUCTURAR] Completado — ${(svgContent.length / 1024).toFixed(1)} KB, ${groupCount} grupos semánticos`);
-        }
-
-        return { svg: svgContent, success: true };
+        // Immediate assembly
+        return assembleFromMapping(mapping, input);
 
     } catch (error) {
         return {
@@ -1109,7 +1032,6 @@ export async function structureSVG(input: SVGStructureInput): Promise<SVGStructu
 // ─── Eligibility checks ──────────────────────────────────────────────────────
 
 export function canVectorize(_row: object): { eligible: boolean; reason?: string } {
-    // Phase 4 (VTracer) is eliminated in the Claude+Recraft pipeline.
     return { eligible: false, reason: 'VTracer eliminado — Recraft entrega SVG nativo' };
 }
 
