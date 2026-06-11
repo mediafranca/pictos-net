@@ -1,16 +1,16 @@
 /**
  * IndexedDB Service — primary persistence layer for pictos-net
  *
- * v3 schema:
+ * v4 schema:
  *   rows    — RowData metadata WITHOUT binary fields (bitmap, rawSvg, structuredSvg)
- *   bitmaps — { id, bitmap: base64 data URL }
- *   svgs    — { id, rawSvg?, structuredSvg? }
+ *   bitmaps — { id, bitmap: base64 data URL, libraryId }
+ *   svgs    — { id, rawSvg?, structuredSvg?, libraryId }
  *
  * localStorage is used only for config (pictonet_v19_config).
  */
 
 const DB_NAME = 'pictonet_storage';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_ROWS = 'rows';
 const STORE_BITMAPS = 'bitmaps';
 const STORE_SVGS = 'svgs';
@@ -19,6 +19,7 @@ interface BitmapEntry {
   id: string;
   bitmap: string;
   timestamp: number;
+  libraryId: string;
 }
 
 interface SvgEntry {
@@ -26,6 +27,7 @@ interface SvgEntry {
   rawSvg?: string;
   structuredSvg?: string;
   timestamp: number;
+  libraryId?: string;
 }
 
 let dbInstance: IDBDatabase | null = null;
@@ -53,21 +55,63 @@ export const initDB = (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const transaction = (event.target as IDBOpenDBRequest).transaction!;
 
       if (!db.objectStoreNames.contains(STORE_BITMAPS)) {
         const store = db.createObjectStore(STORE_BITMAPS, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+        store.createIndex('libraryId', 'libraryId', { unique: false });
       }
 
       if (!db.objectStoreNames.contains(STORE_SVGS)) {
         const store = db.createObjectStore(STORE_SVGS, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+        store.createIndex('libraryId', 'libraryId', { unique: false });
       }
 
-      // v3: rows store for all RowData metadata (no binary fields)
       if (!db.objectStoreNames.contains(STORE_ROWS)) {
         const store = db.createObjectStore(STORE_ROWS, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+
+      // v3 → v4: add libraryId index to bitmaps and svgs stores
+      // and tag all existing entries with libraryId = 'migrated'
+      // (App.tsx migration will rename 'migrated' to the real library id)
+      if (event.oldVersion < 4) {
+        const oldVersion = event.oldVersion;
+        if (oldVersion >= 1 && db.objectStoreNames.contains(STORE_BITMAPS)) {
+          const bitmapStore = transaction.objectStore(STORE_BITMAPS);
+          if (!bitmapStore.indexNames.contains('libraryId')) {
+            bitmapStore.createIndex('libraryId', 'libraryId', { unique: false });
+          }
+          // Tag existing entries
+          const bitmapCursor = bitmapStore.openCursor();
+          bitmapCursor.onsuccess = (e) => {
+            const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+            if (!cursor) return;
+            if (!cursor.value.libraryId) {
+              cursor.update({ ...cursor.value, libraryId: 'migrated' });
+            }
+            cursor.continue();
+          };
+        }
+
+        if (oldVersion >= 1 && db.objectStoreNames.contains(STORE_SVGS)) {
+          const svgStore = transaction.objectStore(STORE_SVGS);
+          if (!svgStore.indexNames.contains('libraryId')) {
+            svgStore.createIndex('libraryId', 'libraryId', { unique: false });
+          }
+          // Tag existing entries
+          const svgCursor = svgStore.openCursor();
+          svgCursor.onsuccess = (e) => {
+            const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+            if (!cursor) return;
+            if (!cursor.value.libraryId) {
+              cursor.update({ ...cursor.value, libraryId: 'migrated' });
+            }
+            cursor.continue();
+          };
+        }
       }
     };
   });
@@ -172,31 +216,35 @@ const compressForStorage = (dataUrl: string, quality = 0.75): Promise<string> =>
  * Save all bitmaps atomically in a single transaction.
  * Compresses PNG bitmaps to JPEG 0.75 before writing to save storage space.
  */
-export const saveBitmapsBatch = async (entries: { id: string; bitmap: string }[]): Promise<void> => {
+export const saveBitmapsBatch = async (entries: { id: string; bitmap: string; libraryId: string }[]): Promise<void> => {
   if (entries.length === 0) return;
   const compressed = await Promise.all(
-    entries.map(async ({ id, bitmap }) => ({ id, bitmap: await compressForStorage(bitmap) }))
+    entries.map(async ({ id, bitmap, libraryId }) => ({
+      id,
+      bitmap: await compressForStorage(bitmap),
+      libraryId,
+    }))
   );
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_BITMAPS], 'readwrite');
     const store = transaction.objectStore(STORE_BITMAPS);
     const now = Date.now();
-    compressed.forEach(({ id, bitmap }) => {
-      store.put({ id, bitmap, timestamp: now } as BitmapEntry);
+    compressed.forEach(({ id, bitmap, libraryId }) => {
+      store.put({ id, bitmap, timestamp: now, libraryId } as BitmapEntry);
     });
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
 };
 
-export const saveBitmap = async (id: string, bitmap: string): Promise<void> => {
+export const saveBitmap = async (id: string, bitmap: string, libraryId: string): Promise<void> => {
   const compressed = await compressForStorage(bitmap);
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_BITMAPS], 'readwrite');
     const store = transaction.objectStore(STORE_BITMAPS);
-    const request = store.put({ id, bitmap: compressed, timestamp: Date.now() } as BitmapEntry);
+    const request = store.put({ id, bitmap: compressed, timestamp: Date.now(), libraryId } as BitmapEntry);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -232,6 +280,23 @@ export const getAllBitmaps = async (): Promise<Map<string, string>> => {
   });
 };
 
+export const getAllBitmapsForLibrary = async (libraryId: string): Promise<Map<string, string>> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_BITMAPS], 'readonly');
+    const store = transaction.objectStore(STORE_BITMAPS);
+    const index = store.index('libraryId');
+    const request = index.getAll(libraryId);
+    request.onsuccess = () => {
+      const entries = request.result as BitmapEntry[];
+      const map = new Map<string, string>();
+      entries.forEach(e => map.set(e.id, e.bitmap));
+      resolve(map);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
 export const deleteBitmap = async (id: string): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
@@ -240,6 +305,25 @@ export const deleteBitmap = async (id: string): Promise<void> => {
     const request = store.delete(id);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
+  });
+};
+
+export const deleteBitmapsForLibrary = async (libraryId: string): Promise<void> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_BITMAPS], 'readwrite');
+    const store = transaction.objectStore(STORE_BITMAPS);
+    const index = store.index('libraryId');
+    const request = index.openCursor(libraryId);
+    request.onsuccess = (e) => {
+      const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 
@@ -257,7 +341,7 @@ export const deleteBitmap = async (id: string): Promise<void> => {
  * the old value. The only caller in the codebase passes both fields, so
  * removing the merge is safe.)
  */
-export const saveSvgs = async (id: string, svgs: { rawSvg?: string; structuredSvg?: string }): Promise<void> => {
+export const saveSvgs = async (id: string, svgs: { rawSvg?: string; structuredSvg?: string }, libraryId?: string): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_SVGS], 'readwrite');
@@ -267,6 +351,7 @@ export const saveSvgs = async (id: string, svgs: { rawSvg?: string; structuredSv
       timestamp: Date.now(),
       rawSvg: svgs.rawSvg,
       structuredSvg: svgs.structuredSvg,
+      libraryId,
     };
     const putReq = store.put(entry);
     putReq.onsuccess = () => resolve();
@@ -305,6 +390,23 @@ export const getAllSvgs = async (): Promise<Map<string, { rawSvg?: string; struc
   });
 };
 
+export const getAllSvgsForLibrary = async (libraryId: string): Promise<Map<string, { rawSvg?: string; structuredSvg?: string }>> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_SVGS], 'readonly');
+    const store = transaction.objectStore(STORE_SVGS);
+    const index = store.index('libraryId');
+    const request = index.getAll(libraryId);
+    request.onsuccess = () => {
+      const entries = request.result as SvgEntry[];
+      const map = new Map<string, { rawSvg?: string; structuredSvg?: string }>();
+      entries.forEach(e => map.set(e.id, { rawSvg: e.rawSvg, structuredSvg: e.structuredSvg }));
+      resolve(map);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
 export const deleteSvgs = async (id: string): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
@@ -313,6 +415,25 @@ export const deleteSvgs = async (id: string): Promise<void> => {
     const request = store.delete(id);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
+  });
+};
+
+export const deleteSvgsForLibrary = async (libraryId: string): Promise<void> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_SVGS], 'readwrite');
+    const store = transaction.objectStore(STORE_SVGS);
+    const index = store.index('libraryId');
+    const request = index.openCursor(libraryId);
+    request.onsuccess = (e) => {
+      const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 };
 

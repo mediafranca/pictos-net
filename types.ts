@@ -429,3 +429,35 @@ export const VOCAB_NSM = {
 export const getNSMPrimes = (langKey: 'en' | 'es'): string[] => {
   return Object.values(VOCAB_NSM).flatMap(cat => cat[langKey]);
 };
+
+// ── Multi-Library ──────────────────────────────────────────────────────────
+
+export interface LibraryMeta {
+  id: string;
+  name: string;
+  createdAt: string;     // ISO-8601
+  modifiedAt: string;    // ISO-8601
+  pictogramCount: number;
+  sequenceCount: number;
+}
+
+// ── Sequences ──────────────────────────────────────────────────────────────
+
+export type StepState = 'blank' | 'pending' | 'complete';
+
+export interface Step {
+  id: string;
+  position: number;       // 1-based, always contiguous
+  utterance: string | null;
+  rowId: string | null;   // non-null iff state = 'complete'
+  state: StepState;
+}
+
+export interface Sequence {
+  id: string;
+  libraryId: string;
+  name: string;
+  steps: Step[];
+  createdAt: string;
+  modifiedAt: string;
+}
