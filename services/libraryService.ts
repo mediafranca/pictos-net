@@ -25,7 +25,8 @@ export const LIBRARIES_INDEX_KEY = 'pictonet_libraries';
 export const ACTIVE_LIBRARY_KEY  = 'pictonet_active_lib';
 export const libMetaKey   = (id: string) => `pictonet_lib_${id}_meta`;
 export const libConfigKey = (id: string) => `pictonet_lib_${id}_config`;
-export const libSeqsKey   = (id: string) => `pictonet_lib_${id}_seqs`;
+export const libSeqsKey      = (id: string) => `pictonet_lib_${id}_seqs`;
+export const libPreviewsKey  = (id: string) => `pictonet_lib_${id}_previews`;
 
 // Legacy keys — used only by needsMigration() and migrateFromSingleLibrary()
 export const LEGACY_STORAGE_KEY = 'pictonet_v19_storage';
@@ -121,6 +122,9 @@ export function deleteLibrary(id: string): void {
   localStorage.removeItem(libMetaKey(id));
   localStorage.removeItem(libConfigKey(id));
   localStorage.removeItem(libSeqsKey(id));
+
+  // Remove previews thumbnail cache
+  localStorage.removeItem(libPreviewsKey(id));
 
   // Remove active pointer if it pointed at this library
   if (localStorage.getItem(ACTIVE_LIBRARY_KEY) === id) {
@@ -301,4 +305,25 @@ export function migrateFromSingleLibrary(): LibraryMeta {
   // Legacy keys serve as a fallback if migration is interrupted.
 
   return meta;
+}
+
+// ── Preview thumbnails ────────────────────────────────────────────────────────
+// Stores up to 3 tiny JPEG data URLs generated from the library's first rows.
+// Updated asynchronously on save; stale previews are fine — home screen only.
+
+export function getLibraryPreviews(id: string): string[] {
+  try {
+    const raw = localStorage.getItem(libPreviewsKey(id));
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLibraryPreviews(id: string, thumbnails: string[]): void {
+  try {
+    localStorage.setItem(libPreviewsKey(id), JSON.stringify(thumbnails.slice(0, 3)));
+  } catch {
+    // Quota exceeded — previews are cosmetic, never block a save
+  }
 }

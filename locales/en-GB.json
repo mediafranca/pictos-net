@@ -58,7 +58,13 @@
     "stageStructured": "struct.",
     "openInFocus": "Open \"{utterance}\" in focus view",
     "untitled": "Untitled",
-    "structureRequiresRaw": "Structured form is generated from the traced SVG. Vectorise first."
+    "structureRequiresRaw": "Structured form is generated from the traced SVG. Vectorise first.",
+    "contentTogglePictogramas": "Pictograms",
+    "contentToggleSecuencias": "Sequences",
+    "storageIndicator": "Storage: {used} of {total} used",
+    "storageIndicatorHigh": "Storage nearly full: {used} of {total}",
+    "noLibraries": "Create your first pictogram library.",
+    "recent": "Recent"
   },
   "home": {
     "graphArchitecture": "Graph Architecture",
@@ -79,7 +85,13 @@
     "emptyLibrary": "Your library is empty",
     "emptyLibraryHint": "Type a phrase to turn it into a pictogram",
     "emptyLibraryImport": "You can also import a list of phrases",
-    "emptyLibraryImportTooltip": ".txt file with one phrase per line"
+    "emptyLibraryImportTooltip": ".txt file with one phrase per line",
+    "templateLibraries": "Example libraries",
+    "newLibraryNamePrompt": "New library name",
+    "importLibraryFile": "Import library (.json)",
+    "libraries": "Libraries",
+    "useTemplate": "Use",
+    "libraryItemCount": "{pictograms} pictograms · {sequences} sequences"
   },
   "pipeline": {
     "understand": "Understand",
@@ -286,7 +298,18 @@
     "close": "Close",
     "addChild": "Add child",
     "element": "element",
-    "elements": "elements"
+    "elements": "elements",
+    "mySequences": "My sequences",
+    "downloadPictogramas": "Download pictograms ({count})",
+    "downloadPrintables": "Download printables",
+    "createLibrary": "Create new library",
+    "backupLibraries": "Back up libraries",
+    "openLibrary": "Open",
+    "duplicateLibrary": "Duplicate",
+    "downloadLibrary": "Download library",
+    "renameLibrary": "Rename",
+    "deleteLibrary": "Delete",
+    "deleteLibraryConfirm": "Delete \"{name}\"? All generated pictograms and images will be deleted. This action cannot be undone."
   },
   "metadata": {
     "speechAct": "speech_act",
@@ -584,5 +607,27 @@
     "confirmChange": "Change only",
     "confirmChangeAndRegen": "Change and regenerate all ({{n}} units)",
     "cancel": "Cancel"
+  },
+  "sequence": {
+    "untitled": "Untitled sequence",
+    "steps": "{count} steps",
+    "noSequences": "No sequences yet. Create your first sequence.",
+    "addStep": "Add step",
+    "stepPlaceholder": "Type a word or phrase...",
+    "generateStep": "Generate",
+    "printSequence": "Print",
+    "downloadPictogramas": "Download",
+    "noCompleteSteps": "Add pictograms to print or download.",
+    "back": "Back",
+    "today": "today",
+    "yesterday": "yesterday",
+    "daysAgo": "{days} days ago",
+    "weeksAgo": "{weeks} wk. ago",
+    "monthsAgo": "{months} mo. ago",
+    "open": "Open",
+    "rename": "Rename",
+    "delete": "Delete",
+    "createNew": "Create new sequence",
+    "stepsCount": "{count} steps · {complete} complete"
   }
 }

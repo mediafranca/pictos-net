@@ -55,6 +55,7 @@ export const handler = async (event, context) => {
             email: payload.email,
             sub: payload.sub,
             user_metadata: payload.user_metadata,
+            app_metadata: payload.app_metadata,
           };
         }
       } catch (err) {
@@ -64,6 +65,7 @@ export const handler = async (event, context) => {
   }
 
   const email = user?.email ?? 'dev';
+  const roles = user?.app_metadata?.roles ?? [];
 
   if (!isLocalDev && !user) {
     await store.setJSON(jobId, { error: 'Unauthorized' });
@@ -82,7 +84,7 @@ export const handler = async (event, context) => {
   }
 
   // Quota check
-  const quota = await checkAndCharge(email, 1);
+  const quota = await checkAndCharge(email, 1, roles);
   if (!quota.allowed) {
     console.warn(`[api-recraft-worker] quota exceeded for ${email} (${quota.units_used}/${quota.limit})`);
     await store.setJSON(jobId, {

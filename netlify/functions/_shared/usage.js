@@ -31,14 +31,20 @@ function safeEmail(email) {
 /**
  * Check quota and increment if allowed.
  *
- * @param {string} email  - user email (use 'dev' for local dev, always allowed)
- * @param {number} units  - units to charge (0 = log only, no quota impact)
+ * @param {string}   email  - user email (use 'dev' for local dev, always allowed)
+ * @param {number}   units  - units to charge (0 = log only, no quota impact)
+ * @param {string[]} roles  - Netlify Identity roles from app_metadata.roles
  * @returns {{ allowed: boolean, units_used: number, limit: number }}
  */
-export async function checkAndCharge(email, units = 1) {
+export async function checkAndCharge(email, units = 1, roles = []) {
   // Dev mode or anonymous: always allow, no tracking
   if (!email || email === 'dev') {
     return { allowed: true, units_used: 0, limit: DAILY_LIMIT };
+  }
+
+  // Superusers bypass the daily quota entirely
+  if (Array.isArray(roles) && roles.includes('superuser')) {
+    return { allowed: true, units_used: 0, limit: Infinity };
   }
 
   if (units === 0) {

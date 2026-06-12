@@ -66,6 +66,7 @@ async function handleRequest(event, context) {
   }
 
   const email = user?.email ?? 'dev';
+  const roles = user?.app_metadata?.roles ?? [];
 
   // PICTOS_ANTHROPIC_KEY avoids Netlify CLI v24 overriding ANTHROPIC_API_KEY with
   // a Netlify AI Gateway JWT. baseURL is set explicitly below for the same reason.
@@ -92,7 +93,7 @@ async function handleRequest(event, context) {
 
   // Quota check (Sonnet = 1 unit; Haiku = 0 units, always allowed)
   const units = UNITS_BY_MODEL[model] ?? 1;
-  const quota = await checkAndCharge(email, units);
+  const quota = await checkAndCharge(email, units, roles);
   if (!quota.allowed) {
     console.warn(`[api-claude] quota exceeded for ${email} (${quota.units_used}/${quota.limit})`);
     return {

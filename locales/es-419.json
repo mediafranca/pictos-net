@@ -58,7 +58,13 @@
     "stageStructured": "estruc.",
     "openInFocus": "Abrir \"{utterance}\" en vista enfocada",
     "untitled": "Sin título",
-    "structureRequiresRaw": "El estructurado se genera a partir del trazado. Vectoriza primero."
+    "structureRequiresRaw": "El estructurado se genera a partir del trazado. Vectoriza primero.",
+    "contentTogglePictogramas": "Pictogramas",
+    "contentToggleSecuencias": "Secuencias",
+    "storageIndicator": "Almacenamiento: {used} de {total} usados",
+    "storageIndicatorHigh": "Almacenamiento casi lleno: {used} de {total}",
+    "noLibraries": "Crea tu primera librería de pictogramas.",
+    "recent": "Recientes"
   },
   "home": {
     "graphArchitecture": "Arquitectura de Grafo",
@@ -79,7 +85,13 @@
     "emptyLibrary": "Tu librería está vacía",
     "emptyLibraryHint": "Escribe una frase para convertirla en pictograma",
     "emptyLibraryImport": "También puedes importar una lista de frases",
-    "emptyLibraryImportTooltip": "Archivo .txt con una frase por línea"
+    "emptyLibraryImportTooltip": "Archivo .txt con una frase por línea",
+    "templateLibraries": "Librerías de ejemplo",
+    "newLibraryNamePrompt": "Nombre de la nueva librería",
+    "importLibraryFile": "Importar librería (.json)",
+    "libraries": "Librerías",
+    "useTemplate": "Usar",
+    "libraryItemCount": "{pictograms} pictogramas · {sequences} secuencias"
   },
   "pipeline": {
     "understand": "Comprender",
@@ -286,7 +298,18 @@
     "close": "Cerrar",
     "addChild": "Agregar hijo",
     "element": "elemento",
-    "elements": "elementos"
+    "elements": "elementos",
+    "mySequences": "Mis secuencias",
+    "downloadPictogramas": "Descargar pictogramas ({count})",
+    "downloadPrintables": "Descargar imprimibles",
+    "createLibrary": "Crear nueva librería",
+    "backupLibraries": "Respaldar librerías",
+    "openLibrary": "Abrir",
+    "duplicateLibrary": "Duplicar",
+    "downloadLibrary": "Descargar librería",
+    "renameLibrary": "Renombrar",
+    "deleteLibrary": "Eliminar",
+    "deleteLibraryConfirm": "¿Eliminar «{name}»? Se borrarán todos los pictogramas e imágenes generadas. Esta acción no se puede deshacer."
   },
   "metadata": {
     "speechAct": "acto_de_habla",
@@ -584,5 +607,27 @@
     "confirmChange": "Solo cambiar",
     "confirmChangeAndRegen": "Cambiar y regenerar todo ({{n}} unidades)",
     "cancel": "Cancelar"
+  },
+  "sequence": {
+    "untitled": "Secuencia sin nombre",
+    "steps": "{count} pasos",
+    "noSequences": "Aún no hay secuencias. Crea tu primera secuencia.",
+    "addStep": "Agregar paso",
+    "stepPlaceholder": "Escribe una palabra o frase...",
+    "generateStep": "Generar",
+    "printSequence": "Imprimir",
+    "downloadPictogramas": "Descargar",
+    "noCompleteSteps": "Agrega pictogramas para imprimir o descargar.",
+    "back": "Volver",
+    "today": "hoy",
+    "yesterday": "ayer",
+    "daysAgo": "hace {days} días",
+    "weeksAgo": "hace {weeks} sem.",
+    "monthsAgo": "hace {months} meses",
+    "open": "Abrir",
+    "rename": "Renombrar",
+    "delete": "Eliminar",
+    "createNew": "Crear nueva secuencia",
+    "stepsCount": "{count} pasos · {complete} completos"
   }
 }

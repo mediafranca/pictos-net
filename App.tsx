@@ -13,7 +13,7 @@ import {
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics, DEFAULT_PHASE5_MODEL } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics, DEFAULT_PHASE5_MODEL, LibraryMeta, Sequence, Step } from './types';
 import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
 import * as Gemini from './services/geminiService';
@@ -30,6 +30,7 @@ import useSVGLibrary from './hooks/useSVGLibrary';
 import { StyleEditor } from './components/PictoForge/StyleEditor';
 import { GeoAutocomplete } from './components/GeoAutocomplete';
 import * as IndexedDBService from './services/indexedDBService';
+import * as libraryService from './services/libraryService';
 import { INITIAL_STYLES } from './lib/style-editor/lib/constants';
 import { INITIAL_KEYFRAMES } from './lib/style-editor/lib/keyframeConstants';
 import packageJson from './package.json';
@@ -38,12 +39,16 @@ import OnboardingModal from './components/OnboardingModal';
 import { PDFExportModal } from './components/PDFExportModal';
 import ParticipateModal from './components/ParticipateModal';
 import { exportLibraryToPdf, pdfExportFilename, downloadPdf, PdfExportCancelledError, type PdfProgress } from './services/pdfExportService';
+import { exportSequenceToPdf, sequencePdfFilename } from './services/sequencePdfService';
 import { RowAuditPanel } from './components/RowAuditPanel';
 import { PictogramGridCell } from './components/PictogramGridCell';
 import { injectSvgA11y } from './utils/svgAccessibility';
 import { AuthProvider, logout, requestLogin, onLogin, ensureAuth } from './components/AuthGate';
 import { VectorizerModal } from './components/VectorizerModal';
 import type { VectorizerResult } from './services/vtracerService';
+import { LibraryHome } from './components/LibraryHome';
+import { SequenceList } from './components/SequenceList';
+import { SequenceEditor } from './components/SequenceEditor';
 
 
 const STORAGE_KEY = 'pictonet_v19_storage';
@@ -79,6 +84,60 @@ const ensureElementsArray = (elements: any): VisualElement[] => {
   console.warn('[VALIDATION] Invalid elements type, returning empty array:', typeof elements, elements);
   return [];
 };
+
+// Rasterize a row's best artifact (SVG preferred, bitmap fallback) to a JPEG
+// data URL at the given pixel size. SVGs are loaded via Blob URL so the browser
+// can decode them without cross-origin restrictions.
+async function rasterizeToThumbnail(row: RowData, size = 300): Promise<string> {
+  const svgString = row.structuredSvg || row.rawSvg;
+
+  if (svgString) {
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('svg load failed'));
+        img.src = url;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } catch {
+      return '';
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  if (row.bitmap) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, size, size);
+          ctx.drawImage(img, 0, 0, size, size);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } catch { resolve(''); }
+      };
+      img.onerror = () => resolve('');
+      img.src = row.bitmap!;
+    });
+  }
+
+  return '';
+}
 
 // Helper function to sanitize filename for downloads
 const sanitizeFilename = (text: string, maxLength: number = 30): string => {
@@ -213,7 +272,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const scrollToRowRef = useRef<string | null>(null);
-  const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
+  const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
+  const [libraryIndex, setLibraryIndex] = useState<LibraryMeta[]>([]);
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
     lang: 'es-419',
@@ -384,51 +444,63 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
   useEffect(() => {
     const loadData = async () => {
-      // ── Step 1: config (localStorage, synchronous) ──────────────────────────
-      const savedConfig = localStorage.getItem(CONFIG_KEY);
+      // ── Step 0: migration check ──────────────────────────────────────────────
+      if (libraryService.needsMigration()) {
+        await libraryService.migrateFromSingleLibrary();
+      }
+
+      // ── Step 1: library index ────────────────────────────────────────────────
+      const index = libraryService.getLibraryIndex();
+      setLibraryIndex(index);
+
+      // Determine which library to open: the previously active one, or the first
+      const savedActiveId = localStorage.getItem(libraryService.ACTIVE_LIBRARY_KEY);
+      const targetId = (savedActiveId && index.find(l => l.id === savedActiveId))
+        ? savedActiveId
+        : null;
+
+      if (!targetId) {
+        // No library to open — show home screen
+        setIsInitialized(true);
+        return;
+      }
+
+      // ── Step 2: config (scoped to library) ──────────────────────────────────
+      const savedConfig = libraryService.getLibraryConfig(targetId);
       if (savedConfig) {
         try {
-          const parsed = JSON.parse(savedConfig);
-          // MigrateImageModel rule: map legacy imageModel → generationModel
+          const parsed = typeof savedConfig === 'string' ? JSON.parse(savedConfig) : savedConfig;
           if (parsed.imageModel !== undefined && !parsed.generationModel) {
             parsed.generationModel = migrateImageModel(parsed.imageModel);
             delete parsed.imageModel;
           } else if (!parsed.generationModel) {
-            // DefaultGenerationModel rule: fresh config with no prior model → default
             parsed.generationModel = DEFAULT_GENERATION_MODEL;
           } else {
-            // Migrate removed -preview IDs to stable IDs
             parsed.generationModel = migrateGenerationModel(parsed.generationModel);
           }
           setConfig(parsed);
         } catch (e) { console.error('Failed to load config', e); }
       }
 
-      // ── Step 2: row metadata (localStorage, synchronous → instant render) ───
-      // localStorage holds row metadata WITHOUT binary fields.
-      // This is always fast and reliable regardless of IDB state.
-      const saved = localStorage.getItem(STORAGE_KEY);
+      // ── Step 3: row metadata (scoped to library) ─────────────────────────────
       let loadedRows: RowData[] = [];
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) loadedRows = parsed.map(sanitizeRow);
-        } catch (e) { console.error('Failed to load rows from localStorage', e); }
+      const savedRows = libraryService.getLibraryRows(targetId);
+      if (Array.isArray(savedRows)) {
+        loadedRows = savedRows.map(sanitizeRow);
       }
 
       if (loadedRows.length > 0) {
         setRows(loadedRows);
-        setViewMode('list');
       }
+      setActiveLibraryId(targetId);
       setIsInitialized(true);
 
-      // ── Step 3: binary data (IndexedDB, async → merge when ready) ────────────
-      // Bitmaps and SVGs are stored separately in IDB; merge them in after load.
+      // ── Step 4: binary data (IndexedDB, async → merge when ready) ────────────
       if (loadedRows.length > 0) {
         try {
           const [bitmapsMap, svgsMap] = await Promise.all([
-            IndexedDBService.getAllBitmaps(),
-            IndexedDBService.getAllSvgs(),
+            IndexedDBService.getAllBitmapsForLibrary(targetId),
+            IndexedDBService.getAllSvgsForLibrary(targetId),
           ]);
           const hasBinaryData = bitmapsMap.size > 0 || svgsMap.size > 0;
           if (hasBinaryData) {
@@ -439,8 +511,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               structuredSvg: svgsMap.get(row.id)?.structuredSvg || row.structuredSvg,
             })));
           }
-          // Seed the tracking ref with rows that have a non-empty SVG entry
-          // in IDB. Empty entries (both fields undefined) are treated as absent.
           const seeded = new Set<string>();
           svgsMap.forEach((value, id) => {
             if (value.rawSvg || value.structuredSvg) seeded.add(id);
@@ -455,59 +525,202 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     loadData();
   }, []);
 
-  // Auto-save strategy:
-  //   1. FIRST: metadata → localStorage synchronously (never blocked by IDB)
-  //      Always strip binary fields to stay well under the 5MB quota.
-  //   2. THEN: bitmaps + SVGs → IDB fire-and-forget (non-blocking)
-  //      Race condition with refresh is acceptable — IDB is a best-effort cache.
   useEffect(() => {
     if (!isInitialized) return;
 
-    // 1. Metadata → localStorage immediately (synchronous, always runs first)
-    const rowsMeta = rows.map((row: RowData) => {
-      const { bitmap, rawSvg, structuredSvg, ...meta } = row;
-      return meta;
-    });
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(rowsMeta));
-      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-    } catch (error) {
-      console.error('[save] localStorage quota exceeded:', error);
-      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(config)); } catch (_) { /* */ }
+    // 1. Metadata → scoped localStorage (synchronous, always runs first)
+    if (activeLibraryId) {
+      const rowsMeta = rows.map((row: RowData) => {
+        const { bitmap, rawSvg, structuredSvg, ...meta } = row;
+        return meta;
+      });
+      try {
+        libraryService.saveLibraryRows(activeLibraryId, rowsMeta);
+        libraryService.saveLibraryConfig(activeLibraryId, config);
+        // Update modifiedAt on every save
+        libraryService.updateLibraryMeta(activeLibraryId, {
+          modifiedAt: new Date().toISOString(),
+          pictogramCount: rowsMeta.length,
+        });
+        setLibraryIndex(libraryService.getLibraryIndex());
+      } catch (error) {
+        console.error('[save] library storage write failed:', error);
+      }
+
+      // 4. Preview thumbnails → localStorage (async, cosmetic, never blocks)
+      // Prefer SVG rows (Recraft output) — bitmap filter missed them entirely.
+      const previewRows = rows
+        .filter((row: RowData) => row.structuredSvg || row.rawSvg || row.bitmap)
+        .slice(0, 3);
+      if (previewRows.length > 0) {
+        const libId = activeLibraryId;
+        Promise.all(previewRows.map((row: RowData) => rasterizeToThumbnail(row, 300)))
+          .then(thumbs => libraryService.saveLibraryPreviews(libId, thumbs.filter(Boolean)))
+          .catch(() => { /* thumbnails are cosmetic */ });
+      }
     }
 
     // 2. Bitmaps → IDB (fire-and-forget, non-blocking)
-    const bitmapEntries = rows
-      .filter((row: RowData) => row.bitmap)
-      .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap! }));
-    if (bitmapEntries.length > 0) {
-      IndexedDBService.saveBitmapsBatch(bitmapEntries)
-        .catch(err => console.error('[save] IDB bitmap write failed:', err));
-    }
+    if (activeLibraryId) {
+      const bitmapEntries = rows
+        .filter((row: RowData) => row.bitmap)
+        .map((row: RowData) => ({ id: row.id, bitmap: row.bitmap!, libraryId: activeLibraryId }));
+      if (bitmapEntries.length > 0) {
+        IndexedDBService.saveBitmapsBatch(bitmapEntries)
+          .catch(err => console.error('[save] IDB bitmap write failed:', err));
+      }
 
-    // 3. SVGs → IDB (fire-and-forget, non-blocking).
-    // We track row IDs that currently have an SVG entry in IDB (seeded
-    // from loadData). On every save:
-    //   - rows that now have at least one SVG -> saveSvgs (overwrites)
-    //   - rows that lost both SVGs since last render -> deleteSvgs
-    // This avoids spamming IDB with deletes for rows that never had SVGs.
-    const currentSvgIds = new Set<string>();
-    rows.forEach((row: RowData) => {
-      if (row.rawSvg || row.structuredSvg) {
-        currentSvgIds.add(row.id);
-        IndexedDBService.saveSvgs(row.id, {
-          rawSvg: row.rawSvg,
-          structuredSvg: row.structuredSvg,
-        }).catch(err => console.error('[save] SVG write failed:', err));
+      // 3. SVGs → IDB (fire-and-forget, non-blocking)
+      const currentSvgIds = new Set<string>();
+      rows.forEach((row: RowData) => {
+        if (row.rawSvg || row.structuredSvg) {
+          currentSvgIds.add(row.id);
+          IndexedDBService.saveSvgs(row.id, {
+            rawSvg: row.rawSvg,
+            structuredSvg: row.structuredSvg,
+          }, activeLibraryId).catch(err => console.error('[save] SVG write failed:', err));
+        }
+      });
+      svgRowIdsRef.current.forEach(id => {
+        if (!currentSvgIds.has(id)) {
+          IndexedDBService.deleteSvgs(id).catch(err => console.error('[save] SVG delete failed:', err));
+        }
+      });
+      svgRowIdsRef.current = currentSvgIds;
+    }
+  }, [rows, isInitialized, config, activeLibraryId]);
+
+  const openLibrary = useCallback((id: string) => {
+    localStorage.setItem(libraryService.ACTIVE_LIBRARY_KEY, id);
+    setActiveLibraryId(id);
+    setLibraryContentMode('pictogramas');
+  }, []);
+
+  const closeLibrary = useCallback(() => {
+    localStorage.removeItem(libraryService.ACTIVE_LIBRARY_KEY);
+    setActiveLibraryId(null);
+    setRows([]);
+    setSequences([]);
+    setActiveSequenceId(null);
+  }, []);
+
+  // ── Library home + content mode ───────────────────────────────────────────
+  const [libraryContentMode, setLibraryContentMode] = useState<'pictogramas' | 'secuencias'>('pictogramas');
+  const [sequences, setSequences] = useState<Sequence[]>([]);
+  const [activeSequenceId, setActiveSequenceId] = useState<string | null>(null);
+  const pendingStepRowsRef = useRef<Map<string, { sequenceId: string; stepId: string }>>(new Map());
+  const [librarySort, setLibrarySort] = useState<'recientes' | 'alfabetico'>('recientes');
+
+  // Load sequences when active library changes
+  useEffect(() => {
+    if (!activeLibraryId) { setSequences([]); setActiveSequenceId(null); return; }
+    setSequences(libraryService.getLibrarySequences(activeLibraryId));
+    setActiveSequenceId(null);
+  }, [activeLibraryId]);
+
+  // Save sequences whenever they change
+  useEffect(() => {
+    if (!activeLibraryId || !isInitialized) return;
+    libraryService.saveLibrarySequences(activeLibraryId, sequences);
+    libraryService.updateLibraryMeta(activeLibraryId, {
+      sequenceCount: sequences.length,
+      modifiedAt: new Date().toISOString(),
+    });
+  }, [sequences, activeLibraryId, isInitialized]);
+
+  // Watch for rows generated from sequence steps completing
+  useEffect(() => {
+    if (pendingStepRowsRef.current.size === 0) return;
+    rows.forEach(row => {
+      const pending = pendingStepRowsRef.current.get(row.id);
+      if (!pending || !(row.rawSvg || row.bitmap)) return;
+      const { sequenceId, stepId } = pending;
+      setSequences(prev => prev.map(seq => {
+        if (seq.id !== sequenceId) return seq;
+        return {
+          ...seq,
+          modifiedAt: new Date().toISOString(),
+          steps: seq.steps.map(s =>
+            s.id === stepId ? { ...s, rowId: row.id, state: 'complete' as const } : s
+          ),
+        };
+      }));
+      pendingStepRowsRef.current.delete(row.id);
+    });
+  }, [rows]);
+  const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number } | null>(null);
+  const libImportRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    IndexedDBService.getStorageEstimate().then(est => {
+      if (est) setStorageInfo(est);
+    });
+  }, []);
+
+  const handleCreateLibrary = useCallback(() => {
+    const name = window.prompt(t('home.newLibraryNamePrompt') || 'Nombre de la nueva librería');
+    if (!name?.trim()) return;
+    const lib = libraryService.createLibrary(name.trim());
+    setLibraryIndex(libraryService.getLibraryIndex());
+    openLibrary(lib.id);
+  }, [openLibrary, t]);
+
+  const handleImportLibrary = useCallback((file: File) => {
+    file.text().then(text => {
+      try {
+        const lib = libraryService.importLibraryJson(text);
+        setLibraryIndex(libraryService.getLibraryIndex());
+        openLibrary(lib.id);
+      } catch (err) {
+        addLog('error', `Error al importar librería: ${err instanceof Error ? err.message : 'formato inválido'}`);
       }
     });
-    svgRowIdsRef.current.forEach(id => {
-      if (!currentSvgIds.has(id)) {
-        IndexedDBService.deleteSvgs(id).catch(err => console.error('[save] SVG delete failed:', err));
-      }
-    });
-    svgRowIdsRef.current = currentSvgIds;
-  }, [rows, isInitialized, config]);
+  }, [openLibrary]);
+
+  const handleBackupLibraries = useCallback(async () => {
+    const blob = await libraryService.backupAllLibraries();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = libraryService.backupFilename();
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleRenameLibrary = useCallback((id: string, newName: string) => {
+    libraryService.updateLibraryMeta(id, { name: newName, modifiedAt: new Date().toISOString() });
+    setLibraryIndex(libraryService.getLibraryIndex());
+  }, []);
+
+  const handleDuplicateLibrary = useCallback((id: string) => {
+    libraryService.duplicateLibrary(id);
+    setLibraryIndex(libraryService.getLibraryIndex());
+  }, []);
+
+  const handleDownloadLibrary = useCallback((id: string) => {
+    const json = libraryService.exportLibraryJson(id);
+    const meta = libraryService.getLibraryIndex().find(l => l.id === id);
+    const safeName = (meta?.name ?? 'libreria').replace(/[^a-z0-9_\-]/gi, '_').toLowerCase();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeName}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleDeleteLibrary = useCallback(async (id: string) => {
+    const meta = libraryService.getLibraryIndex().find(l => l.id === id);
+    const confirmMsg = (t('actions.deleteLibraryConfirm') || '¿Eliminar esta librería?').replace('{name}', meta?.name ?? id);
+    if (!window.confirm(confirmMsg)) return;
+    libraryService.deleteLibrary(id);
+    await Promise.all([
+      IndexedDBService.deleteBitmapsForLibrary(id),
+      IndexedDBService.deleteSvgsForLibrary(id),
+    ]);
+    setLibraryIndex(libraryService.getLibraryIndex());
+  }, [t]);
 
   // Load available libraries from index.json
   useEffect(() => {
@@ -581,7 +794,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         bitmapStatus: 'idle'
       }));
       setRows(prev => [...prev, ...newRows]);
-      setViewMode('list');
       addLog('success', t('messages.importSuccess', { count: newRows.length }));
     } catch (e) {
       addLog('error', t('messages.processingError'));
@@ -767,7 +979,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         } else {
           throw new Error(t('messages.fileFormatError'));
         }
-        setViewMode('list');
       } catch (err) {
         addLog('error', t('messages.importError'));
       }
@@ -787,7 +998,6 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     scrollToRowRef.current = newId;
     if (realText) autoCascadeRef.current = newId;
     setRows(prev => [newEntry, ...prev]);
-    setViewMode('list');
     handleOpenRowChange(newId);
     setShowConfig(false);
     setSearchValue('');
@@ -850,7 +1060,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           console.error('Failed to clear IndexedDB:', err);
         }
 
-        setViewMode('home');
+        closeLibrary();
         setShowLibraryMenu(false);
         addLog('info', t('messages.allCleared'));
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
@@ -875,19 +1085,22 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         const data = await response.json();
         addLog('success', `Biblioteca cargada: ${data.rows?.length || 0} pictogramas`);
 
-        // Load config if available
+        setRows(data.rows as RowData[]);
+        const newLib = libraryService.createLibrary(displayName);
+        libraryService.saveLibraryRows(newLib.id, (data.rows as RowData[]).map((r: RowData) => {
+          const { bitmap, rawSvg, structuredSvg, ...meta } = r;
+          return meta;
+        }));
         if (data.config) {
-          const loadedConfig = { ...data.config };
-          // Retrocompatibilidad: author → name
-          if (!loadedConfig.name && loadedConfig.author) {
-            loadedConfig.name = loadedConfig.author;
-            delete loadedConfig.author;
+          const loadedConfig = { ...config, ...data.config };
+          if (!loadedConfig.name && (data.config as any).author) {
+            loadedConfig.name = (data.config as any).author;
           }
           setConfig(prev => ({ ...prev, ...loadedConfig }));
+          libraryService.saveLibraryConfig(newLib.id, loadedConfig);
         }
-
-        setRows(data.rows as RowData[]);
-        setViewMode('list');
+        setLibraryIndex(libraryService.getLibraryIndex());
+        openLibrary(newLib.id);
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         addLog('error', `Error al cargar biblioteca: ${msg}`);
@@ -1626,13 +1839,80 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     pdfExportAbortRef.current?.abort();
   }, []);
 
+  const handleGenerateFromStep = useCallback((utterance: string, stepId: string, sequenceId: string) => {
+    const newId = `R_MANUAL_${Date.now()}`;
+    const newEntry: RowData = {
+      id: newId,
+      UTTERANCE: utterance,
+      status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle',
+    };
+    pendingStepRowsRef.current.set(newId, { sequenceId, stepId });
+    autoCascadeRef.current = newId;
+    setRows(prev => [newEntry, ...prev]);
+    // Stay in sequences view — the step updates in-place when the cascade completes
+  }, []);
+
+  const pictoDownloadCount = rows.filter(r => r.bitmap || r.rawSvg || r.structuredSvg).length;
+
+  const handleDownloadPictogramasZip = useCallback(async () => {
+    const zip = new JSZip();
+    rows.forEach(row => {
+      const safe = sanitizeFilename(row.UTTERANCE) || row.id;
+      if (row.bitmap) {
+        zip.file(`${safe}.png`, row.bitmap.split(',')[1], { base64: true });
+      }
+      const svg = row.structuredSvg || row.rawSvg;
+      if (svg) zip.file(`${safe}.svg`, svg);
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sanitizeFilename(config.name) || 'pictonet'}-pictogramas.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowLibraryMenu(false);
+  }, [rows, config.name]);
+
+  const handleSequencePrint = useCallback(async (seq: Sequence) => {
+    try {
+      const blob = await exportSequenceToPdf(seq, rows);
+      downloadPdf(blob, sequencePdfFilename(seq));
+    } catch (err) {
+      console.error('[sequence pdf]', err);
+    }
+  }, [rows]);
+
+  const handleSequenceDownloadZip = useCallback(async (seq: Sequence) => {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    const completeSteps = seq.steps
+      .filter(s => s.state === 'complete' && s.rowId)
+      .sort((a, b) => a.position - b.position);
+    completeSteps.forEach((step, i) => {
+      const row = rows.find(r => r.id === step.rowId);
+      if (!row) return;
+      const prefix = `${String(i + 1).padStart(2, '0')}-${sanitizeFilename(step.utterance ?? '') || step.id}`;
+      if (row.bitmap) zip.file(`${prefix}.png`, row.bitmap.split(',')[1], { base64: true });
+      const svg = row.structuredSvg || row.rawSvg;
+      if (svg) zip.file(`${prefix}.svg`, svg);
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sanitizeFilename(seq.name) || 'secuencia'}-pictogramas.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [rows]);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <a href="#mainContent" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:bg-violet-950 focus:text-white focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:rounded">
         Saltar al contenido principal
       </a>
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm" aria-label="Barra de herramientas">
-        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewMode('home'); setShowConfig(false); }}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { closeLibrary(); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.name}</h1>
@@ -1654,6 +1934,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         <nav id="header-actions" aria-label="Acciones principales" className="flex gap-2 items-center">
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
           <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
+          <input
+            ref={libImportRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleImportLibrary(f); e.target.value = ''; }}
+          />
 
           {/* Language Switcher */}
           <div id="lang-btn-group" ref={langBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
@@ -1678,7 +1965,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
           <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
-              onClick={() => setViewMode('list')}
+              onClick={() => { closeLibrary(); setShowConfig(false); }}
               className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-100 flex items-center gap-2"
               title={t('header.libraryTooltip')}
             >
@@ -2078,138 +2365,162 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       )}
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
-        {viewMode === 'list' && rows.length > 0 && (
-          <div id="sort-controls" className="mb-6 flex justify-between items-center gap-2">
-            {/* View mode switcher (left) — see specs/library-views.allium.
-                Default is list; explicit 'grid' is the only opt-in. */}
-            <div id="view-switcher" className="flex items-center gap-2">
-              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider mr-2">{t('library.viewMode')}</span>
-              <div className="inline-flex border border-slate-200 bg-white">
+        {/* Library toolbar — discrete text tabs, single row */}
+        {activeLibraryId !== null && (
+          <div id="library-toolbar" className="mb-6 flex items-center gap-4">
+            {/* Pictogramas tab + inline view toggle when active */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setLibraryContentMode('pictogramas')}
+                aria-pressed={libraryContentMode === 'pictogramas'}
+                className={`text-xs font-semibold uppercase tracking-wider transition-colors ${libraryContentMode === 'pictogramas' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                {t('library.contentTogglePictogramas')}
+              </button>
+              {libraryContentMode === 'pictogramas' && rows.length > 0 && (
+                <div id="view-switcher" className="flex items-center gap-1">
+                  <button
+                    onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
+                    title={t('library.viewList')}
+                    aria-label={t('library.viewList')}
+                    aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
+                    className={`transition-colors ${(config.libraryViewMode ?? 'list') === 'list' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                  >
+                    <List size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
+                    title={t('library.viewGrid')}
+                    aria-label={t('library.viewGrid')}
+                    aria-pressed={config.libraryViewMode === 'grid'}
+                    className={`transition-colors ${config.libraryViewMode === 'grid' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                  >
+                    <LayoutGrid size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Secuencias tab */}
+            <button
+              onClick={() => setLibraryContentMode('secuencias')}
+              aria-pressed={libraryContentMode === 'secuencias'}
+              className={`text-xs font-semibold uppercase tracking-wider transition-colors ${libraryContentMode === 'secuencias' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              {t('library.contentToggleSecuencias')}
+            </button>
+
+            {/* Sort order — pushed right, only for pictogramas with data */}
+            {libraryContentMode === 'pictogramas' && rows.length > 0 && (
+              <div className="ml-auto flex items-center gap-3">
                 <button
-                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'list' }))}
-                  className={`p-2 transition-all ${(config.libraryViewMode ?? 'list') === 'list' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewListTooltip')}
-                  aria-label={t('library.viewList')}
-                  aria-pressed={(config.libraryViewMode ?? 'list') === 'list'}
+                  onClick={() => setSortBy('alphabetical')}
+                  className={`text-xs uppercase tracking-wider transition-colors ${sortBy === 'alphabetical' ? 'text-slate-900 font-semibold' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                  <List size={14} aria-hidden="true" />
+                  {t('library.alphabetical')}
                 </button>
                 <button
-                  onClick={() => setConfig(prev => ({ ...prev, libraryViewMode: 'grid' }))}
-                  className={`p-2 transition-all border-l border-slate-200 ${config.libraryViewMode === 'grid' ? 'bg-violet-950 text-white' : 'text-slate-500 hover:text-violet-700 hover:bg-slate-50'}`}
-                  title={t('library.viewGridTooltip')}
-                  aria-label={t('library.viewGrid')}
-                  aria-pressed={config.libraryViewMode === 'grid'}
+                  onClick={() => setSortBy('completeness')}
+                  className={`text-xs uppercase tracking-wider transition-colors ${sortBy === 'completeness' ? 'text-slate-900 font-semibold' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                  <LayoutGrid size={14} aria-hidden="true" />
+                  {t('library.completeness')}
                 </button>
-              </div>
-            </div>
-            {/* Sort controls (right) */}
-            <div className="flex gap-2 items-center">
-              <span className="text-xs font-medium uppercase text-slate-500 tracking-wider self-center mr-2">{t('library.sortBy')}</span>
-              <button
-                onClick={() => setSortBy('alphabetical')}
-                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'alphabetical' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-              >
-                {t('library.alphabetical')}
-              </button>
-              <button
-                onClick={() => setSortBy('completeness')}
-                className={`px-3 py-1.5 text-xs font-medium uppercase tracking-wider border transition-all ${sortBy === 'completeness' ? 'bg-violet-950 text-white border-violet-950' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
-              >
-                {t('library.completeness')}
-              </button>
-            </div>
-          </div>
-        )}
-        {viewMode === 'home' ? (
-          <div id="home-view" className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
-            <div id="hero-area" className="space-y-4">
-              <div className="inline-flex gap-4 bg-orange-500 text-white px-6 py-2 text-xs font-medium uppercase tracking-[0.3em] shadow-lg rounded-xl">
-                <ScreenShare size={14} /> {t('header.betterOnLargeScreens')}
-              </div>
-              <p className="text-8xl font-black tracking-tighter text-slate-900 leading-none" aria-hidden="true">{config.name}</p>
-              <p className="text-slate-500 text-xl font-medium max-w-2xl mx-auto leading-relaxed">
-                {t('home.description')}
-              </p>
-            </div>
-
-            <div className="flex justify-center max-w-2xl mx-auto">
-              <div id="import-card" onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md">
-                <div className="text-white group-hover:scale-110 transition-transform"><FileText size={40} /></div>
-                <div>
-                  <h2 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h2>
-                  <div className="text-xs text-violet-400 font-mono mt-1">{t('home.importNamespace')}</div>
-                </div>
-                <p className="text-xs text-violet-300 leading-relaxed font-medium">{t('home.importDescription')}</p>
-                <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
-              </div>
-            </div>
-
-            {/* Example Libraries Section - Only show if libraries are available */}
-            {availableLibraries.length > 0 && (
-              <div className="space-y-6">
-                <div className="text-center space-y-2">
-                  <h2 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.exampleLibraries')}</h2>
-                  <p className="text-sm text-slate-500">{t('home.exampleLibrariesDescription')}</p>
-                </div>
-
-                <div id="example-libraries" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {availableLibraries.map((library: LibraryMetadata) => {
-                    const slug = library.filename.replace(/(_graph.*)?\.json$/, '');
-                    return (
-                      <div
-                        key={library.filename}
-                        onClick={() => loadLibrary(library.filename)}
-                        className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-violet-400 hover:shadow-lg transition-all cursor-pointer group"
-                      >
-                        {/* Thumbnail strip */}
-                        <div className="flex h-24 bg-slate-100">
-                          {[0, 1, 2].map(i => (
-                            <picture key={i} className="w-1/3 h-full">
-                              <source srcSet={`/libraries/thumbs-opt/${slug}_${i}.webp`} type="image/webp" />
-                              <img
-                                src={`/libraries/thumbs/${slug}_${i}.jpg`}
-                                alt=""
-                                width={240}
-                                height={240}
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                              />
-                            </picture>
-                          ))}
-                        </div>
-
-                        {/* Info */}
-                        <div className="p-4">
-                          <div className="flex items-start justify-between gap-2">
-                            <h4 className="font-bold text-sm text-slate-900 leading-tight">{library.name}</h4>
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
-                              {library.language}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400">
-                            <Globe size={10} />
-                            <span className="truncate">{library.location}</span>
-                          </div>
-                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
-                            <span className="text-xs text-violet-600 font-semibold">
-                              {library.items} {t('home.items')}
-                            </span>
-                            <span className="text-[10px] text-slate-400 uppercase tracking-wider font-medium group-hover:text-violet-600 transition-colors">
-                              {t('home.loadLibrary')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             )}
-
           </div>
+        )}
+        {activeLibraryId === null ? (
+          <LibraryHome
+            libraries={libraryIndex}
+            templates={availableLibraries}
+            sort={librarySort}
+            onSortChange={setLibrarySort}
+            storageUsed={storageInfo?.usage ?? 0}
+            storageQuota={storageInfo?.quota ?? 0}
+            onOpen={openLibrary}
+            onCreate={handleCreateLibrary}
+            onDuplicate={handleDuplicateLibrary}
+            onDownload={handleDownloadLibrary}
+            onRename={handleRenameLibrary}
+            onDelete={handleDeleteLibrary}
+            onImport={() => libImportRef.current?.click()}
+            onBackup={handleBackupLibraries}
+            onOpenTemplate={loadLibrary}
+          />
+        ) : libraryContentMode === 'secuencias' ? (
+          activeSequenceId ? (
+            <SequenceEditor
+              sequence={sequences.find(s => s.id === activeSequenceId) ?? sequences[0]}
+              libraryRows={rows}
+              onSave={seq => setSequences(prev => prev.map(s => s.id === seq.id ? seq : s))}
+              onBack={() => setActiveSequenceId(null)}
+              onGenerateRow={(utterance, stepId) => handleGenerateFromStep(utterance, stepId, activeSequenceId)}
+              onPrint={handleSequencePrint}
+              onDownloadZip={handleSequenceDownloadZip}
+              renderLinkedRow={(step, dragHandle, position, unlinkStep) => {
+                const row = rows.find(r => r.id === step.rowId);
+                if (!row) return null;
+                return (
+                  <RowComponent
+                    row={row}
+                    stepNumber={position}
+                    dragHandle={dragHandle}
+                    isOpen={openRowId === row.id}
+                    setIsOpen={v => { handleOpenRowChange(v ? row.id : null); if (v) setShowConfig(false); }}
+                    onUpdate={u => updateRowById(row.id, u)}
+                    onProcess={s => processStep(row.id, s)}
+                    onRegeneratePrompt={() => regeneratePrompt(row.id)}
+                    onStop={() => handleStopProcess(row.id)}
+                    onCascade={() => processCascade(row.id)}
+                    onDelete={unlinkStep}
+                    onFocus={s => setFocusMode({ step: s, rowId: row.id })}
+                    onLog={addLog}
+                    config={config}
+                    onConfigChange={partial => setConfig(prev => ({ ...prev, ...partial }))}
+                    onOpenEditor={source => openSVGEditor(row.id, source)}
+                    onOpenVectorizer={() => setVectorizerState({ isOpen: true, rowId: row.id })}
+                    onSettleField={() => settleRowEdits(row.id)}
+                    onRecordElementOp={(op, before, after) => recordElementOp(row.id, op, before, after)}
+                    onUpdateInterventionLog={log => updateRowInterventionLog(row.id, log)}
+                    onDiscardSvg={(phase, previousSvg) => {
+                      const flagKey: keyof RowData = phase === 'svg_raw' ? 'rawSvgDiscarded' : 'structuredSvgDiscarded';
+                      setRows(prev => prev.map(r => r.id !== row.id ? r : { ...r, [flagKey]: true }));
+                    }}
+                    phase5Model={sessionPhase5Model}
+                    onPhase5ModelChange={setSessionPhase5Model}
+                  />
+                );
+              }}
+            />
+          ) : (
+            <SequenceList
+              sequences={sequences}
+              libraryRows={rows}
+              onOpen={id => setActiveSequenceId(id)}
+              onCreate={() => {
+                const newSeq: Sequence = {
+                  id: crypto.randomUUID(),
+                  libraryId: activeLibraryId!,
+                  name: t('sequence.untitled'),
+                  steps: [1, 2, 3].map(pos => ({
+                    id: crypto.randomUUID(),
+                    position: pos,
+                    utterance: null,
+                    rowId: null,
+                    state: 'blank' as const,
+                  })),
+                  createdAt: new Date().toISOString(),
+                  modifiedAt: new Date().toISOString(),
+                };
+                setSequences(prev => [...prev, newSeq]);
+                setActiveSequenceId(newSeq.id);
+              }}
+              onDelete={id => setSequences(prev => prev.filter(s => s.id !== id))}
+              onRename={(id, name) => setSequences(prev => prev.map(s =>
+                s.id === id ? { ...s, name, modifiedAt: new Date().toISOString() } : s
+              ))}
+            />
+          )
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 animate-in fade-in duration-700">
             <div className="animate-bounce">
@@ -2458,9 +2769,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             setConfig(prev => ({ ...prev, visualStylePrompt: stylePrompt }));
           }}
           onImportPhrases={() => appendPhrasesInputRef.current?.click()}
-          onGoHome={() => setViewMode('home')}
+          onGoHome={() => closeLibrary()}
           onFocusSearch={() => {
-            setViewMode('list');
             setIsSearching(true);
           }}
         />
@@ -2612,6 +2922,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             >
               <Settings size={14} className="text-slate-500" /> {t('header.configureLibrary')}
             </button>
+            <button
+              onClick={() => { setLibraryContentMode('secuencias'); setShowLibraryMenu(false); }}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors border-b border-slate-100"
+            >
+              <List size={14} className="text-violet-600" /> {t('actions.mySequences')}
+            </button>
             <div className="px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500 tracking-wider tabular-nums">
               {rows.length} {rows.length === 1 ? t('actions.element') : t('actions.elements')}
             </div>
@@ -2640,7 +2956,14 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               disabled={pdfCount === 0 || pdfExportInFlight}
               className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <FileText size={14} className="text-violet-700" /> {t('actions.exportPictograms', { count: pdfCount })}
+              <FileText size={14} className="text-violet-700" /> {t('actions.downloadPrintables')}
+            </button>
+            <button
+              onClick={handleDownloadPictogramasZip}
+              disabled={pictoDownloadCount === 0}
+              className="w-full text-left px-4 py-3 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} className="text-emerald-600" /> {t('actions.downloadPictogramas', { count: pictoDownloadCount })}
             </button>
             <div className="border-t border-slate-100 my-1"></div>
             <button
@@ -2691,13 +3014,14 @@ const RowComponent: React.FC<{
   onRecordElementOp?: (op: ElementOpKind, before: unknown, after: unknown) => void;
   onUpdateInterventionLog?: (log: RowInterventionLog | null) => void;
   onDiscardSvg?: (phase: 'svg_raw' | 'svg_structured', previousSvg: string) => void;
-  /** Builds the portable JSON for "Copy Row" — wraps the row with the
-   *  schema header and the RowClipboardContext so it stays self-describing
-   *  when pasted outside of a library. */
   onBuildRowClipboard?: (row: RowData) => string;
   phase5Model?: string;
   onPhase5ModelChange?: (model: string) => void;
-}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard, phase5Model, onPhase5ModelChange }) => {
+  /** Sequence context: step number shown in left strip. */
+  stepNumber?: number;
+  /** Sequence context: drag handle element rendered in left strip. */
+  dragHandle?: React.ReactNode;
+}> = ({ row, isOpen, setIsOpen, onUpdate, onProcess, onRegeneratePrompt, onStop, onCascade, onDelete, onFocus, onLog, config, onConfigChange, onOpenEditor, onOpenVectorizer, onSettleField, onRecordElementOp, onUpdateInterventionLog, onDiscardSvg, onBuildRowClipboard, phase5Model, onPhase5ModelChange, stepNumber, dragHandle }) => {
   const { t } = useTranslation();
   const [elementsManuallyEdited, setElementsManuallyEdited] = React.useState(false);
   const [promptManuallyEdited, setPromptManuallyEdited] = React.useState(false);
@@ -2709,6 +3033,12 @@ const RowComponent: React.FC<{
   return (
     <div id={`picto-row-${row.id}`} className={`border transition-all duration-300 scroll-mt-24 ${isOpen ? 'ring-8 ring-slate-100 border-violet-950 bg-white' : 'hover:border-slate-300 bg-white shadow-sm'}`}>
       <div id={`row-header-${row.id}`} className="flex items-stretch pr-0 group min-h-[5rem]">
+        {stepNumber !== undefined && (
+          <div className="flex flex-col items-center justify-center gap-1 px-2 border-r border-slate-100 bg-slate-50 shrink-0 select-none">
+            {dragHandle}
+            <span className="text-[10px] font-bold text-slate-400 tabular-nums leading-none">{stepNumber}</span>
+          </div>
+        )}
         <div className="pl-6 py-6 pr-6 flex-1 flex items-center gap-6">
           <textarea
             value={row.UTTERANCE}
@@ -2740,22 +3070,20 @@ const RowComponent: React.FC<{
         </div>
         <div
           id={`picto-thumbnail-${row.id}`}
-          className="w-24 bg-slate-50 flex items-center justify-center group-hover:scale-110 group-hover:rounded group-hover:shadow-[0_2px_12px_rgba(0,0,0,0.1)] transition-all cursor-pointer overflow-hidden"
+          className="w-20 aspect-square bg-slate-50 shrink-0 flex items-center justify-center group-hover:scale-110 group-hover:rounded group-hover:shadow-[0_2px_12px_rgba(0,0,0,0.1)] transition-all cursor-pointer overflow-hidden"
           onClick={() => setIsOpen(!isOpen)}
         >
           {(() => {
-            const svg = validDownstreamSvg(row);
-            const bitmap = validBitmap(row);
-            return svg ? (
+            const svg = validStructuredSvg(row) || validRawSvg(row);
+            const bmp = validBitmap(row);
+            if (!svg && !bmp) return <div className="text-slate-200"><ImageIcon size={20} /></div>;
+            if (svg) return (
               <div
                 dangerouslySetInnerHTML={{ __html: injectSvgA11y(svg, row.UTTERANCE, row.prompt) }}
                 className="w-full h-full [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full"
               />
-            ) : bitmap ? (
-              <img src={bitmap} alt={row.UTTERANCE} className="w-full h-full object-contain" />
-            ) : (
-              <div className="text-slate-200"><ImageIcon size={20} /></div>
             );
+            return <img src={bmp!} alt={row.UTTERANCE} className="w-full h-full object-contain" />;
           })()}
         </div>
         <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 transition-transform duration-500 cursor-pointer self-center mx-6" />
