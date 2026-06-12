@@ -388,67 +388,73 @@ export function SequenceEditor({
   return (
     <div className="py-4 space-y-6 animate-in fade-in duration-300">
 
-      {/* Header */}
-      <div className="flex items-center gap-4">
+      {/* Header — back link above title, exports to the right */}
+      <div className="space-y-1">
+
+        {/* Back button — sits above the title, not beside it */}
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors shrink-0"
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-violet-700 transition-colors"
         >
-          <ChevronLeft size={14} />
+          <ChevronLeft size={12} />
           {t('sequence.back')}
         </button>
 
-        {/* Sequence name — amber underline on hover/edit, larger type */}
-        <div className="flex-1 min-w-0">
-          {isEditingName ? (
-            <input
-              ref={nameInputRef}
-              value={seqName}
-              onChange={e => setSeqName(e.target.value)}
-              onBlur={commitName}
-              onKeyDown={e => {
-                if (e.key === 'Enter') commitName();
-                if (e.key === 'Escape') { setSeqName(sequence.name); setIsEditingName(false); }
-              }}
-              autoFocus
-              className="w-full text-2xl font-bold text-slate-900 bg-transparent border-b-2 border-amber-400 outline-none leading-tight"
-            />
-          ) : (
-            <h2
-              onClick={startEditingName}
-              className="text-2xl font-bold text-slate-900 cursor-text border-b-2 border-transparent hover:border-amber-300 transition-colors truncate leading-tight"
-              title={seqName}
+        {/* Title row + export actions */}
+        <div className="flex items-center gap-4">
+
+          {/* Sequence name — same amber-bg style as the row utterance field */}
+          <div className="flex-1 min-w-0">
+            {isEditingName ? (
+              <input
+                ref={nameInputRef}
+                value={seqName}
+                onChange={e => setSeqName(e.target.value)}
+                onBlur={commitName}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitName();
+                  if (e.key === 'Escape') { setSeqName(sequence.name); setIsEditingName(false); }
+                }}
+                autoFocus
+                className="w-full text-2xl font-bold text-slate-900 bg-amber-50 border-none outline-none focus:ring-0 rounded px-1 leading-tight"
+              />
+            ) : (
+              <h2
+                onClick={startEditingName}
+                className="text-2xl font-bold text-slate-900 cursor-text hover:bg-amber-50 transition-colors rounded px-1 truncate leading-tight"
+                title={seqName}
+              >
+                {seqName}
+              </h2>
+            )}
+          </div>
+
+          {/* Export actions */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => onPrint(currentSeq)}
+              disabled={!canExport}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              {seqName}
-            </h2>
-          )}
+              <Printer size={14} />
+              {t('sequence.printSequence')}
+            </button>
+            <button
+              onClick={() => onDownloadZip(currentSeq)}
+              disabled={!canExport}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              {t('sequence.downloadPictogramas')}
+            </button>
+          </div>
         </div>
 
-        {/* Export actions */}
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => onPrint(currentSeq)}
-            disabled={!canExport}
-            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <Printer size={14} />
-            {t('sequence.printSequence')}
-          </button>
-          <button
-            onClick={() => onDownloadZip(currentSeq)}
-            disabled={!canExport}
-            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <Download size={14} />
-            {t('sequence.downloadPictogramas')}
-          </button>
-        </div>
+        {/* Step count — below the title row */}
+        <p className="text-xs text-slate-400 px-1">
+          {t('sequence.stepsCount', { count: steps.length, complete: completeSteps.length })}
+        </p>
       </div>
-
-      {/* Step count */}
-      <p className="text-xs text-slate-400">
-        {t('sequence.stepsCount', { count: steps.length, complete: completeSteps.length })}
-      </p>
 
       {/* Sortable step list */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
