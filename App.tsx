@@ -590,14 +590,47 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
   }, [rows, isInitialized, config, activeLibraryId]);
 
-  const openLibrary = useCallback((id: string) => {
+  const openLibrary = useCallback((id: string, { skipRowLoad = false }: { skipRowLoad?: boolean } = {}) => {
     localStorage.setItem(libraryService.ACTIVE_LIBRARY_KEY, id);
+
+    if (!skipRowLoad) {
+      // Load rows + config synchronously, in the same call as setActiveLibraryId.
+      // React 18 auto-batches all setState calls in the same synchronous function,
+      // so the save effect fires exactly once — with the correct rows already in
+      // state — preventing it from overwriting the library with empty rows.
+      const savedRows = libraryService.getLibraryRows(id);
+      const savedConfig = libraryService.getLibraryConfig(id);
+      setRows(savedRows);
+      if (savedConfig) setConfig(prev => ({ ...prev, ...savedConfig }));
+
+      // Merge IDB binaries (SVGs / bitmaps) asynchronously after the sync load.
+      Promise.all([
+        IndexedDBService.getAllBitmapsForLibrary(id),
+        IndexedDBService.getAllSvgsForLibrary(id),
+      ]).then(([bitmapsMap, svgsMap]) => {
+        if (bitmapsMap.size > 0 || svgsMap.size > 0) {
+          setRows(prev => prev.map((row: RowData) => ({
+            ...row,
+            bitmap: bitmapsMap.get(row.id) ?? row.bitmap,
+            rawSvg: svgsMap.get(row.id)?.rawSvg ?? row.rawSvg,
+            structuredSvg: svgsMap.get(row.id)?.structuredSvg ?? row.structuredSvg,
+          })));
+        }
+        const seeded = new Set<string>();
+        svgsMap.forEach((_v, rowId) => { seeded.add(rowId); });
+        svgRowIdsRef.current = seeded;
+      }).catch(err => console.error('[openLibrary] IDB load failed:', err));
+    }
+
     setActiveLibraryId(id);
     setLibraryContentMode('pictogramas');
   }, []);
 
   const closeLibrary = useCallback(() => {
     localStorage.removeItem(libraryService.ACTIVE_LIBRARY_KEY);
+    // Clear the SVG-row tracker so the save effect for the next library
+    // does not attempt to delete SVGs belonging to this (now closed) library.
+    svgRowIdsRef.current = new Set();
     setActiveLibraryId(null);
     setRows([]);
     setSequences([]);
@@ -1100,7 +1133,10 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           libraryService.saveLibraryConfig(newLib.id, loadedConfig);
         }
         setLibraryIndex(libraryService.getLibraryIndex());
-        openLibrary(newLib.id);
+        // skipRowLoad: rows were already set via setRows(data.rows) above,
+        // which includes embedded bitmaps from the template JSON. Loading from
+        // localStorage would strip them; the save effect will persist them to IDB.
+        openLibrary(newLib.id, { skipRowLoad: true });
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         addLog('error', `Error al cargar biblioteca: ${msg}`);
