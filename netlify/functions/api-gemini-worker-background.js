@@ -1,18 +1,15 @@
 /**
- * Netlify Background Function: Gemini Image Generation Proxy
+ * Netlify Background Function: Gemini Image Generation Proxy (Vertex AI)
  *
- * Generates an image via the Gemini API and stores the result in Netlify Blobs
- * for the client to poll via api-gemini-poll.
- *
- * Implements: GeminiKeySelection rule (usage-enforcement.allium) —
- *   GEMINI_LOCAL_API_KEY for local dev, GEMINI_PUBLIC_API_KEY for deployed.
- *   GEMINI_PUBLIC_API_KEY must be restricted by API restriction (not HTTP referrer).
+ * Generates an image via Vertex AI (service-account OAuth, no static API key)
+ * and stores the result in Netlify Blobs for the client to poll via
+ * api-gemini-poll. Auth: Identity JWT verified against GoTrue (_shared/identity.js).
  */
 
 import { checkAndCharge, logCall } from './_shared/usage.js';
 import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+import { verifyIdentityUser } from './_shared/identity.js';
+import { getVertexAccessToken, vertexModelUrl } from './_shared/vertex.js';
 
 const ALLOWED_MODELS = [
   'gemini-2.5-flash-image',
@@ -45,45 +42,13 @@ export const handler = async (event, context) => {
   const store = getStore('gemini-jobs');
   await store.setJSON(jobId, { pending: true });
 
-  let user = context.clientContext?.user;
-  const isLocalDev = process.env.NETLIFY_DEV === 'true';
-
-  // Background functions in production do not populate context.clientContext;
-  // reconstruct user from the Authorization header JWT.
-  if (!user && !isLocalDev) {
-    const authHeader = event.headers?.authorization || event.headers?.Authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.substring(7);
-        const parts = token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-          user = { email: payload.email, sub: payload.sub };
-        }
-      } catch (err) {
-        console.error('[api-gemini-worker] Failed to decode JWT:', err.message);
-      }
-    }
-  }
-
-  const email = user?.email ?? 'dev';
-
-  if (!isLocalDev && !user) {
+  // Verify the Identity JWT signature via GoTrue (never trust a decoded payload).
+  const user = await verifyIdentityUser(event, context);
+  if (!user) {
     await store.setJSON(jobId, { error: 'Unauthorized' });
     return;
   }
-
-  // GeminiKeySelection rule: local → GEMINI_LOCAL_API_KEY, deployed → GEMINI_PUBLIC_API_KEY
-  const apiKey = isLocalDev
-    ? process.env.GEMINI_LOCAL_API_KEY
-    : process.env.GEMINI_PUBLIC_API_KEY;
-
-  if (!apiKey) {
-    console.error('[api-gemini-worker] Gemini API key not configured');
-    await store.setJSON(jobId, { error: 'Server configuration error' });
-    return;
-  }
-
+  const email = user.email ?? 'dev';
 
   // Quota check — 1 unit per image generation call (usage-enforcement.allium)
   const quota = await checkAndCharge(email, 1);
@@ -103,15 +68,15 @@ export const handler = async (event, context) => {
   const startMs = Date.now();
 
   try {
-    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`;
-    // Add Referer so HTTP-referrer-restricted keys are not blocked by Google.
-    // The proper fix is to switch GEMINI_PUBLIC_API_KEY from HTTP-referrer to
-    // API restriction in Google Cloud Console (see .env.example), but this
-    // header ensures server-side calls are accepted either way.
-    const deployUrl = process.env.URL || 'https://next.pictos.net';
+    // Vertex AI: short-lived OAuth token instead of a static API key.
+    const accessToken = await getVertexAccessToken();
+    const url = vertexModelUrl(model);
     const geminiRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Referer': `${deployUrl}/` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {

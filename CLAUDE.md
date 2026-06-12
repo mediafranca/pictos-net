@@ -93,6 +93,8 @@ Recraft V4.1 delivers native SVG so VTracer is no longer needed.
 - Phase 4 set-of-marks: paths get numeric IDs in a rasterized PNG → Claude assigns each ID to a semantic element
 - Local SVG assembly: Claude returns only `{ path_id → element_id }` map; geometry manipulation is all local
 - Quota: Recraft = 1 unit/call, Sonnet = 1 unit/call, Haiku = 0 units (free); default 100/user/day via Netlify Blobs
+- Gemini auth: Vertex AI with service-account OAuth (`_shared/vertex.js`), no static API key. Env: `GOOGLE_SERVICE_ACCOUNT_JSON` (single line), optional `VERTEX_PROJECT_ID`/`VERTEX_LOCATION`
+- Background functions MUST verify the Identity JWT via `_shared/identity.js` (GoTrue `/user` endpoint) — never trust a decoded payload
 
 ## Pre-existing TS Errors (not my concern)
 

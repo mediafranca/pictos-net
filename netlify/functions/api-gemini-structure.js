@@ -11,8 +11,7 @@
 
 import { logCall } from './_shared/usage.js';
 import { connectBlobs } from './_shared/blobs.js';
-
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+import { getVertexAccessToken, vertexModelUrl } from './_shared/vertex.js';
 
 const ALLOWED_MODELS = [
   'gemini-2.5-pro',
@@ -85,15 +84,6 @@ async function handleRequest(event, context) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
   }
 
-  const apiKey = isLocalDev
-    ? process.env.GEMINI_LOCAL_API_KEY
-    : process.env.GEMINI_PUBLIC_API_KEY;
-
-  if (!apiKey) {
-    console.error('[api-gemini-structure] Gemini API key not configured');
-    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server configuration error' }) };
-  }
-
   let model, max_tokens, system, tools, tool_choice, messages;
   try {
     ({ model, max_tokens, system, tools, tool_choice, messages } = JSON.parse(event.body));
@@ -155,20 +145,19 @@ async function handleRequest(event, context) {
     maxOutputTokens: Math.min(max_tokens || 8192, 8192),
   };
 
-  // ── Call Gemini API ────────────────────────────────────────────────────────
-
-  const deployUrl = process.env.URL || 'https://next.pictos.net';
-  const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`;
+  // ── Call Gemini via Vertex AI (service-account OAuth, no static API key) ──
 
   const startMs = Date.now();
   let geminiData, ok = true, errorMsg;
 
   try {
+    const accessToken = await getVertexAccessToken();
+    const url = vertexModelUrl(model);
     const geminiRes = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Referer': `${deployUrl}/`,
+        'Authorization': `Bearer ${accessToken}`,
       },
       body: JSON.stringify(geminiBody),
     });

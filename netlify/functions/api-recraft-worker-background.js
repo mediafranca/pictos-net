@@ -7,6 +7,7 @@
 
 import { checkAndCharge, logCall } from './_shared/usage.js';
 import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
+import { verifyIdentityUser } from './_shared/identity.js';
 
 const RECRAFT_API_URL = 'https://external.api.recraft.ai/v1/images/generations';
 
@@ -26,6 +27,8 @@ export const handler = async (event, context) => {
     return;
   }
 
+  const store = getStore('recraft-jobs');
+
   const ALLOWED_MODELS = ['recraftv4_1', 'recraftv4_1_vector'];
   if (!ALLOWED_MODELS.includes(model)) {
     console.error(`[api-recraft-worker] Disallowed model: ${model}`);
@@ -33,44 +36,18 @@ export const handler = async (event, context) => {
     return;
   }
 
-  const store = getStore('recraft-jobs');
-  
+
   // Set initial status to pending so poller knows it started
   await store.setJSON(jobId, { pending: true });
 
-  let user = context.clientContext?.user;
-  const isLocalDev = process.env.NETLIFY_DEV === 'true';
-
-  // In Netlify Background Functions in production, context.clientContext is missing.
-  // We reconstruct the user context from the Authorization header JWT.
-  if (!user && !isLocalDev) {
-    const authHeader = event.headers?.authorization || event.headers?.Authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.substring(7);
-        const parts = token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-          user = {
-            email: payload.email,
-            sub: payload.sub,
-            user_metadata: payload.user_metadata,
-            app_metadata: payload.app_metadata,
-          };
-        }
-      } catch (err) {
-        console.error('[api-recraft-worker] Failed to decode JWT from Authorization header:', err.message);
-      }
-    }
-  }
-
-  const email = user?.email ?? 'dev';
-  const roles = user?.app_metadata?.roles ?? [];
-
-  if (!isLocalDev && !user) {
+  // Verify the Identity JWT signature via GoTrue (never trust a decoded payload).
+  const user = await verifyIdentityUser(event, context);
+  if (!user) {
     await store.setJSON(jobId, { error: 'Unauthorized' });
     return;
   }
+  const email = user.email ?? 'dev';
+  const roles = user.app_metadata?.roles ?? [];
 
   const apiKey = process.env.RECRAFT_API_KEY;
   if (!apiKey) {
