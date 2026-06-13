@@ -9,292 +9,64 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  ChevronLeft, GripVertical, X, Printer, Download, Plus, Loader2,
+  ChevronLeft, GripVertical, X, Printer, Download, Plus,
 } from 'lucide-react';
-import { Sequence, Step, StepState, RowData } from '../types';
+import { Sequence, Step } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 
 interface SequenceEditorProps {
   sequence: Sequence;
-  libraryRows: RowData[];
   onSave: (seq: Sequence) => void;
   onBack: () => void;
-  onGenerateRow: (utterance: string, stepId: string) => void;
+  /** App.tsx creates a blank RowData + returns a Step already linked to it. */
+  onAddStep: () => Step;
   onPrint: (seq: Sequence) => void;
   onDownloadZip: (seq: Sequence) => void;
-  /** When provided, linked steps (step.rowId set) are rendered via this instead of SortableStep.
-   *  Receives the step, a drag handle element, 1-based position, and an unlinkStep callback. */
-  renderLinkedRow?: (step: Step, dragHandle: React.ReactNode, position: number, unlinkStep: () => void) => React.ReactNode;
-}
-
-// ── StepThumbnail ─────────────────────────────────────────────────────────────
-// Always occupies the same slot; renders image, spinner placeholder, or empty.
-
-function StepThumbnail({ row, generating }: { row: RowData | null; generating?: boolean }) {
-  if (generating && !row) {
-    return (
-      <div className="w-14 h-14 rounded border border-slate-200 bg-slate-50 shrink-0 flex items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-violet-300" />
-      </div>
-    );
-  }
-  if (!row) {
-    return <div className="w-14 h-14 rounded border border-dashed border-slate-200 bg-slate-50 shrink-0" />;
-  }
-  const svg = row.structuredSvg || row.rawSvg;
-  if (svg) {
-    return (
-      <img
-        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
-        className="w-14 h-14 object-contain bg-white rounded border border-slate-200 shrink-0"
-        alt=""
-      />
-    );
-  }
-  if (row.bitmap) {
-    return (
-      <img
-        src={row.bitmap}
-        className="w-14 h-14 object-contain bg-white rounded border border-slate-200 shrink-0"
-        alt=""
-      />
-    );
-  }
-  // Row exists but hasn't produced imagery yet (still generating)
-  return (
-    <div className="w-14 h-14 rounded border border-slate-200 bg-slate-50 shrink-0 flex items-center justify-center">
-      <Loader2 size={18} className="animate-spin text-violet-300" />
-    </div>
-  );
+  /** Renders every step; receives the step, drag handle, 1-based position, and
+   *  a callback to remove the step (and optionally its linked row). */
+  renderLinkedRow?: (
+    step: Step,
+    dragHandle: React.ReactNode,
+    position: number,
+    deleteStep: () => void,
+  ) => React.ReactNode;
 }
 
 // ── SortableStep ──────────────────────────────────────────────────────────────
+// Thin sortable wrapper — all step content is delegated to renderLinkedRow.
 
-interface SortableStepProps {
+function SortableStep({ step, onDelete, renderLinkedRow }: {
   step: Step;
-  libraryRows: RowData[];
-  onUpdate: (s: Step) => void;
   onDelete: () => void;
-  onGenerate: (utterance: string) => void;
-  renderLinkedRow?: SequenceEditorProps['renderLinkedRow'];
-}
-
-function SortableStep({ step, libraryRows, onUpdate, onDelete, onGenerate, renderLinkedRow }: SortableStepProps) {
-  const { t } = useTranslation();
+  renderLinkedRow: SequenceEditorProps['renderLinkedRow'];
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: step.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
 
-  // When a row is linked and the caller provides renderLinkedRow, delegate rendering entirely.
-  if (step.rowId && renderLinkedRow) {
-    const dragHandle = (
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing touch-none"
-        tabIndex={-1}
-        aria-label="Arrastrar"
-      >
-        <GripVertical size={14} />
-      </button>
-    );
-    return (
-      <div ref={setNodeRef} style={style}>
-        {renderLinkedRow(step, dragHandle, step.position, () => onUpdate({ ...step, rowId: null, state: 'blank' as const }))}
-      </div>
-    );
-  }
-
-  const [inputValue, setInputValue] = useState(step.utterance ?? '');
-  const [suggestions, setSuggestions] = useState<RowData[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [selectedIdx, setSelectedIdx] = useState(0);
-  const [generating, setGenerating] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Sync utterance when step is updated externally (e.g. generation completed)
-  useEffect(() => {
-    setInputValue(step.utterance ?? '');
-    if (step.state === 'complete') setGenerating(false);
-  }, [step.utterance, step.state]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!showDropdown) return;
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showDropdown]);
-
-  const handleInputChange = (value: string) => {
-    setInputValue(value);
-    setGenerating(false);
-
-    if (!value.trim()) {
-      onUpdate({ ...step, utterance: null, rowId: null, state: 'blank' });
-      setSuggestions([]);
-      setShowDropdown(false);
-      return;
-    }
-
-    const lower = value.toLowerCase();
-    const exact = libraryRows.find(r => r.UTTERANCE.toLowerCase() === lower);
-
-    if (exact) {
-      onUpdate({ ...step, utterance: exact.UTTERANCE, rowId: exact.id, state: 'complete' });
-      setSuggestions([]);
-      setShowDropdown(false);
-      return;
-    }
-
-    const matches = libraryRows
-      .filter(r => r.UTTERANCE.toLowerCase().includes(lower))
-      .slice(0, 8);
-
-    const newState: StepState = value.trim() ? 'pending' : 'blank';
-    onUpdate({ ...step, utterance: value, rowId: null, state: newState });
-    setSuggestions(matches);
-    setShowDropdown(matches.length > 0);
-    setSelectedIdx(0);
-  };
-
-  const handleSelect = (row: RowData) => {
-    setInputValue(row.UTTERANCE);
-    onUpdate({ ...step, utterance: row.UTTERANCE, rowId: row.id, state: 'complete' });
-    setSuggestions([]);
-    setShowDropdown(false);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showDropdown) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, suggestions.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (suggestions[selectedIdx]) handleSelect(suggestions[selectedIdx]); }
-    else if (e.key === 'Escape') setShowDropdown(false);
-  };
-
-  const handleGenerate = () => {
-    if (!step.utterance) return;
-    setGenerating(true);
-    setSuggestions([]);
-    setShowDropdown(false);
-    onGenerate(step.utterance);
-  };
-
-  // Find the linked row (for thumbnail and status)
-  const linkedRow = step.rowId ? libraryRows.find(r => r.id === step.rowId) ?? null : null;
-
-  // A linked row that hasn't finished generating yet
-  const rowIsProcessing = linkedRow && (
-    linkedRow.nluStatus === 'processing' ||
-    linkedRow.visualStatus === 'processing' ||
-    linkedRow.bitmapStatus === 'processing'
+  const dragHandle = (
+    <button
+      {...attributes}
+      {...listeners}
+      className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing touch-none"
+      tabIndex={-1}
+      aria-label="Arrastrar"
+    >
+      <GripVertical size={14} />
+    </button>
   );
 
-  const isGenerating = generating || !!rowIsProcessing;
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-stretch bg-white border border-slate-200 rounded-lg hover:border-violet-300 transition-colors group"
-    >
-      {/* Left strip: drag handle + step number */}
-      <div className="flex flex-col items-center justify-center gap-1 px-2 py-3 border-r border-slate-100 shrink-0">
-        <button
-          {...attributes}
-          {...listeners}
-          className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing touch-none"
-          tabIndex={-1}
-          aria-label="Arrastrar"
-        >
-          <GripVertical size={14} />
-        </button>
-        <span className="text-[10px] font-bold text-slate-400 leading-none">{step.position}</span>
-      </div>
-
-      {/* Thumbnail slot — always rendered for stable layout */}
-      <div className="flex items-center px-3 py-3 shrink-0">
-        <StepThumbnail row={linkedRow} generating={isGenerating && !linkedRow} />
-      </div>
-
-      {/* Utterance input + autocomplete dropdown */}
-      <div className="flex-1 min-w-0 flex items-center py-3 pr-1" ref={dropdownRef}>
-        <div className="relative w-full">
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputValue}
-            onChange={e => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => { if (suggestions.length > 0) setShowDropdown(true); }}
-            placeholder={t('sequence.stepPlaceholder')}
-            disabled={generating}
-            className={`w-full text-sm border-b-2 outline-none py-0.5 bg-transparent transition-colors
-              ${generating
-                ? 'border-slate-100 text-slate-400 cursor-not-allowed'
-                : step.state === 'blank'
-                ? 'border-slate-200 text-slate-900 placeholder:text-slate-300 focus:border-amber-300'
-                : 'border-amber-300 text-slate-900 focus:border-amber-400'
-              }`}
-          />
-          {showDropdown && suggestions.length > 0 && (
-            <div className="absolute z-30 left-0 top-full mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-              {suggestions.map((row, i) => (
-                <button
-                  key={row.id}
-                  onMouseDown={e => { e.preventDefault(); handleSelect(row); }}
-                  onMouseEnter={() => setSelectedIdx(i)}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
-                    i === selectedIdx ? 'bg-violet-50 text-violet-900' : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {(row.structuredSvg || row.rawSvg || row.bitmap) && (
-                    <span className="w-6 h-6 shrink-0 inline-block">
-                      {(row.structuredSvg || row.rawSvg) ? (
-                        <img
-                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(row.structuredSvg || row.rawSvg || '')}`}
-                          className="w-6 h-6 object-contain"
-                          alt=""
-                        />
-                      ) : row.bitmap ? (
-                        <img src={row.bitmap} className="w-6 h-6 object-contain" alt="" />
-                      ) : null}
-                    </span>
-                  )}
-                  <span className="truncate">{row.UTTERANCE}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right actions */}
-      <div className="flex items-center gap-1.5 px-3 py-3 shrink-0">
-        {isGenerating ? (
-          <Loader2 size={14} className="animate-spin text-violet-400" />
-        ) : step.state === 'pending' && step.utterance ? (
-          <button
-            onClick={handleGenerate}
-            className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-violet-950 text-white hover:bg-violet-800 transition-colors rounded"
-          >
-            {t('sequence.generateStep')}
-          </button>
-        ) : null}
-
-        <button
-          onClick={onDelete}
-          className="p-1 text-slate-300 hover:text-red-500 rounded transition-colors opacity-0 group-hover:opacity-100"
-          aria-label="Eliminar paso"
-        >
-          <X size={14} />
-        </button>
-      </div>
+    <div ref={setNodeRef} style={style}>
+      {renderLinkedRow
+        ? renderLinkedRow(step, dragHandle, step.position, onDelete)
+        : (
+          <div className="flex items-center gap-2 p-3 border border-dashed border-slate-200 rounded text-xs text-slate-400">
+            {dragHandle}
+            <span className="flex-1">Paso {step.position}</span>
+            <button onClick={onDelete} className="p-1 hover:text-red-500"><X size={12} /></button>
+          </div>
+        )
+      }
     </div>
   );
 }
@@ -302,7 +74,7 @@ function SortableStep({ step, libraryRows, onUpdate, onDelete, onGenerate, rende
 // ── SequenceEditor ────────────────────────────────────────────────────────────
 
 export function SequenceEditor({
-  sequence, libraryRows, onSave, onBack, onGenerateRow, onPrint, onDownloadZip, renderLinkedRow,
+  sequence, onSave, onBack, onAddStep, onPrint, onDownloadZip, renderLinkedRow,
 }: SequenceEditorProps) {
   const { t } = useTranslation();
   const [steps, setSteps] = useState<Step[]>(sequence.steps);
@@ -316,12 +88,26 @@ export function SequenceEditor({
     setSeqName(sequence.name);
   }, [sequence.id]);
 
-  // Sync external step updates (e.g., generation completed)
+  // Sync external step updates (e.g., row generation completed in App.tsx).
+  // Uses a functional updater to break the auto-save ↔ sync feedback loop:
+  // when App.tsx reflects our own save back as a new array reference with
+  // identical data, returning `prev` prevents a re-render and no further
+  // auto-save fires.
   useEffect(() => {
-    setSteps(sequence.steps);
+    setSteps(prev => {
+      if (prev.length !== sequence.steps.length) return sequence.steps;
+      const changed = sequence.steps.some((s, i) =>
+        prev[i].id !== s.id ||
+        prev[i].rowId !== s.rowId ||
+        prev[i].utterance !== s.utterance ||
+        prev[i].state !== s.state ||
+        prev[i].position !== s.position
+      );
+      return changed ? sequence.steps : prev;
+    });
   }, [sequence.steps]);
 
-  // Auto-save on every change
+  // Auto-save on every local change
   useEffect(() => {
     onSave({
       ...sequence,
@@ -348,10 +134,6 @@ export function SequenceEditor({
     });
   };
 
-  const updateStep = useCallback((id: string, patch: Partial<Step>) => {
-    setSteps(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
-  }, []);
-
   const deleteStep = useCallback((id: string) => {
     setSteps(prev =>
       prev.filter(s => s.id !== id).map((s, i) => ({ ...s, position: i + 1 }))
@@ -359,14 +141,8 @@ export function SequenceEditor({
   }, []);
 
   const addStep = () => {
-    const newStep: Step = {
-      id: crypto.randomUUID(),
-      position: steps.length + 1,
-      utterance: null,
-      rowId: null,
-      state: 'blank',
-    };
-    setSteps(prev => [...prev, newStep]);
+    const newStep = onAddStep();
+    setSteps(prev => [...prev, { ...newStep, position: prev.length + 1 }]);
   };
 
   const commitName = () => {
@@ -377,12 +153,11 @@ export function SequenceEditor({
 
   const startEditingName = () => {
     setIsEditingName(true);
-    // Focus after state update renders the input
     setTimeout(() => nameInputRef.current?.focus(), 0);
   };
 
-  const completeSteps = steps.filter(s => s.state === 'complete');
-  const canExport = completeSteps.length > 0;
+  const linkedSteps = steps.filter(s => s.rowId !== null);
+  const canExport = linkedSteps.length > 0;
   const currentSeq = { ...sequence, name: seqName, steps, modifiedAt: new Date().toISOString() };
 
   return (
@@ -452,7 +227,7 @@ export function SequenceEditor({
 
         {/* Step count — below the title row */}
         <p className="text-xs text-slate-400 px-1">
-          {t('sequence.stepsCount', { count: steps.length, complete: completeSteps.length })}
+          {t('sequence.stepsCount', { count: steps.length, complete: linkedSteps.length })}
         </p>
       </div>
 
@@ -464,10 +239,7 @@ export function SequenceEditor({
               <SortableStep
                 key={step.id}
                 step={step}
-                libraryRows={libraryRows}
-                onUpdate={updated => updateStep(step.id, updated)}
                 onDelete={() => deleteStep(step.id)}
-                onGenerate={utterance => onGenerateRow(utterance, step.id)}
                 renderLinkedRow={renderLinkedRow}
               />
             ))}

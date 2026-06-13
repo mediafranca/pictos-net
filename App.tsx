@@ -18,7 +18,7 @@ import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
 import * as Gemini from './services/geminiService';
 import { QuotaExceededError } from './services/aiClient';
-import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, migrateGenerationModel, GENERATION_MODEL_LABELS, Phase3Result, getModelFamily } from './types';
+import { GenerationModel, DEFAULT_GENERATION_MODEL, migrateImageModel, migrateGenerationModel, GENERATION_MODEL_LABELS, INOPERATIVE_GENERATION_MODELS, Phase3Result, getModelFamily } from './types';
 import { structureSVG } from './services/svgStructureService';
 import * as Recording from './services/interventionRecording';
 import { validBitmap, validRawSvg, validStructuredSvg, validDownstreamSvg, hasValidBitmap, hasAnyValidArtifact, hasAnyValidSvg } from './utils/rowArtifacts';
@@ -273,6 +273,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const scrollToRowRef = useRef<string | null>(null);
   const [activeLibraryId, setActiveLibraryId] = useState<string | null>(null);
+  const [viewingLibraryHome, setViewingLibraryHome] = useState(true);
   const [libraryIndex, setLibraryIndex] = useState<LibraryMeta[]>([]);
   const [sortBy, setSortBy] = useState<'alphabetical' | 'completeness'>('alphabetical');
   const [config, setConfig] = useState<GlobalConfig>({
@@ -380,6 +381,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const appendPhrasesInputRef = useRef<HTMLInputElement>(null);
+  // Separate ref for importing phrases from the home portada (no active library).
+  // Auto-opens the most recent library (or creates one) before processing.
+  const homeImportRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
   const autoCascadeRef = useRef<string | null>(null);
 
@@ -493,6 +497,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         setRows(loadedRows);
       }
       setActiveLibraryId(targetId);
+      setViewingLibraryHome(false);
       setIsInitialized(true);
 
       // ── Step 4: binary data (IndexedDB, async → merge when ready) ────────────
@@ -541,6 +546,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         libraryService.updateLibraryMeta(activeLibraryId, {
           modifiedAt: new Date().toISOString(),
           pictogramCount: rowsMeta.length,
+          language: config.lang,
         });
         setLibraryIndex(libraryService.getLibraryIndex());
       } catch (error) {
@@ -624,6 +630,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
     setActiveLibraryId(id);
     setLibraryContentMode('pictogramas');
+    setViewingLibraryHome(false);
   }, []);
 
   const closeLibrary = useCallback(() => {
@@ -635,6 +642,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     setRows([]);
     setSequences([]);
     setActiveSequenceId(null);
+    setViewingLibraryHome(true);
   }, []);
 
   // ── Library home + content mode ───────────────────────────────────────────
@@ -1570,7 +1578,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     }
 
     const row = rows.find(r => r.id === rowId);
-    if (!row) return;
+    if (!row || !row.UTTERANCE.trim()) return;
 
     stopFlags.current[row.id] = false;
     addLog('info', t('messages.cascadeStarted', { utterance: row.UTTERANCE }));
@@ -1888,6 +1896,25 @@ const App: React.FC<AppProps> = ({ authUser }) => {
     // Stay in sequences view — the step updates in-place when the cascade completes
   }, []);
 
+  /** Creates a blank RowData and returns a Step already linked to it.
+   *  Called by SequenceEditor when the user clicks "Añadir paso". */
+  const handleAddSequenceStep = useCallback((): Step => {
+    const rowId = `R_SEQ_${Date.now()}`;
+    const newRow: RowData = {
+      id: rowId,
+      UTTERANCE: '',
+      status: 'idle', nluStatus: 'idle', visualStatus: 'idle', bitmapStatus: 'idle',
+    };
+    setRows(prev => [...prev, newRow]);
+    return {
+      id: crypto.randomUUID(),
+      position: 0,   // SequenceEditor will set the final 1-based position
+      utterance: null,
+      rowId,
+      state: 'complete',
+    };
+  }, []);
+
   const pictoDownloadCount = rows.filter(r => r.bitmap || r.rawSvg || r.structuredSvg).length;
 
   const handleDownloadPictogramasZip = useCallback(async () => {
@@ -1971,6 +1998,33 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={handleImportProject} />
           <input type="file" ref={appendPhrasesInputRef} className="hidden" accept=".txt" onChange={e => e.target.files?.[0]?.text().then(processPhrases)} />
           <input
+            type="file"
+            ref={homeImportRef}
+            className="hidden"
+            accept=".txt"
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const text = await file.text();
+              e.target.value = '';
+              if (!activeLibraryId) {
+                let targetId: string;
+                if (libraryIndex.length > 0) {
+                  const sorted = [...libraryIndex].sort((a, b) =>
+                    new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime()
+                  );
+                  targetId = sorted[0].id;
+                } else {
+                  const lib = libraryService.createLibrary('Mi librería');
+                  setLibraryIndex(libraryService.getLibraryIndex());
+                  targetId = lib.id;
+                }
+                await openLibrary(targetId);
+              }
+              processPhrases(text);
+            }}
+          />
+          <input
             ref={libImportRef}
             type="file"
             accept=".json"
@@ -2001,7 +2055,16 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
           <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
-              onClick={() => { closeLibrary(); setShowConfig(false); }}
+              onClick={() => {
+                if (activeLibraryId) {
+                  setViewingLibraryHome(false);
+                  setActiveSequenceId(null);
+                  setLibraryContentMode('pictogramas');
+                } else if (libraryIndex.length > 0) {
+                  openLibrary(libraryIndex[0].id);
+                }
+                setShowConfig(false);
+              }}
               className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-100 flex items-center gap-2"
               title={t('header.libraryTooltip')}
             >
@@ -2266,12 +2329,19 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                     onChange={e => handleGenerationModelChange(e.target.value as GenerationModel)}
                     className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
                   >
-                    {(Object.keys(GENERATION_MODEL_LABELS) as GenerationModel[]).map(m => (
-                      <option key={m} value={m}>
-                        {GENERATION_MODEL_LABELS[m]}
-                        {m === DEFAULT_GENERATION_MODEL ? ` (${t('config.generationModels.default') || 'predeterminado'})` : ''}
-                      </option>
-                    ))}
+                    {(Object.keys(GENERATION_MODEL_LABELS) as GenerationModel[]).map(m => {
+                      // Disable models verified as non-operational (quota/no-image)
+                      // so the selector never offers a model that fails. See
+                      // INOPERATIVE_GENERATION_MODELS in types.ts.
+                      const inoperativeReason = INOPERATIVE_GENERATION_MODELS[m];
+                      return (
+                        <option key={m} value={m} disabled={!!inoperativeReason}>
+                          {GENERATION_MODEL_LABELS[m]}
+                          {m === DEFAULT_GENERATION_MODEL ? ` (${t('config.generationModels.default') || 'predeterminado'})` : ''}
+                          {inoperativeReason ? ` — no disponible (${inoperativeReason})` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
@@ -2465,7 +2535,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             )}
           </div>
         )}
-        {activeLibraryId === null ? (
+        {(activeLibraryId === null || viewingLibraryHome) ? (
           <LibraryHome
             libraries={libraryIndex}
             templates={availableLibraries}
@@ -2473,6 +2543,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             onSortChange={setLibrarySort}
             storageUsed={storageInfo?.usage ?? 0}
             storageQuota={storageInfo?.quota ?? 0}
+            activeLibraryId={activeLibraryId ?? undefined}
             onOpen={openLibrary}
             onCreate={handleCreateLibrary}
             onDuplicate={handleDuplicateLibrary}
@@ -2480,6 +2551,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
             onRename={handleRenameLibrary}
             onDelete={handleDeleteLibrary}
             onImport={() => libImportRef.current?.click()}
+            onImportPhrases={() => homeImportRef.current?.click()}
             onBackup={handleBackupLibraries}
             onOpenTemplate={loadLibrary}
           />
@@ -2487,13 +2559,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           activeSequenceId ? (
             <SequenceEditor
               sequence={sequences.find(s => s.id === activeSequenceId) ?? sequences[0]}
-              libraryRows={rows}
               onSave={seq => setSequences(prev => prev.map(s => s.id === seq.id ? seq : s))}
               onBack={() => setActiveSequenceId(null)}
-              onGenerateRow={(utterance, stepId) => handleGenerateFromStep(utterance, stepId, activeSequenceId)}
+              onAddStep={handleAddSequenceStep}
               onPrint={handleSequencePrint}
               onDownloadZip={handleSequenceDownloadZip}
-              renderLinkedRow={(step, dragHandle, position, unlinkStep) => {
+              renderLinkedRow={(step, dragHandle, position, deleteStep) => {
                 const row = rows.find(r => r.id === step.rowId);
                 if (!row) return null;
                 return (
@@ -2508,7 +2579,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                     onRegeneratePrompt={() => regeneratePrompt(row.id)}
                     onStop={() => handleStopProcess(row.id)}
                     onCascade={() => processCascade(row.id)}
-                    onDelete={unlinkStep}
+                    onDelete={() => {
+                      deleteStep();
+                      // Also remove the row if it has no content (blank sequence step)
+                      if (!row.UTTERANCE && !row.rawSvg && !row.structuredSvg && !row.bitmap && !row.NLU) {
+                        setRows(prev => prev.filter(r => r.id !== row.id));
+                      }
+                    }}
                     onFocus={s => setFocusMode({ step: s, rowId: row.id })}
                     onLog={addLog}
                     config={config}
@@ -2538,13 +2615,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   id: crypto.randomUUID(),
                   libraryId: activeLibraryId!,
                   name: t('sequence.untitled'),
-                  steps: [1, 2, 3].map(pos => ({
-                    id: crypto.randomUUID(),
-                    position: pos,
-                    utterance: null,
-                    rowId: null,
-                    state: 'blank' as const,
-                  })),
+                  steps: [],
                   createdAt: new Date().toISOString(),
                   modifiedAt: new Date().toISOString(),
                 };
@@ -3093,7 +3164,7 @@ const RowComponent: React.FC<{
                 <Square size={18} aria-hidden="true" />
               </button>
             ) : (
-              <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-2 border-2 border-orange-400 hover:border-orange-600 text-orange-500 hover:text-orange-700 transition-all rounded-full bg-white shadow-sm" title={t('actions.runFullPipeline')} aria-label={t('actions.runFullPipeline')}>
+              <button onClick={e => { e.stopPropagation(); onCascade(); }} disabled={!row.UTTERANCE.trim()} className="p-2 border-2 border-orange-400 hover:border-orange-600 text-orange-500 hover:text-orange-700 transition-all rounded-full bg-white shadow-sm disabled:opacity-30 disabled:cursor-not-allowed" title={t('actions.runFullPipeline')} aria-label={t('actions.runFullPipeline')}>
                 <Play size={18} aria-hidden="true" />
               </button>
             )}
@@ -3122,7 +3193,10 @@ const RowComponent: React.FC<{
             return <img src={bmp!} alt={row.UTTERANCE} className="w-full h-full object-contain" />;
           })()}
         </div>
-        <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 transition-transform duration-500 cursor-pointer self-center mx-6" />
+        {isOpen
+          ? <ChevronDown onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 cursor-pointer self-center mx-6" />
+          : <ChevronRight onClick={() => setIsOpen(!isOpen)} size={20} className="text-slate-500 cursor-pointer self-center mx-6" />
+        }
       </div>
 
       {isOpen && (

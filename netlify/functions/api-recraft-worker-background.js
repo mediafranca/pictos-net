@@ -8,6 +8,7 @@
 import { checkAndCharge, logCall } from './_shared/usage.js';
 import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
 import { verifyIdentityUser } from './_shared/identity.js';
+import { fetchWithRetry, describeFetchError } from './_shared/httpRetry.js';
 
 const RECRAFT_API_URL = 'https://external.api.recraft.ai/v1/images/generations';
 
@@ -96,7 +97,9 @@ export const handler = async (event, context) => {
       } : {}),
     };
 
-    const recraftRes = await fetch(RECRAFT_API_URL, {
+    // fetchWithRetry absorbs transient "fetch failed" transport errors and
+    // upstream 5xx; 4xx is returned unretried and handled below.
+    const recraftRes = await fetchWithRetry(RECRAFT_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -131,7 +134,7 @@ export const handler = async (event, context) => {
       return;
     }
 
-    const imageRes = await fetch(imageUrl);
+    const imageRes = await fetchWithRetry(imageUrl, {});
     if (!imageRes.ok) {
       await logCall({
         email, phase: 'recraft', model, units_charged: 1,
@@ -173,12 +176,14 @@ export const handler = async (event, context) => {
     }
 
   } catch (error) {
-    console.error(`[api-recraft-worker] Error: ${error.message}`);
+    // describeFetchError preserves error.cause so "fetch failed" is diagnosable.
+    const detail = describeFetchError(error);
+    console.error(`[api-recraft-worker] Error: ${detail}`);
     await logCall({
       email, phase: 'recraft', model, units_charged: 1,
       ms: Date.now() - startMs,
-      tokens_in: 0, tokens_out: 0, ok: false, error_msg: error.message,
+      tokens_in: 0, tokens_out: 0, ok: false, error_msg: detail,
     });
-    await store.setJSON(jobId, { error: error.message || 'Recraft service error' });
+    await store.setJSON(jobId, { error: detail || 'Recraft service error' });
   }
 };

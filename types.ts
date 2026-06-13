@@ -250,7 +250,7 @@ export function getModelFamily(model: GenerationModel): ModelFamily {
   return model === 'recraftv4_1_vector' ? 'vector' : 'bitmap';
 }
 
-export const DEFAULT_GENERATION_MODEL: GenerationModel = 'gemini-3.1-flash-image';
+export const DEFAULT_GENERATION_MODEL: GenerationModel = 'recraftv4_1_vector';
 
 /** Human-readable labels for GenerationModel values (used by GenerationModelSelector). */
 export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
@@ -259,6 +259,20 @@ export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
   'gemini-3-pro-image': 'Gemini 3 Pro',
   'recraftv4_1': 'Recraft (raster)',
   'recraftv4_1_vector': 'Recraft (vector)',
+};
+
+/**
+ * Generation models that are configured but NOT operational right now, mapped
+ * to the reason. Verified 2026-06-13 against Vertex project `pictos-vertex`:
+ *   - gemini-3-pro-image     → 429 RESOURCE_EXHAUSTED (quota agotada)
+ *   - gemini-3.1-flash-image → HTTP 200 sin parte de imagen (devuelve texto)
+ * Only gemini-2.5-flash-image returns an image among the Gemini family.
+ * Consumed by the GenerationModelSelector in App.tsx to disable these options.
+ * Vaciar este objeto cuando la cuota/modelo vuelvan a estar disponibles.
+ */
+export const INOPERATIVE_GENERATION_MODELS: Partial<Record<GenerationModel, string>> = {
+  'gemini-3-pro-image': 'cuota agotada',
+  'gemini-3.1-flash-image': 'sin imagen',
 };
 
 /** Migrates a legacy imageModel string to the canonical GenerationModel value. */
@@ -439,6 +453,7 @@ export interface LibraryMeta {
   modifiedAt: string;    // ISO-8601
   pictogramCount: number;
   sequenceCount: number;
+  language?: string;
 }
 
 // ── Sequences ──────────────────────────────────────────────────────────────

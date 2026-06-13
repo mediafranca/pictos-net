@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Plus, MoreHorizontal, Globe, Download, Copy, Trash2, Edit,
-  FolderOpen, HardDrive, Upload,
+  FolderOpen, HardDrive, Upload, FileText,
 } from 'lucide-react';
 import { LibraryMeta } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
@@ -22,6 +22,7 @@ interface LibraryHomeProps {
   onSortChange: (s: 'recientes' | 'alfabetico') => void;
   storageUsed: number;
   storageQuota: number;
+  activeLibraryId?: string;
   onOpen: (id: string) => void;
   onCreate: () => void;
   onDuplicate: (id: string) => void;
@@ -29,6 +30,7 @@ interface LibraryHomeProps {
   onRename: (id: string, newName: string) => void;
   onDelete: (id: string) => void;
   onImport: () => void;
+  onImportPhrases: () => void;
   onBackup: () => void;
   onOpenTemplate: (filename: string) => void;
 }
@@ -61,7 +63,7 @@ interface ThumbnailImage {
 function ThumbnailStrip({ images }: { images: ThumbnailImage[] }) {
   const slots = [0, 1, 2].map(i => images[i] ?? null);
   return (
-    <div className="flex h-20 bg-slate-100 rounded-t-xl overflow-hidden shrink-0">
+    <div className="flex aspect-[3/1] bg-slate-100 rounded-t-xl overflow-hidden shrink-0">
       {slots.map((img, i) =>
         img ? (
           // bg-white so pictograms on transparent/white backgrounds render cleanly.
@@ -88,6 +90,7 @@ function ThumbnailStrip({ images }: { images: ThumbnailImage[] }) {
 
 interface LibraryCardProps {
   lib: LibraryMeta;
+  isActive?: boolean;
   onOpen: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDownload: (id: string) => void;
@@ -95,7 +98,7 @@ interface LibraryCardProps {
   onDelete: (id: string) => void;
 }
 
-function LibraryCard({ lib, onOpen, onDuplicate, onDownload, onRename, onDelete }: LibraryCardProps) {
+function LibraryCard({ lib, isActive, onOpen, onDuplicate, onDownload, onRename, onDelete }: LibraryCardProps) {
   const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(lib.name);
@@ -135,7 +138,11 @@ function LibraryCard({ lib, onOpen, onDuplicate, onDownload, onRename, onDelete 
     // No overflow-hidden here — the dropdown menu must escape the card bounds.
     // The ThumbnailStrip handles its own rounded-t-xl overflow clipping.
     <div
-      className="bg-white border border-slate-200 rounded-xl hover:border-violet-400 hover:shadow-md transition-all flex flex-col group cursor-pointer"
+      className={`bg-white rounded-xl transition-all flex flex-col group cursor-pointer border ${
+        isActive
+          ? 'border-violet-500 ring-2 ring-violet-300 shadow-md'
+          : 'border-slate-200 hover:border-violet-400 hover:shadow-md'
+      }`}
       onClick={() => !menuOpen && !isEditing && onOpen(lib.id)}
     >
       <ThumbnailStrip images={thumbnailImages} />
@@ -163,6 +170,11 @@ function LibraryCard({ lib, onOpen, onDuplicate, onDownload, onRename, onDelete 
             >
               {lib.name}
             </h3>
+          )}
+          {lib.language && !isEditing && (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 leading-tight">
+              {lib.language}
+            </span>
           )}
 
           <div className="relative" ref={menuRef}>
@@ -207,27 +219,37 @@ function LibraryCard({ lib, onOpen, onDuplicate, onDownload, onRename, onDelete 
 }
 
 // ── TemplateCard ───────────────────────────────────────────────────────────────
-// Visually identical structure to LibraryCard: strip → name+badge → count → footer.
-// No "..." menu — templates are read-only; the whole card opens on click.
+// Visually identical structure to LibraryCard: strip → name+badge+menu → count → footer.
 
 function TemplateCard({ tmpl, onOpen }: { tmpl: LibraryMetadata; onOpen: () => void }) {
   const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const slug = tmpl.filename.replace(/(_graph.*)?\.json$/, '');
   const images: ThumbnailImage[] = [0, 1, 2].map(i => ({
     src: `/libraries/thumbs/${slug}_${i}.jpg`,
     srcSet: `/libraries/thumbs-opt/${slug}_${i}.webp`,
   }));
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
   return (
     <div
-      onClick={onOpen}
+      onClick={() => !menuOpen && onOpen()}
       className="bg-white border border-slate-200 rounded-xl hover:border-violet-400 hover:shadow-md transition-all flex flex-col group cursor-pointer"
     >
       <ThumbnailStrip images={images} />
 
       <div className="p-4 flex flex-col gap-1.5 flex-1">
-        {/* Name + language badge row — mirrors LibraryCard name + menu row */}
-        <div className="flex items-start justify-between gap-2">
+        {/* Name + language badge + menu row — mirrors LibraryCard */}
+        <div className="flex items-start justify-between gap-2" onClick={e => e.stopPropagation()}>
           <h3
             className="font-bold text-sm text-slate-900 leading-tight flex-1 min-w-0 truncate"
             title={tmpl.name}
@@ -237,14 +259,33 @@ function TemplateCard({ tmpl, onOpen }: { tmpl: LibraryMetadata; onOpen: () => v
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0 leading-tight">
             {tmpl.language}
           </span>
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={e => { e.stopPropagation(); setMenuOpen(m => !m); }}
+              className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors"
+              aria-label="Opciones"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-7 z-30 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[160px] py-1">
+                <button
+                  onClick={e => { e.stopPropagation(); onOpen(); setMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                >
+                  <FolderOpen size={12} />{t('actions.openLibrary')}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Item count — same position as libraryItemCount in LibraryCard */}
+        {/* Item count — unified with LibraryCard */}
         <p className="text-xs text-slate-400">
-          {tmpl.items} {t('home.items')}
+          {t('home.libraryItemCount', { pictograms: tmpl.items, sequences: 0 })}
         </p>
 
-        {/* Footer — location instead of date */}
+        {/* Footer — location */}
         <p className="text-xs text-slate-400 mt-auto flex items-center gap-1 min-w-0">
           <Globe size={10} className="shrink-0" />
           <span className="truncate">{tmpl.location}</span>
@@ -280,6 +321,7 @@ export function LibraryHome({
   onSortChange,
   storageUsed,
   storageQuota,
+  activeLibraryId,
   onOpen,
   onCreate,
   onDuplicate,
@@ -287,6 +329,7 @@ export function LibraryHome({
   onRename,
   onDelete,
   onImport,
+  onImportPhrases,
   onBackup,
   onOpenTemplate,
 }: LibraryHomeProps) {
@@ -300,6 +343,33 @@ export function LibraryHome({
 
   return (
     <div className="py-12 space-y-8 animate-in fade-in zoom-in-95 duration-700">
+
+      {/* Hero — large branding + import card */}
+      <div className="py-8 text-center space-y-10">
+        <div className="space-y-3">
+          <p className="text-8xl font-black tracking-tighter text-slate-900 leading-none select-none" aria-hidden="true">
+            pictos
+          </p>
+          <p className="text-slate-500 text-lg font-medium max-w-xl mx-auto leading-relaxed">
+            {t('home.description')}
+          </p>
+        </div>
+        <div className="flex justify-center">
+          <div
+            onClick={onImportPhrases}
+            className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1 w-full max-w-md"
+          >
+            <div className="text-white group-hover:scale-110 transition-transform origin-left">
+              <FileText size={40} />
+            </div>
+            <div>
+              <h2 className="font-bold text-xl uppercase tracking-wider text-white">{t('home.importTextNode')}</h2>
+              <div className="text-xs text-violet-400 font-mono mt-1">{t('home.importNamespace')}</div>
+            </div>
+            <p className="text-xs text-violet-300 leading-relaxed font-medium">{t('home.importDescription')}</p>
+          </div>
+        </div>
+      </div>
 
       {/* Title row: "Librerías" left, sort links right */}
       <div className="flex items-baseline justify-between gap-4">
@@ -327,6 +397,7 @@ export function LibraryHome({
           <LibraryCard
             key={lib.id}
             lib={lib}
+            isActive={lib.id === activeLibraryId}
             onOpen={onOpen}
             onDuplicate={onDuplicate}
             onDownload={onDownload}

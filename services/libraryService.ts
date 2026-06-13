@@ -88,6 +88,7 @@ export function createLibrary(name: string, initialConfig?: Partial<GlobalConfig
     modifiedAt: now,
     pictogramCount: 0,
     sequenceCount: 0,
+    language: initialConfig?.lang,
   };
 
   const index = getLibraryIndex();
@@ -232,11 +233,7 @@ export function importLibraryJson(json: string): LibraryMeta {
     modifiedAt?: string;
   };
 
-  const index = getLibraryIndex();
-  let name = data.name || 'Librería importada';
-  if (index.some(l => l.name === name)) {
-    name = `${name} (importada)`;
-  }
+  const name = data.name || (data.config as any)?.name || 'Librería importada';
 
   const meta = createLibrary(name, data.config);
 

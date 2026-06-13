@@ -10,6 +10,7 @@ import { checkAndCharge, logCall } from './_shared/usage.js';
 import { getBlobStore as getStore, connectBlobs } from './_shared/blobs.js';
 import { verifyIdentityUser } from './_shared/identity.js';
 import { getVertexAccessToken, vertexModelUrl } from './_shared/vertex.js';
+import { fetchWithRetry, describeFetchError } from './_shared/httpRetry.js';
 
 const ALLOWED_MODELS = [
   'gemini-2.5-flash-image',
@@ -71,7 +72,10 @@ export const handler = async (event, context) => {
     // Vertex AI: short-lived OAuth token instead of a static API key.
     const accessToken = await getVertexAccessToken();
     const url = vertexModelUrl(model);
-    const geminiRes = await fetch(url, {
+    // fetchWithRetry absorbs transient "fetch failed" transport errors (DNS,
+    // IPv6, dead keep-alive socket) that otherwise reach the user as an opaque
+    // failure. 4xx (auth/quota) is returned unretried and handled below.
+    const geminiRes = await fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -128,12 +132,15 @@ export const handler = async (event, context) => {
     await store.setJSON(jobId, { bitmap });
 
   } catch (error) {
-    console.error(`[api-gemini-worker] Error: ${error.message}`);
+    // describeFetchError preserves error.cause (ECONNRESET, ENETUNREACH,
+    // UND_ERR_SOCKET...) so "fetch failed" is no longer opaque in logs/client.
+    const detail = describeFetchError(error);
+    console.error(`[api-gemini-worker] Error: ${detail}`);
     await logCall({
       email, phase: 'gemini', model, units_charged: 1,
       ms: Date.now() - startMs,
-      tokens_in: 0, tokens_out: 0, ok: false, error_msg: error.message,
+      tokens_in: 0, tokens_out: 0, ok: false, error_msg: detail,
     });
-    await store.setJSON(jobId, { error: error.message || 'Gemini service error' });
+    await store.setJSON(jobId, { error: detail || 'Gemini service error' });
   }
 };
