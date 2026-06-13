@@ -78,7 +78,7 @@ export const handler = async (event, context) => {
         'Authorization': `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           responseModalities: ['IMAGE'],
           imageConfig: { aspectRatio: '1:1', imageSize: '1K' },

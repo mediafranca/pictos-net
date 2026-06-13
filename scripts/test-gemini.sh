@@ -50,7 +50,7 @@ else
   HOST="${VERTEX_LOCATION}-aiplatform.googleapis.com"
 fi
 URL="https://${HOST}/v1/projects/${VERTEX_PROJECT_ID}/locations/${VERTEX_LOCATION}/publishers/google/models/${MODEL}:generateContent"
-BODY='{"contents":[{"parts":[{"text":"a simple red circle on white background"}]}],"generationConfig":{"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"1:1","imageSize":"1K"}}}'
+BODY='{"contents":[{"role":"user","parts":[{"text":"a simple red circle on white background"}]}],"generationConfig":{"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"1:1","imageSize":"1K"}}}'
 
 echo "Model    : $MODEL"
 echo "Project  : $VERTEX_PROJECT_ID"
