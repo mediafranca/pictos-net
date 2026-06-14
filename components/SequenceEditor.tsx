@@ -4,14 +4,14 @@ import {
   useSensor, useSensors, DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  SortableContext, verticalListSortingStrategy,
+  SortableContext, verticalListSortingStrategy, rectSortingStrategy,
   useSortable, arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  ChevronLeft, GripVertical, X, Printer, Download, Plus,
+  ChevronLeft, GripVertical, X, Printer, Download, Plus, List, LayoutGrid,
 } from 'lucide-react';
-import { Sequence, Step } from '../types';
+import { Sequence, Step, RowData } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 
 interface SequenceEditorProps {
@@ -30,6 +30,10 @@ interface SequenceEditorProps {
     position: number,
     deleteStep: () => void,
   ) => React.ReactNode;
+  /** Grid view: library rows so compact cells can show pictogram thumbnails. */
+  rows?: RowData[];
+  viewMode?: 'list' | 'grid';
+  onViewModeChange?: (mode: 'list' | 'grid') => void;
 }
 
 // ── SortableStep ──────────────────────────────────────────────────────────────
@@ -71,10 +75,80 @@ function SortableStep({ step, onDelete, renderLinkedRow }: {
   );
 }
 
+// ── SequenceGridCell ──────────────────────────────────────────────────────────
+// Compact pictogram cell used in grid view — mirrors PictogramGridCell layout.
+
+function SequenceGridCell({ step, row, onDelete }: {
+  step: Step;
+  row?: RowData;
+  onDelete: () => void;
+}) {
+  const svg = row?.structuredSvg || row?.rawSvg;
+  const bmp = row?.bitmap;
+  // El texto del pictograma vive en row.UTTERANCE; step.utterance suele venir
+  // nulo en pasos generados, por eso la grilla aparecia sin texto.
+  const caption = row?.UTTERANCE || step.utterance || '';
+  return (
+    // Mirrors PictogramGridCell: tarjeta con area cuadrada arriba y pie de texto.
+    <div className="relative border border-slate-200 hover:border-violet-300 bg-white shadow-sm hover:shadow-md transition-all flex flex-col group">
+      {/* Area del pictograma — cuadrada, igual que PictogramGridCell */}
+      <div className="relative aspect-square bg-slate-50 overflow-hidden">
+        {svg ? (
+          <img
+            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
+            className="w-full h-full object-contain p-4"
+            alt={caption}
+            loading="lazy"
+          />
+        ) : bmp ? (
+          <img src={bmp} className="w-full h-full object-contain p-4" alt={caption} loading="lazy" />
+        ) : (
+          <div className="w-full h-full bg-slate-50" aria-hidden="true" />
+        )}
+        {/* Numero de paso — chip arriba a la izquierda */}
+        <span className="absolute top-2 left-2 z-10 text-[10px] font-bold text-slate-400 bg-white/90 rounded px-1 leading-tight tabular-nums">
+          {step.position}
+        </span>
+        {/* Eliminar — arriba a la derecha, al hover */}
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(); }}
+          className="absolute top-2 right-2 z-10 p-1 bg-white/80 rounded text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+          aria-label="Eliminar paso"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      {/* Pie — texto del pictograma, igual que PictogramGridCell (3 lineas, sin corte) */}
+      <div className="p-3">
+        <p className="text-xs font-medium text-slate-900 uppercase tracking-wide text-center line-clamp-3 min-h-[4.5rem] flex items-center justify-center">
+          {caption || '...'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Sortable wrapper for grid mode
+function SortableGridStep({ step, row, onDelete }: {
+  step: Step;
+  row?: RowData;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: step.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="touch-none cursor-grab active:cursor-grabbing">
+      <SequenceGridCell step={step} row={row} onDelete={onDelete} />
+    </div>
+  );
+}
+
 // ── SequenceEditor ────────────────────────────────────────────────────────────
 
 export function SequenceEditor({
   sequence, onSave, onBack, onAddStep, onPrint, onDownloadZip, renderLinkedRow,
+  rows, viewMode = 'list', onViewModeChange,
 }: SequenceEditorProps) {
   const { t } = useTranslation();
   const [steps, setSteps] = useState<Step[]>(sequence.steps);
@@ -204,8 +278,28 @@ export function SequenceEditor({
             )}
           </div>
 
-          {/* Export actions */}
+          {/* Export actions + view toggle */}
           <div className="flex items-center gap-3 shrink-0">
+            {onViewModeChange && (
+              <div className="flex items-center gap-1 border-r border-slate-100 pr-3">
+                <button
+                  onClick={() => onViewModeChange('list')}
+                  title={t('library.viewList')}
+                  aria-pressed={viewMode === 'list'}
+                  className={`transition-colors ${viewMode === 'list' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                >
+                  <List size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => onViewModeChange('grid')}
+                  title={t('library.viewGrid')}
+                  aria-pressed={viewMode === 'grid'}
+                  className={`transition-colors ${viewMode === 'grid' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                >
+                  <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+              </div>
+            )}
             <button
               onClick={() => onPrint(currentSeq)}
               disabled={!canExport}
@@ -231,20 +325,35 @@ export function SequenceEditor({
         </p>
       </div>
 
-      {/* Sortable step list */}
+      {/* Sortable step list — list or grid layout */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={steps.map(s => s.id)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-2">
-            {steps.map(step => (
-              <SortableStep
-                key={step.id}
-                step={step}
-                onDelete={() => deleteStep(step.id)}
-                renderLinkedRow={renderLinkedRow}
-              />
-            ))}
-          </div>
-        </SortableContext>
+        {viewMode === 'grid' ? (
+          <SortableContext items={steps.map(s => s.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {steps.map(step => (
+                <SortableGridStep
+                  key={step.id}
+                  step={step}
+                  row={rows?.find(r => r.id === step.rowId)}
+                  onDelete={() => deleteStep(step.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        ) : (
+          <SortableContext items={steps.map(s => s.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {steps.map(step => (
+                <SortableStep
+                  key={step.id}
+                  step={step}
+                  onDelete={() => deleteStep(step.id)}
+                  renderLinkedRow={renderLinkedRow}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        )}
       </DndContext>
 
       {/* Add step */}

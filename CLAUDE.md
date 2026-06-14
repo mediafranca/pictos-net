@@ -62,6 +62,7 @@ Recraft V4.1 delivers native SVG so VTracer is no longer needed.
 - Method: set-of-marks rasterization → Claude Sonnet vision → local path assembly
 - Geometry never leaves the browser
 - Output: mf-svg-schema compliant SVG with semantic groups and accessibility metadata
+- Model selectable via `GlobalConfig.phase5Model`: `claude-sonnet-4-6`, `claude-opus-4-6`, `gemini-2.5-pro`, `gemini-2.5-flash` (default). `gemini-2.0-flash` removed 2026-06-13 (404 in `pictos-vertex`, all regions). Claude models route to `api-claude`, `gemini-*` to `api-gemini-structure`.
 
 ## GlobalConfig Parameters
 
@@ -74,8 +75,10 @@ Recraft V4.1 delivers native SVG so VTracer is no longer needed.
 | `visualStylePrompt` | 3 | Active | Text added to Recraft prompt |
 | `svgStyleDefs` | 2, 4 | Active | CSS definitions for SVG editor + structuring |
 | `svgKeyframes` | 4 | Active | Animation keyframes for structured SVG |
+| `generationModel` | 3 | Active | Phase 3 model: `recraftv4_1_vector` (default), `recraftv4_1`, `gemini-2.5-flash-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image` |
+| `phase5Model` | 4 | Active | Phase 4 structuring model: `claude-sonnet-4-6`, `claude-opus-4-6`, `gemini-2.5-pro`, `gemini-2.5-flash` (default) |
 | `aspectRatio` | — | Inactive | Was Gemini Image aspect ratio; Recraft uses fixed size |
-| `imageModel` | — | Inactive | Was Gemini flash/pro selector; removed from pipeline |
+| `imageModel` | — | Inactive | Legacy; migrated to `generationModel` on first load |
 
 ## Conventions
 
@@ -93,7 +96,9 @@ Recraft V4.1 delivers native SVG so VTracer is no longer needed.
 - Phase 4 set-of-marks: paths get numeric IDs in a rasterized PNG → Claude assigns each ID to a semantic element
 - Local SVG assembly: Claude returns only `{ path_id → element_id }` map; geometry manipulation is all local
 - Quota: Recraft = 1 unit/call, Sonnet = 1 unit/call, Haiku = 0 units (free); default 100/user/day via Netlify Blobs
-- Gemini auth: Vertex AI with service-account OAuth (`_shared/vertex.js`), no static API key. Env: `GOOGLE_SERVICE_ACCOUNT_JSON` (single line), optional `VERTEX_PROJECT_ID`/`VERTEX_LOCATION`
+- Gemini auth: Vertex AI with service-account OAuth (`_shared/vertex.js`), no static API key. Env: `GOOGLE_SERVICE_ACCOUNT_JSON` (single line), optional `VERTEX_PROJECT_ID`/`VERTEX_LOCATION`. Active project: `pictos-vertex` (SA `pictos-vertex-sa`, role Vertex AI User). The old `gen-lang-client-0167983259` was `CONSUMER_SUSPENDED`; if "servicio bloqueado" reappears it is a stale Netlify env var, not the local `.env`
+- Google model availability (verified live 2026-06-13 against `pictos-vertex`, location `global`): structuring text = `gemini-2.5-pro`, `gemini-2.5-flash` (`gemini-2.0-flash` 404s everywhere); image gen = `gemini-2.5-flash-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image` (the last has low daily quota → intermittent 429). `INOPERATIVE_GENERATION_MODELS` in `types.ts` gates broken options in the selector (currently empty)
+- Sequence PDF reuses the library export engine: `exportSequenceToPdf` (`sequencePdfService`) delegates to `exportLibraryToPdf` (`pdfExportService`) with `titleOverride` = sequence name and a per-cell step-number badge (top-left). Caption comes from `row.UTTERANCE`. The sequence grid view (`SequenceEditor`) mirrors `PictogramGridCell`
 - Background functions MUST verify the Identity JWT via `_shared/identity.js` (GoTrue `/user` endpoint) — never trust a decoded payload
 
 ## Pre-existing TS Errors (not my concern)

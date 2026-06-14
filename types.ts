@@ -59,15 +59,15 @@ export type Phase5StructuringModel =
   | 'claude-sonnet-4-6'
   | 'claude-opus-4-6'
   | 'gemini-2.5-pro'
-  | 'gemini-2.5-flash'
-  | 'gemini-2.0-flash';
+  | 'gemini-2.5-flash';
+// Nota: gemini-2.0-flash se retiro del selector el 2026-06-13: el proyecto
+// pictos-vertex devuelve 404 NOT_FOUND para ese modelo en global y us-central1.
 
 export const PHASE5_MODELS: { id: Phase5StructuringModel; label: string }[] = [
   { id: 'claude-sonnet-4-6',  label: 'Claude Sonnet 4.6' },
   { id: 'claude-opus-4-6',    label: 'Claude Opus 4.6' },
   { id: 'gemini-2.5-pro',     label: 'Gemini 2.5 Pro' },
   { id: 'gemini-2.5-flash',   label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.0-flash',   label: 'Gemini 2.0 Flash' },
 ];
 
 export const DEFAULT_PHASE5_MODEL: Phase5StructuringModel = 'gemini-2.5-flash';
@@ -263,17 +263,18 @@ export const GENERATION_MODEL_LABELS: Record<GenerationModel, string> = {
 
 /**
  * Generation models that are configured but NOT operational right now, mapped
- * to the reason. Verified 2026-06-13 against Vertex project `pictos-vertex`:
- *   - gemini-3-pro-image     → 429 RESOURCE_EXHAUSTED (quota agotada)
- *   - gemini-3.1-flash-image → HTTP 200 sin parte de imagen (devuelve texto)
- * Only gemini-2.5-flash-image returns an image among the Gemini family.
- * Consumed by the GenerationModelSelector in App.tsx to disable these options.
- * Vaciar este objeto cuando la cuota/modelo vuelvan a estar disponibles.
+ * to the reason. Consumed by the GenerationModelSelector in App.tsx to disable
+ * these options. Vaciar este objeto cuando la cuota/modelo vuelvan a estar
+ * disponibles.
+ *
+ * Re-verificado 2026-06-13 (en vivo) contra Vertex project `pictos-vertex`,
+ * location `global`: los tres modelos de la familia Gemini devuelven imagen
+ * (image/png) — gemini-2.5-flash-image, gemini-3.1-flash-image y
+ * gemini-3-pro-image. Por eso el mapa queda vacio. Nota operativa: la cuota de
+ * gemini-3-pro-image es baja y puede devolver 429 RESOURCE_EXHAUSTED de forma
+ * intermitente; el cliente debe degradar con un mensaje claro en ese caso.
  */
-export const INOPERATIVE_GENERATION_MODELS: Partial<Record<GenerationModel, string>> = {
-  'gemini-3-pro-image': 'cuota agotada',
-  'gemini-3.1-flash-image': 'sin imagen',
-};
+export const INOPERATIVE_GENERATION_MODELS: Partial<Record<GenerationModel, string>> = {};
 
 /** Migrates a legacy imageModel string to the canonical GenerationModel value. */
 export function migrateImageModel(imageModel: string | undefined): GenerationModel {
@@ -324,6 +325,8 @@ export interface GlobalConfig {
   imageModel?: string;
   /** Phase 3 generation model. Persisted in localStorage. */
   generationModel: GenerationModel;
+  /** Phase 5 structuring model. Persisted in localStorage. Defaults to DEFAULT_PHASE5_MODEL. */
+  phase5Model?: Phase5StructuringModel;
   /** Whether the "Configuración avanzada" panel section is expanded. Persisted. */
   advancedConfigOpen?: boolean;
   name: string;

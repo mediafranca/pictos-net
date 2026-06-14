@@ -19,6 +19,9 @@
 --   - Order: mirrors the Library's current sort
 --   - A blocking progress modal exposing per-pictogram progress and
 --     a cancel affordance
+--   - Two optional, backward-compatible inputs so the same engine can serve
+--     the sequence export (sequences.allium): a header title override and a
+--     per-cell badge (e.g. a step number)
 -- Excludes:
 --   - Cover page / table of contents (resolved: a header on each page
 --     replaces both)
@@ -291,6 +294,10 @@ rule CellLayout {
       lines as needed to fit the full string
     the pictogram width sits in the 70–90 mm range (design intent),
     determined by the page size, margins and inter-column gutter
+    when the caller supplies a per-cell badge (e.g. a sequence step number),
+      it is drawn small, on a faint white chip, in the top-left corner of the
+      cell over the pictogram; it does not consume caption space. The library
+      export passes no badge, so its cells are unaffected.
 }
 
 rule CutGuideStyle {
@@ -346,7 +353,9 @@ rule PageHeader {
   when: a PdfPage is being composed
   ensures:
     the top of every page carries a header strip with:
-      left:  the Library name (GlobalConfig.name)
+      left:  the Library name (GlobalConfig.name), or a caller-supplied title
+             override when present (used by the sequence export to show the
+             sequence name instead — see sequences.allium)
       right: the page number ("Page N of M") in the active UI language
     a thin horizontal rule separates the header from the cell grid
     no metadata is repeated inside the cells

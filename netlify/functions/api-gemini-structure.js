@@ -5,7 +5,8 @@
  * translates it to Gemini REST format, calls the Gemini API synchronously,
  * and returns a Claude-compatible response shape for uniform handling in the client.
  *
- * Supported models: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
+ * Supported models: gemini-2.5-pro, gemini-2.5-flash
+ * (gemini-2.0-flash removed 2026-06-13 — returns 404 in pictos-vertex.)
  * Phase 5 calls are free-tier in the quota (0 units charged).
  */
 
@@ -16,7 +17,6 @@ import { getVertexAccessToken, vertexModelUrl } from './_shared/vertex.js';
 const ALLOWED_MODELS = [
   'gemini-2.5-pro',
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
 ];
 
 const ALLOWED_ORIGINS = [

@@ -13,7 +13,7 @@ import {
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics, DEFAULT_PHASE5_MODEL, LibraryMeta, Sequence, Step } from './types';
+import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB, VisualElement, NLUFrameRole, ElementOpKind, RowInterventionLog, SvgMetrics, DEFAULT_PHASE5_MODEL, PHASE5_MODELS, Phase5StructuringModel, LibraryMeta, Sequence, Step } from './types';
 import * as Claude from './services/claudeService';
 import * as Recraft from './services/recraftService';
 import * as Gemini from './services/geminiService';
@@ -358,7 +358,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [loadingLibraryName, setLoadingLibraryName] = useState('');
   // Session-only Phase 5 model selector (not persisted — for experimentation)
-  const [sessionPhase5Model, setSessionPhase5Model] = useState<string>(DEFAULT_PHASE5_MODEL);
+  const setPhase5Model = (m: string) => setConfig(prev => ({ ...prev, phase5Model: m as Phase5StructuringModel }));
   const [svgEditorState, setSvgEditorState] = useState<{
     isOpen: boolean;
     rowId: string | null;
@@ -542,8 +542,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       try {
         libraryService.saveLibraryRows(activeLibraryId, rowsMeta);
         libraryService.saveLibraryConfig(activeLibraryId, config);
-        // Update modifiedAt on every save
+        // Update modifiedAt on every save. Keep the library card name
+        // (LibraryMeta.name) in sync with the space name (config.name) so the
+        // two never diverge; config.name is the canonical name. Only sync when
+        // non-empty so clearing the field doesn't blank the card.
         libraryService.updateLibraryMeta(activeLibraryId, {
+          ...(config.name && config.name.trim() ? { name: config.name } : {}),
           modifiedAt: new Date().toISOString(),
           pictogramCount: rowsMeta.length,
           language: config.lang,
@@ -561,7 +565,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       if (previewRows.length > 0) {
         const libId = activeLibraryId;
         Promise.all(previewRows.map((row: RowData) => rasterizeToThumbnail(row, 300)))
-          .then(thumbs => libraryService.saveLibraryPreviews(libId, thumbs.filter(Boolean)))
+          .then(thumbs => {
+            libraryService.saveLibraryPreviews(libId, thumbs.filter(Boolean));
+            // Update modifiedAt after thumbnails are written so LibraryCard
+            // re-reads getLibraryPreviews on its next dep-triggered useEffect.
+            libraryService.updateLibraryMeta(libId, { modifiedAt: new Date().toISOString() });
+            setLibraryIndex(libraryService.getLibraryIndex());
+          })
           .catch(() => { /* thumbnails are cosmetic */ });
       }
     }
@@ -649,6 +659,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
   const [libraryContentMode, setLibraryContentMode] = useState<'pictogramas' | 'secuencias'>('pictogramas');
   const [sequences, setSequences] = useState<Sequence[]>([]);
   const [activeSequenceId, setActiveSequenceId] = useState<string | null>(null);
+  const [sequenceViewMode, setSequenceViewMode] = useState<'list' | 'grid'>('list');
   const pendingStepRowsRef = useRef<Map<string, { sequenceId: string; stepId: string }>>(new Map());
   const [librarySort, setLibrarySort] = useState<'recientes' | 'alfabetico'>('recientes');
 
@@ -730,8 +741,13 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
   const handleRenameLibrary = useCallback((id: string, newName: string) => {
     libraryService.updateLibraryMeta(id, { name: newName, modifiedAt: new Date().toISOString() });
+    // Keep the space name (config.name) in sync with the library card name,
+    // so renaming from the home card and editing the space name agree.
+    const cfg = libraryService.getLibraryConfig(id);
+    if (cfg) libraryService.saveLibraryConfig(id, { ...cfg, name: newName });
+    if (id === activeLibraryId) setConfig(prev => ({ ...prev, name: newName }));
     setLibraryIndex(libraryService.getLibraryIndex());
-  }, []);
+  }, [activeLibraryId]);
 
   const handleDuplicateLibrary = useCallback((id: string) => {
     libraryService.duplicateLibrary(id);
@@ -760,8 +776,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
       IndexedDBService.deleteBitmapsForLibrary(id),
       IndexedDBService.deleteSvgsForLibrary(id),
     ]);
+    if (id === activeLibraryId) closeLibrary();
     setLibraryIndex(libraryService.getLibraryIndex());
-  }, [t]);
+  }, [t, activeLibraryId, closeLibrary]);
 
   // Load available libraries from index.json
   useEffect(() => {
@@ -1124,26 +1141,49 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
-        addLog('success', `Biblioteca cargada: ${data.rows?.length || 0} pictogramas`);
+        const typedRows = data.rows as RowData[];
+        addLog('success', `Biblioteca cargada: ${typedRows?.length || 0} pictogramas`);
 
-        setRows(data.rows as RowData[]);
         const newLib = libraryService.createLibrary(displayName);
-        libraryService.saveLibraryRows(newLib.id, (data.rows as RowData[]).map((r: RowData) => {
+
+        // Save row metadata (no binary) to localStorage
+        libraryService.saveLibraryRows(newLib.id, typedRows.map((r: RowData) => {
           const { bitmap, rawSvg, structuredSvg, ...meta } = r;
           return meta;
         }));
+
+        // Compute pending config change now but apply it AFTER the await below,
+        // so all setState calls land in the same batch as setActiveLibraryId
+        // (from openLibrary). If setConfig fired before the await, the save
+        // effect would write the template config to the previously active library.
+        let pendingConfig: GlobalConfig | null = null;
         if (data.config) {
-          const loadedConfig = { ...config, ...data.config };
-          if (!loadedConfig.name && (data.config as any).author) {
-            loadedConfig.name = (data.config as any).author;
+          pendingConfig = { ...config, ...data.config } as GlobalConfig;
+          if (!pendingConfig.name && (data.config as any).author) {
+            pendingConfig.name = (data.config as any).author;
           }
-          setConfig(prev => ({ ...prev, ...loadedConfig }));
-          libraryService.saveLibraryConfig(newLib.id, loadedConfig);
+          libraryService.saveLibraryConfig(newLib.id, pendingConfig);
         }
+
+        // Write binary data to IDB now (awaited) so bitmaps survive a page
+        // reload even for large libraries whose IDB writes might not finish
+        // before the browser is closed if left fire-and-forget.
+        const bitmapEntries = typedRows
+          .filter(r => r.bitmap)
+          .map(r => ({ id: r.id, bitmap: r.bitmap!, libraryId: newLib.id }));
+        const svgEntries = typedRows.filter(r => r.rawSvg || r.structuredSvg);
+        await Promise.all([
+          bitmapEntries.length > 0 ? IndexedDBService.saveBitmapsBatch(bitmapEntries) : Promise.resolve(),
+          ...svgEntries.map(r =>
+            IndexedDBService.saveSvgs(r.id, { rawSvg: r.rawSvg, structuredSvg: r.structuredSvg }, newLib.id)
+          ),
+        ]);
+
+        // Apply all state changes in one batch so the save effect sees the
+        // correct activeLibraryId alongside the new rows and config.
+        if (pendingConfig) setConfig(prev => ({ ...prev, ...pendingConfig! }));
+        setRows(typedRows);
         setLibraryIndex(libraryService.getLibraryIndex());
-        // skipRowLoad: rows were already set via setRows(data.rows) above,
-        // which includes embedded bitmaps from the template JSON. Loading from
-        // localStorage would strip them; the save effect will persist them to IDB.
         openLibrary(newLib.id, { skipRowLoad: true });
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -1939,12 +1979,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
   const handleSequencePrint = useCallback(async (seq: Sequence) => {
     try {
-      const blob = await exportSequenceToPdf(seq, rows);
+      const blob = await exportSequenceToPdf(seq, rows, config, t);
       downloadPdf(blob, sequencePdfFilename(seq));
     } catch (err) {
       console.error('[sequence pdf]', err);
     }
-  }, [rows]);
+  }, [rows, config, t]);
 
   const handleSequenceDownloadZip = useCallback(async (seq: Sequence) => {
     const JSZip = (await import('jszip')).default;
@@ -1975,10 +2015,12 @@ const App: React.FC<AppProps> = ({ authUser }) => {
         Saltar al contenido principal
       </a>
       <header id="toolbar" className="h-20 bg-white border-b border-slate-200 sticky top-0 z-50 flex items-center px-8 justify-between shadow-sm" aria-label="Barra de herramientas">
-        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { closeLibrary(); setShowConfig(false); }}>
+        <div id="brand-area" className="flex items-center gap-4 cursor-pointer" onClick={() => { setViewingLibraryHome(true); setShowConfig(false); }}>
           <div className="p-1.5"><LogoIcon size={44} /></div>
           <div>
-            <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">{config.name}</h1>
+            <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">
+              {activeLibraryId ? (libraryIndex.find(l => l.id === activeLibraryId)?.name ?? 'PICTOS.NET') : 'PICTOS.NET'}
+            </h1>
             <span id="tagline" className="text-xs text-slate-500 font-mono tracking-widest uppercase">PICTOS.net v{APP_VERSION}</span>
           </div>
         </div>
@@ -2056,12 +2098,16 @@ const App: React.FC<AppProps> = ({ authUser }) => {
           <div id="library-btn-group" ref={libraryBtnRef} className="relative flex items-center bg-white border border-slate-200 shadow-sm rounded-md transition-all hover:border-violet-200 group">
             <button
               onClick={() => {
-                if (activeLibraryId) {
+                if (activeLibraryId && !viewingLibraryHome) {
+                  setViewingLibraryHome(true);
+                } else if (activeLibraryId) {
                   setViewingLibraryHome(false);
                   setActiveSequenceId(null);
                   setLibraryContentMode('pictogramas');
                 } else if (libraryIndex.length > 0) {
                   openLibrary(libraryIndex[0].id);
+                } else {
+                  handleCreateLibrary();
                 }
                 setShowConfig(false);
               }}
@@ -2345,6 +2391,25 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                   </select>
                 </div>
 
+                {/* field-phase5-model */}
+                <div id="field-phase5-model">
+                  <FieldLabel
+                    label={t('config.phase5Model')}
+                    tooltip={t('config.phase5ModelTooltip')}
+                  />
+                  <select
+                    value={config.phase5Model ?? DEFAULT_PHASE5_MODEL}
+                    onChange={e => setPhase5Model(e.target.value)}
+                    className="w-full text-xs border p-2.5 bg-slate-50 focus:bg-white transition-colors"
+                  >
+                    {PHASE5_MODELS.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}{m.id === DEFAULT_PHASE5_MODEL ? ` (${t('config.generationModels.default') || 'predeterminado'})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* field-annotated-context */}
                 <div id="field-annotated-context">
                   <FieldLabel
@@ -2472,7 +2537,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
 
       <main id="mainContent" className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {/* Library toolbar — discrete text tabs, single row */}
-        {activeLibraryId !== null && (
+        {activeLibraryId !== null && !viewingLibraryHome && (
           <div id="library-toolbar" className="mb-6 flex items-center gap-4">
             {/* Pictogramas tab + inline view toggle when active */}
             <div className="flex items-center gap-2">
@@ -2507,16 +2572,36 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               )}
             </div>
 
-            {/* Secuencias tab */}
+            {/* Secuencias tab — always navigates to sequence list */}
             <button
-              onClick={() => setLibraryContentMode('secuencias')}
+              onClick={() => { setLibraryContentMode('secuencias'); setActiveSequenceId(null); }}
               aria-pressed={libraryContentMode === 'secuencias'}
               className={`text-xs font-semibold uppercase tracking-wider transition-colors ${libraryContentMode === 'secuencias' ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
             >
               {t('library.contentToggleSecuencias')}
             </button>
 
-            {/* Sort order — pushed right, only for pictogramas with data */}
+            {/* View toggle — pushed right; for pictogramas: sort+list/grid; for sequences: list/grid only when inside one */}
+            {libraryContentMode === 'secuencias' && activeSequenceId !== null && (
+              <div className="ml-auto flex items-center gap-1">
+                <button
+                  onClick={() => setSequenceViewMode('list')}
+                  title={t('library.viewList')}
+                  aria-pressed={sequenceViewMode === 'list'}
+                  className={`transition-colors ${sequenceViewMode === 'list' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                >
+                  <List size={14} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={() => setSequenceViewMode('grid')}
+                  title={t('library.viewGrid')}
+                  aria-pressed={sequenceViewMode === 'grid'}
+                  className={`transition-colors ${sequenceViewMode === 'grid' ? 'text-violet-700' : 'text-slate-300 hover:text-slate-500'}`}
+                >
+                  <LayoutGrid size={14} aria-hidden="true" />
+                </button>
+              </div>
+            )}
             {libraryContentMode === 'pictogramas' && rows.length > 0 && (
               <div className="ml-auto flex items-center gap-3">
                 <button
@@ -2564,6 +2649,9 @@ const App: React.FC<AppProps> = ({ authUser }) => {
               onAddStep={handleAddSequenceStep}
               onPrint={handleSequencePrint}
               onDownloadZip={handleSequenceDownloadZip}
+              rows={rows}
+              viewMode={sequenceViewMode}
+              onViewModeChange={setSequenceViewMode}
               renderLinkedRow={(step, dragHandle, position, deleteStep) => {
                 const row = rows.find(r => r.id === step.rowId);
                 if (!row) return null;
@@ -2599,8 +2687,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                       const flagKey: keyof RowData = phase === 'svg_raw' ? 'rawSvgDiscarded' : 'structuredSvgDiscarded';
                       setRows(prev => prev.map(r => r.id !== row.id ? r : { ...r, [flagKey]: true }));
                     }}
-                    phase5Model={sessionPhase5Model}
-                    onPhase5ModelChange={setSessionPhase5Model}
+                    phase5Model={config.phase5Model ?? DEFAULT_PHASE5_MODEL}
+                    onPhase5ModelChange={setPhase5Model}
                   />
                 );
               }}
@@ -2724,8 +2812,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                     }));
                   }}
                   onBuildRowClipboard={buildRowClipboardJson}
-                  phase5Model={sessionPhase5Model}
-                  onPhase5ModelChange={setSessionPhase5Model}
+                  phase5Model={config.phase5Model ?? DEFAULT_PHASE5_MODEL}
+                  onPhase5ModelChange={setPhase5Model}
                 />
               );
             })}
@@ -2834,8 +2922,8 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 : flagged;
             }));
           }}
-          phase5Model={sessionPhase5Model}
-          onPhase5ModelChange={setSessionPhase5Model}
+          phase5Model={config.phase5Model ?? DEFAULT_PHASE5_MODEL}
+          onPhase5ModelChange={setPhase5Model}
         />
       )}
 

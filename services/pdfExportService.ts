@@ -42,6 +42,14 @@ const UTTERANCE_FONT_SIZE_PT = 13;
 const UTTERANCE_LINE_HEIGHT_FACTOR = 1.25;
 const HEADER_FONT_SIZE_PT = 10;
 const FOOTER_FONT_SIZE_PT = 9;
+
+// Step-number badge (sequence export). Small grey number on a faint white chip,
+// drawn in the top-right corner of the cell — matches the grid-view chip.
+const BADGE_FONT_SIZE_PT = 9;
+const BADGE_GREY = 120;
+const BADGE_CHIP_PAD_X_MM = 1.2;
+const BADGE_CHIP_PAD_Y_MM = 0.8;
+
 const PDF_FONT_NAME = 'Lexend';
 const PDF_FONT_FILE = 'Lexend.ttf';
 const PDF_FONT_URL = '/fonts/Lexend.ttf';
@@ -77,6 +85,17 @@ export interface PdfExportOptions {
   t?: (key: string, params?: Record<string, string | number>) => string;
   onProgress?: (p: PdfProgress) => void;
   signal?: AbortSignal;
+  /**
+   * Optional header title used instead of `config.name`. Used by the sequence
+   * export to print the sequence name where the library name would normally go.
+   */
+  titleOverride?: string;
+  /**
+   * Optional per-cell badge. When it returns a non-empty value, the value is
+   * drawn small in the top-right corner of the cell (mirrors the grid-view step
+   * number chip). Used by the sequence export to stamp each step's position.
+   */
+  badgeFor?: (row: RowData) => string | number | null;
 }
 
 export interface PdfExportResult {
@@ -200,7 +219,7 @@ interface RowPlan {
 }
 
 export async function exportLibraryToPdf(options: PdfExportOptions): Promise<PdfExportResult> {
-  const { rows, config, t, onProgress, signal } = options;
+  const { rows, config, t, onProgress, signal, titleOverride, badgeFor } = options;
 
   // Filter: only rows with at least one artifact.
   const eligible: { row: RowData; artifact: ArtifactPick }[] = [];
@@ -302,8 +321,8 @@ export async function exportLibraryToPdf(options: PdfExportOptions): Promise<Pdf
     doc.setFontSize(HEADER_FONT_SIZE_PT);
     doc.setTextColor(120, 120, 120);
     const headerY = MARGIN_MM + HEADER_HEIGHT_MM - 4;
-    const libraryName = upper((config.name || '').trim() || 'PICTOS');
-    doc.text(libraryName, MARGIN_MM, headerY);
+    const headerTitle = upper(((titleOverride ?? config.name) || '').trim() || 'PICTOS');
+    doc.text(headerTitle, MARGIN_MM, headerY);
     const pageLabel = upper(
       t
         ? t('pdfExport.progress', { page: currentPage1Based, total: totalPages })
@@ -367,6 +386,27 @@ export async function exportLibraryToPdf(options: PdfExportOptions): Promise<Pdf
       const lineY = captionBaselineY + idx * utteranceLineHeightMm;
       doc.text(line, x + COLUMN_W_MM / 2, lineY, { align: 'center' });
     });
+
+    // Optional step-number badge — small grey number on a faint white chip in
+    // the top-left corner, drawn last so it sits above the pictogram (mirrors
+    // the grid-view chip). Used by the sequence export.
+    const badge = badgeFor?.(cell.row);
+    if (badge != null && String(badge).length > 0) {
+      const label = String(badge);
+      doc.setFont(PDF_FONT_NAME, 'normal');
+      doc.setFontSize(BADGE_FONT_SIZE_PT);
+      const textWmm = doc.getTextWidth(label);
+      const chipW = textWmm + 2 * BADGE_CHIP_PAD_X_MM;
+      const chipH = ptToMm(BADGE_FONT_SIZE_PT) + 2 * BADGE_CHIP_PAD_Y_MM;
+      const chipX = x + CELL_PAD_X_MM;
+      const chipY = y + CELL_PAD_Y_MM;
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(chipX, chipY, chipW, chipH, 0.6, 0.6, 'F');
+      doc.setTextColor(BADGE_GREY, BADGE_GREY, BADGE_GREY);
+      const badgeBaselineY = chipY + BADGE_CHIP_PAD_Y_MM + ptToMm(BADGE_FONT_SIZE_PT) * 0.85;
+      doc.text(label, chipX + BADGE_CHIP_PAD_X_MM, badgeBaselineY, { align: 'left' });
+      doc.setTextColor(0, 0, 0);
+    }
   };
 
   let renderedCells = 0;

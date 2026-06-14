@@ -138,9 +138,9 @@ function LibraryCard({ lib, isActive, onOpen, onDuplicate, onDownload, onRename,
     // No overflow-hidden here — the dropdown menu must escape the card bounds.
     // The ThumbnailStrip handles its own rounded-t-xl overflow clipping.
     <div
-      className={`bg-white rounded-xl transition-all flex flex-col group cursor-pointer border ${
+      className={`relative bg-white rounded-xl transition-all flex flex-col group cursor-pointer border ${
         isActive
-          ? 'border-violet-500 ring-2 ring-violet-300 shadow-md'
+          ? 'border-violet-400 scale-[1.06] shadow-[0_18px_30px_-10px_rgba(0,0,0,0.25)] z-10'
           : 'border-slate-200 hover:border-violet-400 hover:shadow-md'
       }`}
       onClick={() => !menuOpen && !isEditing && onOpen(lib.id)}
@@ -340,6 +340,7 @@ export function LibraryHome({
     : [...libraries].sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 
   const isStorageHigh = storageQuota > 0 && storageUsed / storageQuota > 0.8;
+  const activeLib = libraries.find(l => l.id === activeLibraryId);
 
   return (
     <div className="py-12 space-y-8 animate-in fade-in zoom-in-95 duration-700">
@@ -371,10 +372,18 @@ export function LibraryHome({
         </div>
       </div>
 
-      {/* Title row: "Librerías" left, sort links right */}
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.libraries')}</h1>
-        <div className="flex items-center gap-1 text-xs text-slate-400">
+      {/* Title row: "Librerías" left (with active library indicator), sort links right */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t('home.libraries')}</h1>
+          {activeLib && (
+            <p className="flex items-center gap-1.5 mt-1 text-xs text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" aria-hidden="true" />
+              {activeLib.name}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 text-xs text-slate-400 mt-1">
           <button
             onClick={() => onSortChange('recientes')}
             className={`transition-colors ${sort === 'recientes' ? 'text-violet-700 font-semibold' : 'hover:text-slate-700'}`}
