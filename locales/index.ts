@@ -247,6 +247,5 @@ export type TranslationKey =
   | 'footer.collaborate'
   | 'footer.collaborateDesc'
   | 'footer.author'
-  | 'footer.affiliation1'
   | 'footer.affiliation2'
   | 'footer.license';

@@ -2844,7 +2844,7 @@ const App: React.FC<AppProps> = ({ authUser }) => {
                 {t('footer.author')}
               </a>
             </h4>
-            <p className="leading-relaxed">{t('footer.affiliation1')}<br />{t('footer.affiliation2')}</p>
+            <p className="leading-relaxed">{t('footer.affiliation2')}</p>
             <div className="flex items-center gap-4 mt-3">
               <a
                 href="https://github.com/hspencer/pictos-net"
