@@ -27,17 +27,13 @@ const ParticipateModal: React.FC<ParticipateModalProps> = ({ t, onClose }) => {
         {/* Body */}
         <div className="p-6 text-slate-600 space-y-4 text-sm leading-relaxed">
           <p>{t('participate.intro')}</p>
-          <div className="bg-violet-50 text-violet-800 p-4 rounded-lg border border-violet-100">
-            <p className="font-medium mb-1">{t('participate.shareLibrary')}</p>
-            <p className="text-violet-600 mb-3">{t('participate.shareInstructions')}</p>
-            <a 
-              href="mailto:contact@pictos.net?subject=PICTOS.net%20Library%20Share"
-              className="inline-flex items-center gap-2 bg-white text-violet-700 font-medium px-4 py-2 rounded shadow-sm hover:shadow hover:bg-violet-50 transition-all text-xs"
-            >
-              <Mail size={14} /> contact@pictos.net
-            </a>
-          </div>
           <p>{t('participate.research')}</p>
+          <a
+            href={`mailto:hspencer@ead.cl?subject=${encodeURIComponent(t('participate.contactSubject'))}`}
+            className="inline-flex items-center gap-2 text-violet-700 font-medium hover:underline"
+          >
+            <Mail size={14} /> hspencer@ead.cl
+          </a>
         </div>
 
         {/* Footer */}

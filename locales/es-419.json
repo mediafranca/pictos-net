@@ -601,7 +601,8 @@
     "intro": "¡Muchas gracias por tu interés en PICTOS.net! Este es un proyecto de investigación enfocado en mejorar la accesibilidad cognitiva y explorar nuevas formas de crear herramientas generativas para la CAA.",
     "shareLibrary": "Comparte tu biblioteca",
     "shareInstructions": "Si has creado una biblioteca de pictogramas y quieres compartirla como ejemplo de uso de la herramienta, exporta el archivo .json y envíalo por correo electrónico.",
-    "research": "También puedes escribirme a la misma dirección si te interesa participar en el estudio, dar feedback, o tienes ideas sobre cómo mejorar estas tecnologías."
+    "research": "También puedes escribirme si te interesa participar en el estudio, dar feedback, o tienes ideas sobre cómo mejorar estas tecnologías.",
+    "contactSubject": "PICTOS.net - contacto web"
   },
   "modelChangeWarning": {
     "title": "¿Cambiar modelo de generación?",
